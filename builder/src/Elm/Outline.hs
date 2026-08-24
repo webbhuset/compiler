@@ -11,6 +11,7 @@ module Elm.Outline
   , decoder
   , defaultSummary
   , flattenExposed
+  , gitDeps
   )
   where
 
@@ -58,6 +59,7 @@ data AppOutline =
     , _app_deps_indirect :: Map.Map Pkg.Name V.Version
     , _app_test_direct :: Map.Map Pkg.Name V.Version
     , _app_test_indirect :: Map.Map Pkg.Name V.Version
+    , _app_git_deps :: Map.Map Pkg.Name String
     }
 
 
@@ -71,6 +73,7 @@ data PkgOutline =
     , _pkg_deps :: Map.Map Pkg.Name Con.Constraint
     , _pkg_test_deps :: Map.Map Pkg.Name Con.Constraint
     , _pkg_elm_version :: Con.Constraint
+    , _pkg_git_deps :: Map.Map Pkg.Name String
     }
 
 
@@ -107,6 +110,13 @@ flattenExposed exposed =
       concatMap snd sections
 
 
+gitDeps :: Outline -> Map.Map Pkg.Name String
+gitDeps outline =
+  case outline of
+    App app -> _app_git_deps app
+    Pkg pkg -> _pkg_git_deps pkg
+
+
 
 -- WRITE
 
@@ -123,8 +133,8 @@ write root outline =
 encode :: Outline -> E.Value
 encode outline =
   case outline of
-    App (AppOutline elm srcDirs depsDirect depsTrans testDirect testTrans) ->
-      E.object
+    App (AppOutline elm srcDirs depsDirect depsTrans testDirect testTrans gitDependencies) ->
+      E.object $
         [ "type" ==> E.chars "application"
         , "source-directories" ==> E.list encodeSrcDir (NE.toList srcDirs)
         , "elm-version" ==> V.encode elm
@@ -139,9 +149,10 @@ encode outline =
               , "indirect" ==> encodeDeps V.encode testTrans
               ]
         ]
+        ++ encodeGitDeps gitDependencies
 
-    Pkg (PkgOutline name summary license version exposed deps tests elm) ->
-      E.object
+    Pkg (PkgOutline name summary license version exposed deps tests elm gitDependencies) ->
+      E.object $
         [ "type" ==> E.string (Json.fromChars "package")
         , "name" ==> Pkg.encode name
         , "summary" ==> E.string summary
@@ -152,6 +163,14 @@ encode outline =
         , "dependencies" ==> encodeDeps Con.encode deps
         , "test-dependencies" ==> encodeDeps Con.encode tests
         ]
+        ++ encodeGitDeps gitDependencies
+
+
+encodeGitDeps :: Map.Map Pkg.Name String -> [(Json.String, E.Value)]
+encodeGitDeps gitDependencies =
+  if Map.null gitDependencies
+  then []
+  else [ "git-dependencies" ==> encodeDeps E.chars gitDependencies ]
 
 
 encodeExposed :: Exposed -> E.Value
@@ -195,13 +214,13 @@ read root =
 
         Right outline ->
           case outline of
-            Pkg (PkgOutline pkg _ _ _ _ deps _ _) ->
+            Pkg (PkgOutline pkg _ _ _ _ deps _ _ _) ->
               return $
                 if Map.notMember Pkg.core deps && pkg /= Pkg.core
                 then Left Exit.OutlineNoPkgCore
                 else Right outline
 
-            App (AppOutline _ srcDirs direct indirect _ _)
+            App (AppOutline _ srcDirs direct indirect _ _ _)
               | Map.notMember Pkg.core direct ->
                   return $ Left Exit.OutlineNoAppCore
 
@@ -292,6 +311,7 @@ appDecoder =
     <*> D.field "dependencies" (D.field "indirect" (depsDecoder versionDecoder))
     <*> D.field "test-dependencies" (D.field "direct" (depsDecoder versionDecoder))
     <*> D.field "test-dependencies" (D.field "indirect" (depsDecoder versionDecoder))
+    <*> gitDepsDecoder
 
 
 pkgDecoder :: Decoder PkgOutline
@@ -305,6 +325,15 @@ pkgDecoder =
     <*> D.field "dependencies" (depsDecoder constraintDecoder)
     <*> D.field "test-dependencies" (depsDecoder constraintDecoder)
     <*> D.field "elm-version" constraintDecoder
+    <*> gitDepsDecoder
+
+
+gitDepsDecoder :: Decoder (Map.Map Pkg.Name String)
+gitDepsDecoder =
+  D.oneOf
+    [ D.field "git-dependencies" (depsDecoder (fmap Json.toChars D.string))
+    , pure Map.empty
+    ]
 
 
 

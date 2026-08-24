@@ -59,6 +59,7 @@ executable worker
         Data.NonEmptyList
         Data.OneOrMore
         Data.Utf8
+        Deps.Git
         Deps.Registry
         Deps.Solver
         Deps.Website

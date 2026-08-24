@@ -41,6 +41,7 @@ import qualified Network.HTTP.Types.Status as HTTP
 import qualified System.FilePath as FP
 import System.FilePath ((</>), (<.>))
 
+import qualified Deps.Git as Git
 import qualified Elm.Constraint as C
 import qualified Elm.Magnitude as M
 import qualified Elm.ModuleName as ModuleName
@@ -365,6 +366,7 @@ data Publish
   | PublishCannotRegister Http.Error
   | PublishNoGit
   | PublishLocalChanges V.Version
+  | PublishWithGitDeps
   --
   | PublishZipBadDetails Details
   | PublishZipApplication
@@ -395,6 +397,16 @@ publishToReport publish =
 
     PublishApplication ->
       Help.report "UNPUBLISHABLE" Nothing "I cannot publish applications, only packages!" []
+
+    PublishWithGitDeps ->
+      Help.report "UNPUBLISHABLE" Nothing
+        "This package has a \"git-dependencies\" field in its elm.json, so I cannot\
+        \ publish it."
+        [ D.reflow $
+            "Anyone who downloads a published package must be able to download all of\
+            \ its dependencies from the official package registry, but the packages\
+            \ listed in \"git-dependencies\" only exist in private git repositories."
+        ]
 
     PublishNotInitialVersion vsn ->
       Help.docReport "INVALID VERSION" Nothing
@@ -902,11 +914,15 @@ data Solver
   = SolverBadCacheData Pkg.Name V.Version
   | SolverBadHttpData Pkg.Name V.Version String
   | SolverBadHttp Pkg.Name V.Version Http.Error
+  | SolverBadGitDep Git.Problem
 
 
 toSolverReport :: Solver -> Help.Report
 toSolverReport problem =
   case problem of
+    SolverBadGitDep gitProblem ->
+      toGitProblemReport gitProblem
+
     SolverBadCacheData pkg vsn ->
       Help.report "PROBLEM SOLVING PACKAGE CONSTRAINTS" Nothing
         (
@@ -938,6 +954,76 @@ toSolverReport problem =
       toHttpErrorReport "PROBLEM SOLVING PACKAGE CONSTRAINTS" httpError $
         "I need the elm.json of " ++ Pkg.toChars pkg ++ " " ++ V.toChars vsn
         ++ " to help me search for a set of compatible packages"
+
+
+
+-- GIT PROBLEM
+
+
+toGitProblemReport :: Git.Problem -> Help.Report
+toGitProblemReport problem =
+  case problem of
+    Git.MissingGit ->
+      Help.report "GIT NOT FOUND" Nothing
+        "I need the `git` executable to fetch the packages listed in the\
+        \ \"git-dependencies\" of your elm.json, but I cannot find it on your PATH."
+        [ D.reflow "Install git and try again!"
+        ]
+
+    Git.CommandFailed command stderr ->
+      Help.report "GIT PROBLEM" Nothing
+        "I ran into trouble fetching a package listed in the \"git-dependencies\"\
+        \ of your elm.json. The following command failed:"
+        [ D.indent 4 $ D.dullyellow $ D.fromChars command
+        , D.reflow "It reported:"
+        , D.indent 4 $ D.vcat $ map D.fromChars (lines stderr)
+        , D.reflow $
+            "Maybe the URL has a typo? Maybe the version does not exist as a tag in\
+            \ the repository? Maybe you do not have access to the repository? The\
+            \ message above usually tells which one it is."
+        ]
+
+    Git.NoVersions url ->
+      Help.report "GIT PROBLEM" Nothing
+        "I could not find any version tags in the following git repository:"
+        [ D.indent 4 $ D.dullyellow $ D.fromChars url
+        , D.reflow $
+            "It is listed in the \"git-dependencies\" of your elm.json, so I need tags\
+            \ like 1.0.0 or 2.1.3 to know which versions exist. Publish a version tag\
+            \ in that repository and try again!"
+        ]
+
+    Git.MissingOutline pkg vsn url ->
+      Help.report "GIT PROBLEM" Nothing
+        ( "I cloned " ++ Pkg.toChars pkg ++ " " ++ V.toChars vsn ++ " from:"
+        )
+        [ D.indent 4 $ D.dullyellow $ D.fromChars url
+        , D.reflow $
+            "But it does not look like an Elm package. I need it to contain an\
+            \ elm.json file and a src/ directory, like published packages have."
+        ]
+
+    Git.LocalCacheConflict pkg vsn url maybeOrigin ->
+      Help.report "CORRUPT PACKAGE CACHE" Nothing
+        ( "Your elm.json says " ++ Pkg.toChars pkg ++ " " ++ V.toChars vsn
+          ++ " should come from:"
+        )
+        [ D.indent 4 $ D.dullyellow $ D.fromChars url
+        , D.reflow $
+            case maybeOrigin of
+              Nothing ->
+                "But your ELM_HOME package cache already contains sources for that\
+                \ exact package name and version from somewhere else, probably from\
+                \ the official package registry."
+
+              Just origin ->
+                "But your ELM_HOME package cache already contains sources for that\
+                \ exact package name and version cloned from " ++ origin
+        , D.reflow $
+            "I do not want to mix them up, so I stopped. Delete that package directory\
+            \ from your ELM_HOME to let me clone the right one, or pick a different\
+            \ version number."
+        ]
 
 
 

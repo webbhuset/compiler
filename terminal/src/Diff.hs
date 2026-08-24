@@ -153,7 +153,7 @@ readOutline (Env maybeRoot _ _ registry) =
                 Outline.App _ ->
                   Task.throw $ Exit.DiffApplication
 
-                Outline.Pkg (Outline.PkgOutline pkg _ _ _ _ _ _ _) ->
+                Outline.Pkg (Outline.PkgOutline pkg _ _ _ _ _ _ _ _) ->
                   case Registry.getVersions pkg registry of
                     Just vsns -> return (pkg, vsns)
                     Nothing   -> Task.throw Exit.DiffUnpublished

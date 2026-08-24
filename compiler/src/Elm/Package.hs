@@ -7,6 +7,7 @@ module Elm.Package
   , Project
   , Canonical(..)
   , isKernel
+  , registerTrustedKernelPackages
   , toChars
   , toUrl
   , toFilePath
@@ -32,13 +33,16 @@ module Elm.Package
 import Control.Monad (liftM2)
 import Data.Binary (Binary, get, put)
 import qualified Data.Coerce as Coerce
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Name as Name
+import qualified Data.Set as Set
 import qualified Data.Utf8 as Utf8
 import GHC.Exts (isTrue#)
 import GHC.Prim
 import System.FilePath ((</>))
+import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Elm.Version as V
 import qualified Json.Decode as D
@@ -82,8 +86,34 @@ data Canonical =
 
 
 isKernel :: Name -> Bool
-isKernel (Name author _) =
-  author == elm || author == elm_explorations
+isKernel name@(Name author _) =
+  author == elm || author == elm_explorations || isTrustedKernel name
+
+
+-- KERNEL TRUST
+--
+-- Packages fetched through the "git-dependencies" field in elm.json are
+-- trusted to define Elm.Kernel.* modules and effect managers, just like
+-- the elm/* and elm-explorations/* packages. The set must be registered
+-- before any compilation starts, which happens when git dependencies
+-- are resolved in Deps.Solver.addGitDeps.
+
+
+{-# NOINLINE trustedKernelRef #-}
+trustedKernelRef :: IORef (Set.Set Name)
+trustedKernelRef =
+  unsafePerformIO (newIORef Set.empty)
+
+
+registerTrustedKernelPackages :: Set.Set Name -> IO ()
+registerTrustedKernelPackages names =
+  modifyIORef' trustedKernelRef (Set.union names)
+
+
+{-# NOINLINE isTrustedKernel #-}
+isTrustedKernel :: Name -> Bool
+isTrustedKernel name =
+  unsafePerformIO (Set.member name <$> readIORef trustedKernelRef)
 
 
 toChars :: Name -> String

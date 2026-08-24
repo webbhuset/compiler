@@ -51,8 +51,10 @@ run args () =
 
               Install pkg ->
                 Task.run $
-                  do  env <- Task.eio Exit.InstallBadRegistry $ Solver.initEnv
+                  do  env0 <- Task.eio Exit.InstallBadRegistry $ Solver.initEnv
                       oldOutline <- Task.eio Exit.InstallBadOutline $ Outline.read root
+                      env <- Task.eio (Exit.InstallHadSolverTrouble . Exit.SolverBadGitDep) $
+                        Solver.addGitDeps oldOutline env0
                       case oldOutline of
                         Outline.App outline ->
                           do  changes <- makeAppPlan env pkg outline
@@ -149,7 +151,7 @@ attemptChangesHelp root env oldOutline newOutline question =
 
 
 makeAppPlan :: Solver.Env -> Pkg.Name -> Outline.AppOutline -> Task (Changes V.Version)
-makeAppPlan (Solver.Env cache _ connection registry) pkg outline@(Outline.AppOutline _ _ direct indirect testDirect testIndirect) =
+makeAppPlan (Solver.Env cache _ connection registry gitUrls) pkg outline@(Outline.AppOutline _ _ direct indirect testDirect testIndirect _) =
   if Map.member pkg direct then
     return AlreadyInstalled
 
@@ -192,7 +194,7 @@ makeAppPlan (Solver.Env cache _ connection registry) pkg outline@(Outline.AppOut
                       Solver.Offline  -> Task.throw (Exit.InstallUnknownPackageOffline pkg suggestions)
 
                   Right _ ->
-                    do  result <- Task.io $ Solver.addToApp cache connection registry pkg outline
+                    do  result <- Task.io $ Solver.addToApp cache connection registry gitUrls pkg outline
                         case result of
                           Solver.Ok (Solver.AppSolution old new app) ->
                             return (Changes (detectChanges old new) (Outline.App app))
@@ -212,7 +214,7 @@ makeAppPlan (Solver.Env cache _ connection registry) pkg outline@(Outline.AppOut
 
 
 makePkgPlan :: Solver.Env -> Pkg.Name -> Outline.PkgOutline -> Task (Changes C.Constraint)
-makePkgPlan (Solver.Env cache _ connection registry) pkg outline@(Outline.PkgOutline _ _ _ _ _ deps test _) =
+makePkgPlan (Solver.Env cache _ connection registry gitUrls) pkg outline@(Outline.PkgOutline _ _ _ _ _ deps test _ _) =
   if Map.member pkg deps then
     return AlreadyInstalled
   else
@@ -236,7 +238,7 @@ makePkgPlan (Solver.Env cache _ connection registry) pkg outline@(Outline.PkgOut
           Right (Registry.KnownVersions _ _) ->
             do  let old = Map.union deps test
                 let cons = Map.insert pkg C.anything old
-                result <- Task.io $ Solver.verify cache connection registry cons
+                result <- Task.io $ Solver.verify cache connection registry gitUrls cons
                 case result of
                   Solver.Ok solution ->
                     let
