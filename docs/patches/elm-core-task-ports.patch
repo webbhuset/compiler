@@ -1,0 +1,123 @@
+--- a/src/Elm/Kernel/Platform.js
++++ b/src/Elm/Kernel/Platform.js
+@@ -4,7 +4,7 @@
+ import Elm.Kernel.Json exposing (run, wrap, unwrap, errorToString)
+ import Elm.Kernel.List exposing (Cons, Nil)
+ import Elm.Kernel.Process exposing (sleep)
+-import Elm.Kernel.Scheduler exposing (andThen, binding, rawSend, rawSpawn, receive, send, succeed)
++import Elm.Kernel.Scheduler exposing (andThen, binding, fail, rawSend, rawSpawn, receive, send, succeed)
+ import Elm.Kernel.Utils exposing (Tuple0)
+ import Result exposing (isOk)
+ 
+@@ -34,6 +34,7 @@
+ 
+ function _Platform_initialize(flagDecoder, args, init, update, subscriptions, stepperBuilder)
+ {
++	_Platform_registerTaskPorts(args ? args['taskPorts'] : undefined);
+ 	var result = A2(__Json_run, flagDecoder, __Json_wrap(args ? args['flags'] : undefined));
+ 	__Result_isOk(result) || __Debug_crash(2 /**__DEBUG/, __Json_errorToString(result.a) /**/);
+ 	var managers = {};
+@@ -334,13 +335,102 @@
+ 
+ function _Platform_checkPortName(name)
+ {
+-	if (_Platform_effectManagers[name])
++	if (_Platform_effectManagers[name] || _Platform_taskPortDecls[name])
+ 	{
+ 		__Debug_crash(3, name)
+ 	}
+ }
+ 
+ 
++
++// TASK PORTS
++//
++// A task port is declared like this on the Elm side:
++//
++//     port fetchUser : { id : String } -> Task Json.Decode.Value { name : String }
++//
++// The JavaScript side provides a promise-returning (or plain) function
++// when starting the program:
++//
++//     Elm.Main.init({
++//         taskPorts: {
++//             fetchUser: function(args) { return fetch(...); }
++//         }
++//     });
++//
++// Running the task calls the function with the encoded argument. The
++// resolved value is decoded as the success type; a rejection or a value
++// that does not match the expected type fails the task with a
++// Json.Decode.Value describing what happened.
++
++
++var _Platform_taskPortDecls = {};
++var _Platform_taskPortImpls = {};
++
++function _Platform_registerTaskPorts(taskPorts)
++{
++	if (taskPorts)
++	{
++		for (var name in taskPorts)
++		{
++			_Platform_taskPortImpls[name] = taskPorts[name];
++		}
++	}
++}
++
++function _Platform_taskPort(name, converter, decoder)
++{
++	_Platform_checkPortName(name);
++	_Platform_taskPortDecls[name] = true;
++
++	return function(payload)
++	{
++		return __Scheduler_binding(function(callback)
++		{
++			var impl = _Platform_taskPortImpls[name];
++			if (typeof impl !== 'function')
++			{
++				callback(__Scheduler_fail(__Json_wrap(
++					new Error('No function registered for task port `' + name + '`. Pass one to init like: Elm.Main.init({ taskPorts: { ' + name + ': function(args) { ... } } })')
++				)));
++				return;
++			}
++
++			var promise;
++			try
++			{
++				promise = Promise.resolve(impl(__Json_unwrap(converter(payload))));
++			}
++			catch (error)
++			{
++				promise = Promise.reject(error);
++			}
++
++			promise.then(
++				function(value)
++				{
++					var result = A2(__Json_run, decoder, __Json_wrap(value));
++					if (__Result_isOk(result))
++					{
++						callback(__Scheduler_succeed(result.a));
++					}
++					else
++					{
++						callback(__Scheduler_fail(__Json_wrap(
++							new Error('The task port `' + name + '` produced an unexpected value.' /**__DEBUG/ + '\n' + __Json_errorToString(result.a) /**/)
++						)));
++					}
++				},
++				function(error)
++				{
++					callback(__Scheduler_fail(__Json_wrap(error)));
++				}
++			);
++		});
++	};
++}
++
++
+ 
+ // OUTGOING PORTS
+ 

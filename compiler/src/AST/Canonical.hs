@@ -301,6 +301,7 @@ data Effects
 data Port
   = Incoming { _freeVars :: FreeVars, _payload :: Type, _func :: Type }
   | Outgoing { _freeVars :: FreeVars, _payload :: Type, _func :: Type }
+  | Task FreeVars Type Type Type Type -- freeVars, arg, err, ok, func
 
 
 data Manager

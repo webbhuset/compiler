@@ -167,6 +167,14 @@ addPort home name port_ graph =
       in
       addToGraph (Opt.Global home name) node fields graph
 
+    Can.Task _ argType _ okType _ ->
+      let
+        (deps, fields, (encoder, decoder)) =
+          Names.run ((,) <$> Port.toEncoder argType <*> Port.toDecoder okType)
+        node = Opt.PortTask encoder decoder deps
+      in
+      addToGraph (Opt.Global home name) node fields graph
+
 
 
 -- HELPER

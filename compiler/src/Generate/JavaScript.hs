@@ -242,6 +242,11 @@ addGlobalHelp mode graph global state =
         generatePort mode global "outgoingPort" encoder
       )
 
+    Opt.PortTask encoder decoder deps ->
+      addStmt (addDeps deps state) (
+        generateTaskPort mode global encoder decoder
+      )
+
 
 addStmt :: State -> JS.Stmt -> State
 addStmt state stmt =
@@ -429,6 +434,16 @@ generatePort mode (Opt.Global home name) makePort converter =
     JS.Call (JS.Ref (JsName.fromKernel Name.platform makePort))
       [ JS.String (Name.toBuilder name)
       , Expr.codeToExpr (Expr.generate mode converter)
+      ]
+
+
+generateTaskPort :: Mode.Mode -> Opt.Global -> Opt.Expr -> Opt.Expr -> JS.Stmt
+generateTaskPort mode (Opt.Global home name) encoder decoder =
+  JS.Var (JsName.fromGlobal home name) $
+    JS.Call (JS.Ref (JsName.fromKernel Name.platform "taskPort"))
+      [ JS.String (Name.toBuilder name)
+      , Expr.codeToExpr (Expr.generate mode encoder)
+      , Expr.codeToExpr (Expr.generate mode decoder)
       ]
 
 

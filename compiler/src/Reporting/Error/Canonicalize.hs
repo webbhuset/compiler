@@ -103,6 +103,9 @@ data PortProblem
   | CmdBadMsg
   | SubBad
   | NotCmdOrSub
+  | TaskNoArg
+  | TaskExtraArgs Int
+  | TaskBadErr
 
 
 data PossibleNames =
@@ -657,8 +660,53 @@ toReport source err =
               "I am confused about the `" <> Name.toChars name <> "` port declaration."
             ,
               D.reflow $
-                "Ports need to produce a command (Cmd) or a subscription (Sub) but\
-                \ this is neither. I do not know how to handle this."
+                "Ports need to produce a command (Cmd), a subscription (Sub), or a\
+                \ task (Task) but this is none of those. I do not know how to handle\
+                \ this."
+            )
+
+          TaskNoArg ->
+            (
+              "The `" <> Name.toChars name <> "` port cannot be just a task."
+            ,
+              D.stack
+                [ D.reflow $
+                    "Task ports need exactly one argument, carrying the value that is\
+                    \ sent to the JavaScript function:"
+                , D.indent 4 $ D.dullyellow $ D.fromChars $
+                    "port " <> Name.toChars name <> " : () -> Task Json.Decode.Value Int"
+                , D.reflow $
+                    "Use a () argument if the JavaScript side does not need any input."
+                ]
+            )
+
+          TaskExtraArgs n ->
+            (
+              "The `" <> Name.toChars name <> "` port can only send ONE value out to JavaScript."
+            ,
+              let
+                theseItemsInSomething
+                  | n == 2 = "both of these items into a tuple or record"
+                  | n == 3 = "these " ++ show n ++ " items into a tuple or record"
+                  | True   = "these " ++ show n ++ " items into a record"
+              in
+              D.reflow $
+                "You can put " ++ theseItemsInSomething ++ " to send them out though."
+            )
+
+          TaskBadErr ->
+            (
+              "The `" <> Name.toChars name <> "` port has an unsupported error type."
+            ,
+              D.stack
+                [ D.reflow $
+                    "The error type of a task port must be Json.Decode.Value, because\
+                    \ JavaScript can reject a promise with any value at all:"
+                , D.indent 4 $ D.dullyellow $ D.fromChars $
+                    "port " <> Name.toChars name <> " : args -> Task Json.Decode.Value result"
+                , D.reflow $
+                    "Decode the error on the Elm side if you need something more precise."
+                ]
             )
 
     RecursiveAlias region name args tipe others ->
