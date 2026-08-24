@@ -89,6 +89,7 @@ executable elm
         Build
         Deps.Bump
         Deps.Diff
+        Deps.Git
         Deps.Registry
         Deps.Solver
         Deps.Website

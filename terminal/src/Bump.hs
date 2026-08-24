@@ -79,7 +79,7 @@ getEnv root stuff =
 
 
 bump :: File.Writer R.PROJECT -> Env -> Task.Task Exit.Bump ()
-bump writer env@(Env root _ _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _)) =
+bump writer env@(Env root _ _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _ _)) =
   case Registry.getVersions pkg registry of
     Just knownVersions ->
       let
@@ -101,7 +101,7 @@ bump writer env@(Env root _ _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn
 
 
 checkNewPackage :: File.Writer R.PROJECT -> R.Root -> Outline.PkgOutline -> IO ()
-checkNewPackage writer root outline@(Outline.PkgOutline _ _ _ version _ _ _ _) =
+checkNewPackage writer root outline@(Outline.PkgOutline _ _ _ version _ _ _ _ _) =
   do  putStrLn Exit.newPackageOverview
       if version == V.one
         then
@@ -118,7 +118,7 @@ checkNewPackage writer root outline@(Outline.PkgOutline _ _ _ version _ _ _ _) =
 
 
 suggestVersion :: File.Writer R.PROJECT -> Env -> Task.Task Exit.Bump ()
-suggestVersion writer (Env root stuff cache manager _ outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _)) =
+suggestVersion writer (Env root stuff cache manager _ outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _ _)) =
   do  oldDocs <- Task.eio (Exit.BumpCannotFindDocs pkg vsn) $ R.withRegistryLock cache $ \w -> Diff.getDocs w cache manager pkg vsn
       newDocs <- generateDocs writer root stuff outline
       let changes = Diff.diff oldDocs newDocs
@@ -136,7 +136,7 @@ suggestVersion writer (Env root stuff cache manager _ outline@(Outline.PkgOutlin
 
 
 generateDocs :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Outline.PkgOutline -> Task.Task Exit.Bump Docs.Documentation
-generateDocs writer root stuff (Outline.PkgOutline _ _ _ _ exposed _ _ _) =
+generateDocs writer root stuff (Outline.PkgOutline _ _ _ _ exposed _ _ _ _) =
   do  details <-
         Task.eio Exit.BumpBadDetails $
           Details.load writer Reporting.silent root stuff

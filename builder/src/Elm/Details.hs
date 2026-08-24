@@ -155,10 +155,10 @@ loadInterfaces stuff (Details _ _ _ _ _ extras) =
 
 
 verifyInstall :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Solver.Env -> Outline.Outline -> IO (Either Exit.Details ())
-verifyInstall writer root stuff (Solver.Env cache manager connection registry) outline =
+verifyInstall writer root stuff (Solver.Env cache manager connection registry gitUrls) outline =
   do  time <- File.getTime (R.elm_json root)
       let key = Reporting.ignorer
-      let env = Env key stuff cache manager connection registry
+      let env = Env key stuff cache manager connection registry gitUrls
       case outline of
         Outline.Pkg pkg -> Task.run (verifyPkg writer env time pkg >> return ())
         Outline.App app -> Task.run (verifyApp writer env time app >> return ())
@@ -212,6 +212,7 @@ data Env =
     , _manager :: Http.Manager
     , _connection :: Solver.Connection
     , _registry :: Registry.Registry
+    , _gitUrls :: Map.Map Pkg.Name String
     }
 
 
@@ -229,8 +230,14 @@ initEnv key root stuff =
                 Left problem ->
                   return $ Left $ Exit.DetailsCannotGetRegistry problem
 
-                Right (Solver.Env cache manager connection registry) ->
-                  return $ Right (Env key stuff cache manager connection registry, outline)
+                Right solverEnv ->
+                  do  eitherEnv <- Solver.addGitDeps outline solverEnv
+                      case eitherEnv of
+                        Left gitProblem ->
+                          return $ Left $ Exit.DetailsSolverProblem (Exit.SolverBadGitDep gitProblem)
+
+                        Right (Solver.Env cache manager connection registry gitUrls) ->
+                          return $ Right (Env key stuff cache manager connection registry gitUrls, outline)
 
 
 
@@ -241,7 +248,7 @@ type Task a = Task.Task Exit.Details a
 
 
 verifyPkg :: File.Writer R.PROJECT -> Env -> File.Time -> Outline.PkgOutline -> Task Details
-verifyPkg writer env time (Outline.PkgOutline pkg _ _ _ exposed direct testDirect elm) =
+verifyPkg writer env time (Outline.PkgOutline pkg _ _ _ exposed direct testDirect elm _) =
   if Con.goodElm elm
   then
     do  solution <- verifyConstraints env =<< union noDups direct testDirect
@@ -253,7 +260,7 @@ verifyPkg writer env time (Outline.PkgOutline pkg _ _ _ exposed direct testDirec
 
 
 verifyApp :: File.Writer R.PROJECT -> Env -> File.Time -> Outline.AppOutline -> Task Details
-verifyApp writer env time outline@(Outline.AppOutline elmVersion srcDirs direct _ _ _) =
+verifyApp writer env time outline@(Outline.AppOutline elmVersion srcDirs direct _ _ _ _) =
   if elmVersion == V.compiler
   then
     do  stated <- checkAppDeps outline
@@ -266,7 +273,7 @@ verifyApp writer env time outline@(Outline.AppOutline elmVersion srcDirs direct 
 
 
 checkAppDeps :: Outline.AppOutline -> Task (Map.Map Pkg.Name V.Version)
-checkAppDeps (Outline.AppOutline _ _ direct indirect testDirect testIndirect) =
+checkAppDeps (Outline.AppOutline _ _ direct indirect testDirect testIndirect _) =
   do  x <- union allowEqualDups indirect testDirect
       y <- union noDups direct testIndirect
       union noDups x y
@@ -277,8 +284,8 @@ checkAppDeps (Outline.AppOutline _ _ direct indirect testDirect testIndirect) =
 
 
 verifyConstraints :: Env -> Map.Map Pkg.Name Con.Constraint -> Task (Map.Map Pkg.Name Solver.Details)
-verifyConstraints (Env _ _ cache _ connection registry) constraints =
-  do  result <- Task.io $ Solver.verify cache connection registry constraints
+verifyConstraints (Env _ _ cache _ connection registry gitUrls) constraints =
+  do  result <- Task.io $ Solver.verify cache connection registry gitUrls constraints
       case result of
         Solver.Ok details        -> return details
         Solver.NoSolution        -> Task.throw $ Exit.DetailsNoSolution
@@ -312,7 +319,7 @@ allowEqualDups _ v1 v2 =
 
 
 verifyDependencies :: File.Writer R.PROJECT -> Env -> File.Time -> ValidOutline -> Map.Map Pkg.Name Solver.Details -> Map.Map Pkg.Name a -> Task Details
-verifyDependencies writer env@(Env key stuff cache _ _ _) time outline solution directDeps =
+verifyDependencies writer env@(Env key stuff cache _ _ _ _) time outline solution directDeps =
   Task.eio id $
   do  Reporting.report key (Reporting.DStart (Map.size solution))
       mvar <- newEmptyMVar
@@ -379,7 +386,7 @@ type Dep =
 
 
 verifyDep :: File.Writer R.PACKAGES -> Env -> MVar (Map.Map Pkg.Name (Fork.SafeMVar Dep)) -> Map.Map Pkg.Name Solver.Details -> Pkg.Name -> Solver.Details -> IO Dep
-verifyDep writer (Env key _ cache manager _ _) depsMVar solution pkg details@(Solver.Details vsn directDeps) =
+verifyDep writer (Env key _ cache manager _ _ _) depsMVar solution pkg details@(Solver.Details vsn directDeps) =
   do  let fingerprint = Map.intersectionWith (\(Solver.Details v _) _ -> v) solution directDeps
       exists <- Dir.doesDirectoryExist (R.package cache pkg vsn </> "src")
       if exists
@@ -438,7 +445,7 @@ build writer key cache depsMVar pkg (Solver.Details vsn _) f fs =
           do  Reporting.report key Reporting.DBroken
               return $ Left $ Just $ Exit.BD_BadBuild pkg vsn f
 
-        Right (Outline.Pkg (Outline.PkgOutline _ _ _ _ exposed deps _ _)) ->
+        Right (Outline.Pkg (Outline.PkgOutline _ _ _ _ exposed deps _ _ _)) ->
           do  allDeps <- readMVar depsMVar
               directDeps <- traverse Fork.await (Map.intersection allDeps deps)
               case sequence directDeps of

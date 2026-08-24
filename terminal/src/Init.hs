@@ -73,8 +73,8 @@ init =
         Left problem ->
           return (Left (Exit.InitRegistryProblem problem))
 
-        Right (Solver.Env cache _ connection registry) ->
-          do  result <- Solver.verify cache connection registry defaults
+        Right (Solver.Env cache _ connection registry gitUrls) ->
+          do  result <- Solver.verify cache connection registry gitUrls defaults
               case result of
                 Solver.Err exit ->
                   return (Left (Exit.InitSolverProblem exit))
@@ -95,7 +95,7 @@ init =
                         do  root <- R.pwd
                             Dir.createDirectoryIfMissing True (R.src root)
                             Outline.write writer root $ Outline.App $
-                              Outline.AppOutline V.compiler (NE.List (R.Relative "src") []) directs indirects Map.empty Map.empty
+                              Outline.AppOutline V.compiler (NE.List (R.Relative "src") []) directs indirects Map.empty Map.empty Map.empty
                       putStrLn "Okay, I created it. Now read that link!"
                       return (Right ())
 

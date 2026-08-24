@@ -626,6 +626,7 @@ getRoot =
                     defaultDeps
                     Map.empty
                     C.defaultElm
+                    Map.empty
 
               return root
 
