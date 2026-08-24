@@ -167,6 +167,7 @@ data Node
   | Kernel [K.Chunk] (Set.Set Global)
   | PortIncoming Expr (Set.Set Global)
   | PortOutgoing Expr (Set.Set Global)
+  | PortTask Expr Expr (Set.Set Global)
 
 
 data EffectsType = Cmd | Sub | Fx
@@ -470,6 +471,7 @@ eNode node =
       Kernel cs d           -> E.u8#  8#Word8 <> E.list32 K.eChunk cs <> E.set32 eGlobal d
       PortIncoming e d      -> E.u8#  9#Word8 <> eExpr e <> E.set32 eGlobal d
       PortOutgoing e d      -> E.u8# 10#Word8 <> eExpr e <> E.set32 eGlobal d
+      PortTask e1 e2 d      -> E.u8# 11#Word8 <> eExpr e1 <> eExpr e2 <> E.set32 eGlobal d
 
 
 dNode :: D.Decoder Node
@@ -487,6 +489,7 @@ dNode =
         8  -> liftM2 Kernel (D.list32 K.dChunk) (D.set32 dGlobal)
         9  -> liftM2 PortIncoming dExpr (D.set32 dGlobal)
         10 -> liftM2 PortOutgoing dExpr (D.set32 dGlobal)
+        11 -> liftM3 PortTask dExpr dExpr (D.set32 dGlobal)
         _  -> D.expecting "Node"
 
 

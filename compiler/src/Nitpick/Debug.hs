@@ -32,6 +32,7 @@ nodeHasDebug node =
     Opt.Kernel _ _              -> False
     Opt.PortIncoming expr _     -> hasDebug expr
     Opt.PortOutgoing expr _     -> hasDebug expr
+    Opt.PortTask enc dec _      -> hasDebug enc || hasDebug dec
 
 
 hasDebug :: Opt.Expr -> Bool
