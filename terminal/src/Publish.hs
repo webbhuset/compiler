@@ -8,6 +8,7 @@ module Publish
 import Control.Exception (bracket_)
 import Control.Monad (void)
 import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.NonEmptyList as NE
 import qualified Data.Utf8 as Utf8
 import qualified System.Directory as Dir
@@ -90,13 +91,14 @@ publish env@(Env root _ manager registry outline) =
     Outline.App _ ->
       Task.throw Exit.PublishApplication
 
-    Outline.Pkg (Outline.PkgOutline pkg summary _ vsn exposed _ _ _) ->
+    Outline.Pkg (Outline.PkgOutline pkg summary _ vsn exposed _ _ _ gitDependencies) ->
       do  let maybeKnownVersions = Registry.getVersions pkg registry
 
           reportPublishStart pkg vsn maybeKnownVersions
 
           if noExposed  exposed then Task.throw Exit.PublishNoExposed else return ()
           if badSummary summary then Task.throw Exit.PublishNoSummary else return ()
+          if not (Map.null gitDependencies) then Task.throw Exit.PublishWithGitDeps else return ()
 
           verifyReadme root
           verifyLicense root

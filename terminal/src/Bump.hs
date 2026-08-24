@@ -78,7 +78,7 @@ getEnv =
 
 
 bump :: Env -> Task.Task Exit.Bump ()
-bump env@(Env root _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _)) =
+bump env@(Env root _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _ _)) =
   case Registry.getVersions pkg registry of
     Just knownVersions ->
       let
@@ -100,7 +100,7 @@ bump env@(Env root _ _ registry outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _)
 
 
 checkNewPackage :: FilePath -> Outline.PkgOutline -> IO ()
-checkNewPackage root outline@(Outline.PkgOutline _ _ _ version _ _ _ _) =
+checkNewPackage root outline@(Outline.PkgOutline _ _ _ version _ _ _ _ _) =
   do  putStrLn Exit.newPackageOverview
       if version == V.one
         then
@@ -117,7 +117,7 @@ checkNewPackage root outline@(Outline.PkgOutline _ _ _ version _ _ _ _) =
 
 
 suggestVersion :: Env -> Task.Task Exit.Bump ()
-suggestVersion (Env root cache manager _ outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _)) =
+suggestVersion (Env root cache manager _ outline@(Outline.PkgOutline pkg _ _ vsn _ _ _ _ _)) =
   do  oldDocs <- Task.eio (Exit.BumpCannotFindDocs pkg vsn) (Diff.getDocs cache manager pkg vsn)
       newDocs <- generateDocs root outline
       let changes = Diff.diff oldDocs newDocs
@@ -135,7 +135,7 @@ suggestVersion (Env root cache manager _ outline@(Outline.PkgOutline pkg _ _ vsn
 
 
 generateDocs :: FilePath -> Outline.PkgOutline -> Task.Task Exit.Bump Docs.Documentation
-generateDocs root (Outline.PkgOutline _ _ _ _ exposed _ _ _) =
+generateDocs root (Outline.PkgOutline _ _ _ _ exposed _ _ _ _) =
   do  details <-
         Task.eio Exit.BumpBadDetails $ BW.withScope $ \scope ->
           Details.load Reporting.silent scope root
