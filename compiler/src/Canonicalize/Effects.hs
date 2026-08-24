@@ -121,8 +121,40 @@ canonicalizePort env (Src.Port (A.At region portName) tipe) =
                   _ ->
                     Result.throw (Error.PortTypeInvalid region portName Error.SubBad)
 
+        Can.TType home name [errType, okType] : revArgs
+           | home == ModuleName.platform && name == Name.task ->
+                case revArgs of
+                  [] ->
+                    Result.throw (Error.PortTypeInvalid region portName Error.TaskNoArg)
+
+                  [argType] ->
+                    if not (isJsonValue errType)
+                    then Result.throw (Error.PortTypeInvalid region portName Error.TaskBadErr)
+                    else
+                      case checkPayload argType of
+                        Left (badType, err) ->
+                          Result.throw (Error.PortPayloadInvalid region portName badType err)
+
+                        Right () ->
+                          case checkPayload okType of
+                            Left (badType, err) ->
+                              Result.throw (Error.PortPayloadInvalid region portName badType err)
+
+                            Right () ->
+                              Result.ok (portName, Can.Task freeVars argType errType okType ctipe)
+
+                  _ ->
+                    Result.throw (Error.PortTypeInvalid region portName (Error.TaskExtraArgs (length revArgs)))
+
         _ ->
           Result.throw (Error.PortTypeInvalid region portName Error.NotCmdOrSub)
+
+
+isJsonValue :: Can.Type -> Bool
+isJsonValue tipe =
+  case tipe of
+    Can.TType home name [] -> isJson home name
+    _                      -> False
 
 
 

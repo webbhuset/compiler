@@ -159,6 +159,7 @@ data Node
   | Kernel [K.Chunk] (Set.Set Global)
   | PortIncoming Expr (Set.Set Global)
   | PortOutgoing Expr (Set.Set Global)
+  | PortTask Expr Expr (Set.Set Global)
 
 
 data EffectsType = Cmd | Sub | Fx
@@ -416,6 +417,7 @@ instance Binary Node where
       Kernel a b           -> putWord8  8 >> put a >> put b
       PortIncoming a b     -> putWord8  9 >> put a >> put b
       PortOutgoing a b     -> putWord8 10 >> put a >> put b
+      PortTask a b c       -> putWord8 11 >> put a >> put b >> put c
 
   get =
     do  word <- getWord8
@@ -431,6 +433,7 @@ instance Binary Node where
           8  -> liftM2 Kernel get get
           9  -> liftM2 PortIncoming get get
           10 -> liftM2 PortOutgoing get get
+          11 -> liftM3 PortTask get get get
           _  -> fail "problem getting Opt.Node binary"
 
 

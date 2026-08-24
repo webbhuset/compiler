@@ -82,6 +82,12 @@ letPort name port_ makeConstraint =
           let header = Map.singleton name (A.At A.zero tipe)
           CLet (Map.elems vars) [] header CTrue <$> makeConstraint
 
+    Can.Task freeVars _ _ _ srcType ->
+      do  vars <- Map.traverseWithKey (\k _ -> nameToRigid k) freeVars
+          tipe <- Instantiate.fromSrcType (Map.map VarN vars) srcType
+          let header = Map.singleton name (A.At A.zero tipe)
+          CLet (Map.elems vars) [] header CTrue <$> makeConstraint
+
 
 
 -- EFFECT MANAGER HELPERS
