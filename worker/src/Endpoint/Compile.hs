@@ -320,5 +320,5 @@ loadErrorJS (A.Root root) =
   BW.withScope $ \scope ->
     do  details <- run $ Details.load Reporting.silent scope root
         artifacts <- run $ Build.fromPaths Reporting.silent root details (NE.List (root </> "src" </> "Errors.elm") [])
-        javascript <- run $ Task.run $ Generate.prod root details artifacts
+        javascript <- run $ Task.run $ Generate.prod Generate.Iife root details artifacts
         return $ LBS.toStrict $ B.toLazyByteString javascript

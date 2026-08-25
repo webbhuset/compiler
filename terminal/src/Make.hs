@@ -48,6 +48,7 @@ data Flags =
 
 data Output
   = JS FilePath
+  | Esm FilePath
   | Html FilePath
   | DevNull
 
@@ -93,11 +94,11 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                       return ()
 
                     [name] ->
-                      do  builder <- toBuilder root details desiredMode artifacts
+                      do  builder <- toBuilder Generate.Iife root details desiredMode artifacts
                           generate style "index.html" (Html.sandwich name builder) (NE.List name [])
 
                     name:names ->
-                      do  builder <- toBuilder root details desiredMode artifacts
+                      do  builder <- toBuilder Generate.Iife root details desiredMode artifacts
                           generate style "elm.js" builder (NE.List name names)
 
                 Just DevNull ->
@@ -106,7 +107,16 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (JS target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  builder <- toBuilder root details desiredMode artifacts
+                      do  builder <- toBuilder Generate.Iife root details desiredMode artifacts
+                          generate style target builder (Build.getRootNames artifacts)
+
+                    name:names ->
+                      Task.throw (Exit.MakeNonMainFilesIntoJavaScript name names)
+
+                Just (Esm target) ->
+                  case getNoMains artifacts of
+                    [] ->
+                      do  builder <- toBuilder Generate.Esm root details desiredMode artifacts
                           generate style target builder (Build.getRootNames artifacts)
 
                     name:names ->
@@ -114,7 +124,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
 
                 Just (Html target) ->
                   do  name <- hasOneMain artifacts
-                      builder <- toBuilder root details desiredMode artifacts
+                      builder <- toBuilder Generate.Iife root details desiredMode artifacts
                       generate style target (Html.sandwich name builder) (NE.List name [])
 
 
@@ -255,13 +265,13 @@ generate style target builder names =
 data DesiredMode = Debug | Dev | Prod
 
 
-toBuilder :: FilePath -> Details.Details -> DesiredMode -> Build.Artifacts -> Task B.Builder
-toBuilder root details desiredMode artifacts =
+toBuilder :: Generate.Format -> FilePath -> Details.Details -> DesiredMode -> Build.Artifacts -> Task B.Builder
+toBuilder format root details desiredMode artifacts =
   Task.mapError Exit.MakeBadGenerate $
     case desiredMode of
-      Debug -> Generate.debug root details artifacts
-      Dev   -> Generate.dev   root details artifacts
-      Prod  -> Generate.prod  root details artifacts
+      Debug -> Generate.debug format root details artifacts
+      Dev   -> Generate.dev   format root details artifacts
+      Prod  -> Generate.prod  format root details artifacts
 
 
 
@@ -286,7 +296,7 @@ output =
     , _plural = "output files"
     , _parser = parseOutput
     , _suggest = \_ -> return []
-    , _examples = \_ -> return [ "elm.js", "index.html", "/dev/null" ]
+    , _examples = \_ -> return [ "elm.js", "elm.mjs", "index.html", "/dev/null" ]
     }
 
 
@@ -295,6 +305,7 @@ parseOutput name
   | isDevNull name      = Just DevNull
   | hasExt ".html" name = Just (Html name)
   | hasExt ".js"   name = Just (JS name)
+  | hasExt ".mjs"  name = Just (Esm name)
   | otherwise           = Nothing
 
 
