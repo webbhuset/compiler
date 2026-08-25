@@ -103,7 +103,7 @@ isNormal (Src.Import (A.At _ name) maybeAlias _) =
 addImport :: Map.Map Module.Name I.Interface -> State -> Src.Import -> Result i w State
 addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybeAlias exposing) =
   let
-    (I.Interface pkg defs unions aliases binops) = $(Map.require 'addImport) name ifaces Module.toChars
+    (I.Interface pkg defs unions aliases binops _) = $(Map.require 'addImport) name ifaces Module.toChars
     !prefix = case maybeAlias of { Just p -> p ; Nothing -> Module.toPrefix name }
     !home = ModuleName.Canonical pkg name
 

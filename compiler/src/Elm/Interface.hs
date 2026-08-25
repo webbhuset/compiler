@@ -21,11 +21,12 @@ module Elm.Interface
   where
 
 
-import Control.Monad (liftM, liftM2, liftM3, liftM4, liftM5)
+import Control.Monad (liftM, liftM2, liftM3, liftM4)
 import Data.Coerce (coerce)
 import qualified Data.Map.Strict as Map
 import qualified Data.Map.Merge.Strict as Map
 import qualified Data.Map.Utils as Map
+import qualified Data.Set as Set
 
 import qualified Bytes.Decode as D
 import qualified Bytes.Encode as E
@@ -52,6 +53,9 @@ data Interface =
     , _unions  :: Map.Map T.Name Union
     , _aliases :: Map.Map T.Name Alias
     , _binops  :: Map.Map Op.Name Binop
+    , _comparables :: Set.Set (ModuleName.Canonical, T.Name)
+      -- all comparable newtypes visible from this module, including the
+      -- ones inherited from its imports (see Type.Comparable)
     }
   deriving (Eq)
 
@@ -83,14 +87,15 @@ data Binop =
 -- FROM MODULE
 
 
-fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations =
+fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Set.Set (ModuleName.Canonical, T.Name) -> Interface
+fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations comparables =
   Interface
     { _home    = home
     , _values  = restrictValues  exports annotations
     , _unions  = restrictUnions  exports unions
     , _aliases = restrictAliases exports aliases
     , _binops  = restrictBinops  exports (Map.map (toOp annotations) binops)
+    , _comparables = comparables
     }
 
 
@@ -188,7 +193,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _) =
+private (Interface pkg _ unions aliases _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -219,22 +224,24 @@ privatize di =
 
 
 eInterface :: Interface -> E.Builder
-eInterface (Interface h vs us as bs) =
+eInterface (Interface h vs us as bs cs) =
   Pkg.eName h
   <> E.dict32 N.encode eAnnotation vs
   <> E.dict32 T.encode eUnion us
   <> E.dict32 T.encode eAlias as
   <> E.dict32 Op.encode eBinop bs
+  <> E.set32 (\(home, name) -> ModuleName.eCanonical home <> T.encode name) cs
 
 
 dInterface :: D.Decoder Interface
 dInterface =
-  liftM5 Interface
-    Pkg.dName
-    (D.dict32 N.decode dAnnotation)
-    (D.dict32 T.decode dUnion)
-    (D.dict32 T.decode dAlias)
-    (D.dict32 Op.decode dBinop)
+  Interface
+    <$> Pkg.dName
+    <*> D.dict32 N.decode dAnnotation
+    <*> D.dict32 T.decode dUnion
+    <*> D.dict32 T.decode dAlias
+    <*> D.dict32 Op.decode dBinop
+    <*> D.set32 (liftM2 (,) ModuleName.dCanonical T.decode)
 
 
 eUnion :: Union -> E.Builder

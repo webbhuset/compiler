@@ -26,6 +26,7 @@ import qualified AST.Prim.TypeVar as T
 import qualified Data.Bag as Bag
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Doc as D
+import qualified Type.Comparable as Comparable
 import qualified Reporting.Render.Type as RT
 import qualified Reporting.Render.Type.Localizer as L
 
@@ -441,7 +442,7 @@ isSuper super tipe =
     Type h n args ->
       case super of
         Number     -> isInt h n || isFloat h n
-        Comparable -> isInt h n || isFloat h n || isString h n || isChar h n || isList h n && isSuper super (head args)
+        Comparable -> isInt h n || isFloat h n || isString h n || isChar h n || isList h n && isSuper super (head args) || Comparable.isComparableAtom h n
         Appendable -> isString h n || isList h n
         CompAppend -> isString h n || isList h n && isSuper Comparable (head args)
 

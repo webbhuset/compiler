@@ -12,6 +12,7 @@ import qualified AST.Prim.Name as N
 import qualified AST.Prim.TypeName as T
 import qualified AST.Prim.TypeVar as T
 import qualified Elm.ModuleName as ModuleName
+import qualified Type.Comparable as Comparable
 import qualified Type.Error as Error
 import qualified Type.Occurs as Occurs
 import Type.Type as Type
@@ -354,6 +355,7 @@ atomMatchesSuper super home name =
       isNumber home name
       || Error.isString home name
       || Error.isChar home name
+      || Comparable.isComparableAtom home name
 
     Appendable ->
       Error.isString home name

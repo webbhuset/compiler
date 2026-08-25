@@ -1,0 +1,20 @@
+diff --git a/src/Elm/Kernel/Utils.js b/src/Elm/Kernel/Utils.js
+index 951dff4..2c7764f 100644
+--- a/src/Elm/Kernel/Utils.js
++++ b/src/Elm/Kernel/Utils.js
+@@ -114,6 +114,15 @@ function _Utils_cmp(x, y, ord)
+ 				: _Utils_cmp(x.c, y.c);
+ 	}
+ 
++	// single-constructor wrappers around a comparable payload compare as
++	// the payload; in --optimize mode the wrapper is not even there
++	/**__DEBUG/
++	if (x.$ !== '::' && x.$ !== '[]')
++	{
++		return _Utils_cmp(x.a, y.a);
++	}
++	//*/
++
+ 	// traverse conses until end of a list or a mismatch
+ 	for (; x.b && y.b && !(ord = _Utils_cmp(x.a, y.a)); x = x.b, y = y.b) {} // WHILE_CONSES
+ 	return ord || (x.b ? /*GT*/ 1 : y.b ? /*LT*/ -1 : /*EQ*/ 0);
