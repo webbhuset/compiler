@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns, TemplateHaskell #-}
 module Generate
-  ( debug
+  ( Format(..)
+  , debug
   , dev
   , prod
   , repl
@@ -50,34 +51,46 @@ type Task a =
   Task.Task Exit.Generate a
 
 
-debug :: R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
-debug stuff details (Build.Artifacts pkg ifaces roots modules) =
+data Format
+  = Iife
+  | Esm
+
+
+generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> B.Builder
+generateWith format =
+  case format of
+    Iife -> JS.generate
+    Esm  -> JS.generateEsm
+
+
+debug :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
+debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
   do  loading <- loadObjects stuff details modules
       types   <- loadTypes stuff ifaces modules
       objects <- finalizeObjects loading
       let mode = Mode.Dev (Just types)
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      return $ JS.generate mode graph mains
+      return $ generateWith format mode graph mains
 
 
-dev :: R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
-dev stuff details (Build.Artifacts pkg _ roots modules) =
+dev :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
+dev format stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       let mode = Mode.Dev Nothing
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      return $ JS.generate mode graph mains
+      return $ generateWith format mode graph mains
 
 
-prod :: R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
-prod stuff details (Build.Artifacts pkg _ roots modules) =
+prod :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task B.Builder
+prod format stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       checkForDebugUses objects
       let graph = objectsToGlobalGraph objects
       let mode = Mode.Prod (Mode.shortenFieldNames graph)
       let mains = gatherMains pkg objects roots
-      return $ JS.generate mode graph mains
+      return $ generateWith format mode graph mains
 
 
 repl :: R.Stuff -> Details.Details -> Bool -> Build.ReplArtifacts -> N.Name -> Task B.Builder
