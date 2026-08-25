@@ -16,15 +16,17 @@ module Elm.Interface
   where
 
 
-import Control.Monad (liftM, liftM3, liftM4, liftM5)
+import Control.Monad (liftM, liftM3, liftM4)
 import Data.Binary
 import Data.Map.Strict ((!))
 import qualified Data.Map.Strict as Map
 import qualified Data.Map.Merge.Strict as Map
 import qualified Data.Name as Name
+import qualified Data.Set as Set
 
 import qualified AST.Canonical as Can
 import qualified AST.Utils.Binop as Binop
+import qualified Elm.ModuleName as ModuleName
 import qualified Elm.Package as Pkg
 import qualified Reporting.Annotation as A
 
@@ -40,6 +42,9 @@ data Interface =
     , _unions  :: Map.Map Name.Name Union
     , _aliases :: Map.Map Name.Name Alias
     , _binops  :: Map.Map Name.Name Binop
+    , _comparables :: Set.Set (ModuleName.Canonical, Name.Name)
+      -- all comparable newtypes visible from this module, including the
+      -- ones inherited from its imports (see Type.Comparable)
     }
   deriving (Eq)
 
@@ -71,14 +76,15 @@ data Binop =
 -- FROM MODULE
 
 
-fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations =
+fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Set.Set (ModuleName.Canonical, Name.Name) -> Interface
+fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations comparables =
   Interface
     { _home = home
     , _values = restrict exports annotations
     , _unions = restrictUnions exports unions
     , _aliases = restrictAliases exports aliases
     , _binops = restrict exports (Map.map (toOp annotations) binops)
+    , _comparables = comparables
     }
 
 
@@ -166,7 +172,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _) =
+private (Interface pkg _ unions aliases _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -197,8 +203,8 @@ privatize di =
 
 
 instance Binary Interface where
-  get = liftM5 Interface get get get get get
-  put (Interface a b c d e) = put a >> put b >> put c >> put d >> put e
+  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get
+  put (Interface a b c d e f) = put a >> put b >> put c >> put d >> put e >> put f
 
 
 instance Binary Union where

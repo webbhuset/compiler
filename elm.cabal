@@ -200,6 +200,7 @@ executable elm
         Reporting.Suggest
         Reporting.Warning
         Type.Constrain.Expression
+        Type.Comparable
         Type.Constrain.Module
         Type.Constrain.Pattern
         Type.Error

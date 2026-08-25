@@ -8,6 +8,7 @@ module Compile
 
 import qualified Data.Map as Map
 import qualified Data.Name as Name
+import qualified Data.Set as Set
 
 import qualified AST.Source as Src
 import qualified AST.Canonical as Can
@@ -21,6 +22,7 @@ import qualified Optimize.Module as Optimize
 import qualified Reporting.Error as E
 import qualified Reporting.Result as R
 import qualified Reporting.Render.Type.Localizer as Localizer
+import qualified Type.Comparable as Comparable
 import qualified Type.Constrain.Module as Type
 import qualified Type.Solve as Type
 
@@ -36,16 +38,18 @@ data Artifacts =
     { _modul :: Can.Module
     , _types :: Map.Map Name.Name Can.Annotation
     , _graph :: Opt.LocalGraph
+    , _comparables :: Set.Set Comparable.Atom
     }
 
 
 compile :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Either E.Error Artifacts
 compile pkg ifaces modul =
   do  canonical   <- canonicalize pkg ifaces modul
-      annotations <- typeCheck modul canonical
+      let comparables = Comparable.compute ifaces canonical
+      annotations <- typeCheck comparables modul canonical
       ()          <- nitpick canonical
       objects     <- optimize modul annotations canonical
-      return (Artifacts canonical annotations objects)
+      return (Artifacts canonical annotations objects (Comparable._atoms comparables))
 
 
 
@@ -62,9 +66,9 @@ canonicalize pkg ifaces modul =
       Left $ E.BadNames errors
 
 
-typeCheck :: Src.Module -> Can.Module -> Either E.Error (Map.Map Name.Name Can.Annotation)
-typeCheck modul canonical =
-  case unsafePerformIO (Type.run =<< Type.constrain canonical) of
+typeCheck :: Comparable.Info -> Src.Module -> Can.Module -> Either E.Error (Map.Map Name.Name Can.Annotation)
+typeCheck comparables modul canonical =
+  case unsafePerformIO (Comparable.register comparables >> (Type.run =<< Type.constrain canonical)) of
     Right annotations ->
       Right annotations
 

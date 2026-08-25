@@ -644,7 +644,7 @@ crawlKernel foreignDeps mvar pkg src name =
 getDepHome :: ForeignInterface -> Maybe Pkg.Name
 getDepHome fi =
   case fi of
-    ForeignSpecific (I.Interface pkg _ _ _ _) -> Just pkg
+    ForeignSpecific (I.Interface pkg _ _ _ _ _) -> Just pkg
     ForeignAmbiguous                          -> Nothing
 
 
@@ -674,8 +674,8 @@ compile pkg mvar status =
                 Left _ ->
                   return Nothing
 
-                Right (Compile.Artifacts canonical annotations objects) ->
-                  do  let ifaces = I.fromModule pkg canonical annotations
+                Right (Compile.Artifacts canonical annotations objects comparables) ->
+                  do  let ifaces = I.fromModule pkg canonical annotations comparables
                       docs <- makeDocs docsStatus canonical
                       return $ Just $ RLocal ifaces objects docs
 

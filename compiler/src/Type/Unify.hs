@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Name as Name
 
 import qualified Elm.ModuleName as ModuleName
+import qualified Type.Comparable as Comparable
 import qualified Type.Error as Error
 import qualified Type.Occurs as Occurs
 import Type.Type as Type
@@ -352,6 +353,7 @@ atomMatchesSuper super home name =
       isNumber home name
       || Error.isString home name
       || Error.isChar home name
+      || Comparable.isComparableAtom home name
 
     Appendable ->
       Error.isString home name
