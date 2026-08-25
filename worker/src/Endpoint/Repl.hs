@@ -188,7 +188,7 @@ compile (A.Artifacts interfaces objects) state@(Repl.State imports types decls) 
 
 
 toJavaScript :: (Src.Module, Compile.Artifacts, Opt.GlobalGraph) -> Maybe N.Name -> B.Builder
-toJavaScript (modul, Compile.Artifacts canModule types locals, objects) maybeName =
+toJavaScript (modul, Compile.Artifacts canModule types locals _, objects) maybeName =
   let
     localizer = L.fromModule modul
     graph = Opt.addLocalGraph locals objects

@@ -140,6 +140,7 @@ executable worker
         Reporting.Warning
         Stuff
         Type.Constrain.Expression
+        Type.Comparable
         Type.Constrain.Module
         Type.Constrain.Pattern
         Type.Error

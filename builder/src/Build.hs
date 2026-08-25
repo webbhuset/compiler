@@ -708,7 +708,7 @@ compile (Env key root projectType _ buildID _ _) docsNeed (Details.Local path ti
     pkg = projectTypeToPkg projectType
   in
   case Compile.compile pkg ifaces modul of
-    Right (Compile.Artifacts canonical annotations objects) ->
+    Right (Compile.Artifacts canonical annotations objects comparables) ->
       do  result <- makeDocs docsNeed canonical
           case result of
             Left err ->
@@ -717,7 +717,7 @@ compile (Env key root projectType _ buildID _ _) docsNeed (Details.Local path ti
 
             Right docs ->
               do  let name = Src.getName modul
-                  let iface = I.fromModule pkg canonical annotations
+                  let iface = I.fromModule pkg canonical annotations comparables
                   let elmi = Stuff.elmi root name
                   File.writeBinary (Stuff.elmo root name) objects
                   maybeOldi <- File.readBinary elmi
@@ -929,10 +929,10 @@ finalizeReplArtifacts env@(Env _ root projectType _ _ _ _) source modul@(Src.Mod
 
     compileInput ifaces =
       case Compile.compile pkg ifaces modul of
-        Right (Compile.Artifacts canonical annotations objects) ->
+        Right (Compile.Artifacts canonical annotations objects comparables) ->
           let
             h = Can._name canonical
-            m = Fresh (Src.getName modul) (I.fromModule pkg canonical annotations) objects
+            m = Fresh (Src.getName modul) (I.fromModule pkg canonical annotations comparables) objects
             ms = Map.foldrWithKey addInside [] results
           in
           return $ Right $ ReplArtifacts h (m:ms) (L.fromModule modul) annotations
@@ -1180,9 +1180,9 @@ compileOutside (Env key _ projectType _ _ _ _) (Details.Local path time _ _ _ _)
     name = Src.getName modul
   in
   case Compile.compile pkg ifaces modul of
-    Right (Compile.Artifacts canonical annotations objects) ->
+    Right (Compile.Artifacts canonical annotations objects comparables) ->
       do  Reporting.report key Reporting.BDone
-          return $ ROutsideOk name (I.fromModule pkg canonical annotations) objects
+          return $ ROutsideOk name (I.fromModule pkg canonical annotations comparables) objects
 
     Left errors ->
       return $ ROutsideErr $ Error.Module name path time source errors

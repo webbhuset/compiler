@@ -568,8 +568,9 @@ badFlexSuper direction super tipe =
         T.Type _ name _ ->
           [ D.toSimpleHint $
               "I do not know how to compare `" ++ Name.toChars name ++ "` values. I can only\
-              \ compare ints, floats, chars, strings, lists of comparable values, and tuples\
-              \ of comparable values."
+              \ compare ints, floats, chars, strings, lists of comparable values, tuples\
+              \ of comparable values, and custom types with exactly one constructor\
+              \ wrapping exactly one comparable value."
           , D.reflowLink
               "Check out" "comparing-custom-types" "for ideas on how to proceed."
           ]
