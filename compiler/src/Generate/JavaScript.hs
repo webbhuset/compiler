@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Generate.JavaScript
   ( generate
+  , generateEsm
   , generateForRepl
   , generateForReplEndpoint
   )
@@ -50,6 +51,20 @@ generate mode (Opt.GlobalGraph graph _) mains =
   <> stateToBuilder state
   <> toMainExports mode mains
   <> "}(this));"
+
+
+-- Everything lives in module scope, which is already strict and does not
+-- leak, so no IIFE is needed. The `scope` parameter is only ever used by
+-- _Platform_export, which is never called in this mode.
+generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> B.Builder
+generateEsm mode (Opt.GlobalGraph graph _) mains =
+  let
+    state = Map.foldrWithKey (addMain mode graph) emptyState mains
+  in
+  Functions.functions
+  <> perfNote mode
+  <> stateToBuilder state
+  <> toMainExportsEsm mode mains
 
 
 addMain :: Mode.Mode -> Graph -> ModuleName.Canonical -> Opt.Main -> State -> State
@@ -522,6 +537,13 @@ toMainExports mode mains =
     exports = generateExports mode (Map.foldrWithKey addToTrie emptyTrie mains)
   in
   JsName.toBuilder export <> "(" <> exports <> ");"
+
+
+toMainExportsEsm :: Mode.Mode -> Mains -> B.Builder
+toMainExportsEsm mode mains =
+  "const Elm = "
+  <> generateExports mode (Map.foldrWithKey addToTrie emptyTrie mains)
+  <> ";\nexport { Elm };\nexport default Elm;\n"
 
 
 generateExports :: Mode.Mode -> Trie -> B.Builder
