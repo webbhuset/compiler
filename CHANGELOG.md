@@ -188,11 +188,11 @@ view model =
   `@keyframes` — a misspelled animation name, a silent no-op in browsers,
   is a compile error.
 - Emitted names are module-scoped (`Page-Checkout--card`), giving
-  CSS-modules-style local scoping. Class names must be lowerCamelCase,
-  since they become record fields.
+  CSS-modules-style local scoping; `--optimize` shortens them to one or
+  two characters. Class names must be lowerCamelCase, since they become
+  record fields.
 - The CSS text is never in the JS bundle, which holds only name
-  translation tables (keys shortened by `--optimize` like any record
-  field). `--output=bundle.mjs` (or `.js`) writes a `bundle.mjs.css`
+  translation tables. `--output=bundle.mjs` (or `.js`) writes a `bundle.mjs.css`
   sidecar containing exactly the blocks that survive dead-code
   elimination; `.html` output and `elm reactor` inline a `<style>`.
 - The consuming side (`Css.classes`, `Css.class`, `Css.vars`, value

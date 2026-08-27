@@ -146,9 +146,10 @@ nothing — and is only written when the program has CSS blocks.
 Emitted names are module-scoped: class `card` in module `Page.Checkout` is
 emitted as `Page-Checkout--card`, and custom properties and keyframes
 likewise. Two modules can both declare `.card` without collision, and
-devtools show where a class came from. The JavaScript bundle holds only
-small translation tables, whose keys are shortened by `--optimize` like
-every other record field.
+devtools show where a class came from. With `--optimize`, names are instead
+shortened to one or two characters — still collision-free across modules —
+and the per-module comments are dropped. The JavaScript bundle holds only
+small translation tables in either mode.
 
 ## Rules
 
