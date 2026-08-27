@@ -1,14 +1,11 @@
 --- a/src/Elm/Kernel/VirtualDom.js
 +++ b/src/Elm/Kernel/VirtualDom.js
-@@ -523,7 +523,10 @@
+@@ -523,7 +523,7 @@ function _VirtualDom_applyStyles(domNode, styles)
  
  	for (var key in styles)
  	{
 -		domNodeStyle[key] = styles[key];
-+		// custom properties (--x) are not settable as named properties
-+		key.charCodeAt(0) === 45 /* - */ && key.charCodeAt(1) === 45 /* - */
-+			? domNodeStyle.setProperty(key, styles[key])
-+			: (domNodeStyle[key] = styles[key]);
++		domNodeStyle.setProperty(key, styles[key]);
  	}
  }
  
