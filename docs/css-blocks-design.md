@@ -339,8 +339,10 @@ Contents and ordering:
   stable across builds. Scoped class names make cross-block cascade order
   mostly irrelevant anyway.
 - Dev builds prefix each block with a `/* Module.Name */` comment;
-  `--optimize` drops the comments and uses the shortened names. Whitespace
-  inside blocks is preserved as written (chunks are raw text).
+  `--optimize` drops the comments and uses the shortened names. The common
+  leading indentation of a block (from its position in the Elm file) is
+  stripped at parse time, keeping relative nesting; error positions still
+  point into the block as written.
 
 
 ## What is checked, what is not
