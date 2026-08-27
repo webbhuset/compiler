@@ -144,19 +144,80 @@ users : Dict Id User
   non-comparable breaks downstream `Dict` users; treat it as a major
   change yourself.
 
+## CSS blocks
+
+*[docs](docs/css-blocks-design.md) · runtime in the `webbhuset/css`
+package · `Css.vars` requires a
+[patched elm/virtual-dom](docs/patches/elm-virtual-dom-custom-properties.patch)*
+
+CSS is embedded the way GLSL shaders are: the compiler parses a
+`[css| ... |]` block and infers a record type from it, so HTML and CSS can
+no longer drift apart — removing or renaming a class in the CSS turns every
+use site into an ordinary type error:
+
+```elm
+sheet =
+    [css|
+        @property --progress { syntax: "<percentage>"; inherits: false; }
+
+        .bar {
+            width: var(--progress);
+            transition: width 0.2s;
+        }
+    |]
+
+-- inferred:
+-- sheet : Css.Stylesheet { bar : Css.Class } { progress : Css.Percentage }
+
+
+view model =
+    let
+        c = Css.classes sheet
+    in
+    div
+        (Css.class c.bar :: Css.vars sheet { progress = Css.pct model.progress })
+        []
+```
+
+- Class selectors become `Css.Class` fields and `@keyframes` names become
+  `Css.Animation` fields. Custom properties that a block consumes but never
+  assigns become required inputs, supplied per element with `Css.vars` and
+  typed by their `@property` syntax descriptor (`"<percentage>"` gives
+  `Css.Percentage`, and so on; untyped inputs are `Css.Value`).
+- Identifiers in `animation`/`animation-name` must be keywords or declared
+  `@keyframes` — a misspelled animation name, a silent no-op in browsers,
+  is a compile error.
+- Emitted names are module-scoped (`Page-Checkout--card`), giving
+  CSS-modules-style local scoping. Class names must be lowerCamelCase,
+  since they become record fields.
+- The CSS text is never in the JS bundle, which holds only name
+  translation tables (keys shortened by `--optimize` like any record
+  field). `--output=bundle.mjs` (or `.js`) writes a `bundle.mjs.css`
+  sidecar containing exactly the blocks that survive dead-code
+  elimination; `.html` output and `elm reactor` inline a `<style>`.
+- The consuming side (`Css.classes`, `Css.class`, `Css.vars`, value
+  constructors like `px`/`pct`/`rgb`) lives in the `webbhuset/css` package,
+  consumed as a git dependency since it has kernel code. External CSS can
+  still be referenced explicitly, e.g.
+  `Css.value "var(--brand-color)"` for a page-level design token.
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
   field, which official parsers ignore.
 - **elm/core**: task ports and comparable newtypes need a patched
-  elm/core (both patches are in [docs/patches/](docs/patches/)), consumed
-  through a git dependency under an unpublished version number. The
-  patches are additive; programs not using the features behave
-  identically.
+  elm/core, and `Css.vars` needs a patched elm/virtual-dom (all patches
+  are in [docs/patches/](docs/patches/)), consumed through git
+  dependencies under unpublished version numbers. The elm/core patches
+  are additive; programs not using the features behave identically. The
+  virtual-dom patch applies styles with `setProperty`, which only accepts
+  hyphenated CSS names — camelCase keys like `style "backgroundColor"`
+  (already against elm/html convention) stop working.
 - **Caches**: the interface file format carries extra information, so the
   first build with this fork rebuilds `elm-stuff` and the `ELM_HOME`
   package artifacts automatically. Do not alternate this fork and the
   official compiler on the same `ELM_HOME` — they will repeatedly
   invalidate each other's caches.
-- **Object files**: task ports add a node kind to the `.elmo` format;
-  stale `elm-stuff` from other compilers is detected and rebuilt.
+- **Object files**: task ports add a node kind and CSS blocks an
+  expression kind to the `.elmo` format; stale `elm-stuff` from other
+  compilers is detected and rebuilt.
