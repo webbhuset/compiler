@@ -402,7 +402,23 @@ analyze :: [Char] -> Either Error Css.Content
 analyze src =
   do  toks <- tokenize 0 0 src
       (acc, _) <- items CtxTop Nothing toks emptyAcc
-      finalize acc
+      finalize (blockIndent src) acc
+
+
+-- The whole block is indented by its position in the Elm file. Emitted
+-- CSS drops that common indentation, keeping only the relative nesting.
+-- This happens on the finished chunks, not the source, so error positions
+-- still point into the block as written.
+blockIndent :: [Char] -> Int
+blockIndent src =
+  let
+    indents =
+      [ length (takeWhile (== ' ') line)
+      | line <- lines src
+      , any (\c -> c /= ' ' && c /= '\r' && c /= '\t') line
+      ]
+  in
+  if null indents then 0 else minimum indents
 
 
 
@@ -804,12 +820,12 @@ checkKeyframesName row col name declared =
 -- FINALIZE
 
 
-finalize :: Acc -> Either Error Css.Content
-finalize acc =
+finalize :: Int -> Acc -> Either Error Css.Content
+finalize indent acc =
   do  checkCollisions (_classes acc) (_kfs acc)
       chunks <- traverse (resolveChunk (_kfs acc)) (reverse (_revChunks acc))
       let inputs = toInputs acc
-      Right $ Css.Content (mergeChunks chunks) $
+      Right $ Css.Content (mergeChunks indent chunks) $
         Css.Types
           { Css._classes = Set.fromList (map Name.fromChars (Map.keys (_classes acc)))
           , Css._keyframes = Set.fromList (map Name.fromChars (Map.keys (_kfs acc)))
@@ -877,29 +893,53 @@ syntaxToType syntax =
     _              -> Css.Value
 
 
-mergeChunks :: [RChunk] -> [Css.Chunk]
-mergeChunks chunks =
+mergeChunks :: Int -> [RChunk] -> [Css.Chunk]
+mergeChunks indent chunks =
   case chunks of
     [] ->
       []
 
     RText a : RText b : rest ->
-      mergeChunks (RText (a ++ b) : rest)
+      mergeChunks indent (RText (a ++ b) : rest)
 
     RText a : rest ->
-      Css.Text (BS_UTF8.fromString a) : mergeChunks rest
+      Css.Text (BS_UTF8.fromString (stripIndent indent a)) : mergeChunks indent rest
 
     RClass name : rest ->
-      Css.ClassRef (Name.fromChars name) : mergeChunks rest
+      Css.ClassRef (Name.fromChars name) : mergeChunks indent rest
 
     RVar name : rest ->
-      Css.VarRef (Name.fromChars name) : mergeChunks rest
+      Css.VarRef (Name.fromChars name) : mergeChunks indent rest
 
     RKf name : rest ->
-      Css.KeyframesRef (Name.fromChars name) : mergeChunks rest
+      Css.KeyframesRef (Name.fromChars name) : mergeChunks indent rest
 
     RAnim _ _ name : rest ->
-      Css.KeyframesRef (Name.fromChars name) : mergeChunks rest
+      Css.KeyframesRef (Name.fromChars name) : mergeChunks indent rest
 
     RAnimLoose name : rest ->
-      Css.Text (BS_UTF8.fromString name) : mergeChunks rest
+      Css.Text (BS_UTF8.fromString name) : mergeChunks indent rest
+
+
+-- Drop up to `indent` spaces after every newline. Newlines only appear in
+-- whitespace and comments (strings reject them), and the indentation
+-- following a newline always sits in the same text chunk, so a per-chunk
+-- pass is safe.
+stripIndent :: Int -> [Char] -> [Char]
+stripIndent indent chars =
+  if indent <= 0 then
+    chars
+  else
+    let
+      go cs =
+        case cs of
+          [] -> []
+          '\n' : rest -> '\n' : go (dropSpaces indent rest)
+          c : rest -> c : go rest
+
+      dropSpaces n cs =
+        case cs of
+          ' ' : rest | n > 0 -> dropSpaces (n - 1) rest
+          _ -> cs
+    in
+    go chars
