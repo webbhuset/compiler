@@ -1,10 +1,12 @@
 # CSS Blocks — Design Proposal
 
-**Status: compiler side implemented on the `css-blocks` branch (parse,
-typing, JS codegen, sidecar/inline CSS output). Not yet done: the `Css`
-companion package (kernel code for `classes`/`class`/`vars`), and CSS name
-shortening in `--optimize` (names are module-qualified in all modes for
-now).**
+**Status: implemented. Compiler side on the `css-blocks` branch (parse,
+typing, JS codegen, sidecar/inline CSS output); the `webbhuset/css`
+companion package with the kernel runtime lives in a separate repository.
+`Css.vars` requires an `elm/virtual-dom` patched with
+`docs/patches/elm-virtual-dom-custom-properties.patch` (stock virtual-dom
+silently ignores custom properties). Not yet done: CSS name shortening in
+`--optimize` (names are module-qualified in all modes for now).**
 
 Elm already embeds one foreign language with compiler support: GLSL. A
 `[glsl| ... |]` block is parsed at compile time, its `attribute` / `uniform` /
@@ -67,7 +69,7 @@ module Css exposing (Stylesheet, Class, Value, ...)
 classes   : Stylesheet classes vars -> classes          -- kernel
 class     : Class -> Html.Attribute msg
 classList : List ( Class, Bool ) -> Html.Attribute msg
-vars      : Stylesheet classes vars -> vars -> Html.Attribute msg  -- kernel
+vars      : Stylesheet classes vars -> vars -> List (Html.Attribute msg)  -- kernel
 ```
 
 The package ships kernel code and is consumed as a git-dependency, like the
@@ -145,19 +147,28 @@ sheet =
 
 view model =
     div
-        [ Css.class c.bar
-        , Css.vars sheet
-            { progress = Css.pct model.progress
-            , accent = Css.value "var(--brand-color)"
-            }
-        ]
+        (Css.class c.bar
+            :: Css.vars sheet
+                { progress = Css.pct model.progress
+                , accent = Css.value "var(--brand-color)"
+                }
+        )
         []
 ```
 
 `Css.vars` walks the record (using a compiled translation table, since field
 names are mangled under `--optimize`) and sets each property on the element as
-an individual style entry, so multiple `vars` attributes on one element
-compose, and virtual-dom diffs them normally.
+an individual style fact, so multiple `vars` lists on one element compose,
+and virtual-dom diffs them normally. One fact holds one style entry, which is
+why `vars` returns a list of attributes rather than a single one.
+
+One caveat: stock `elm/virtual-dom` applies styles with
+`element.style[key] = value`, which browsers silently ignore for `--custom`
+properties (they require `style.setProperty`). `Css.vars` therefore needs an
+`elm/virtual-dom` patched with
+`docs/patches/elm-virtual-dom-custom-properties.patch`, consumed as a
+git-dependency like the elm/core patches for task ports and comparable
+newtypes. Everything else works with the stock virtual-dom.
 
 ### Typing inputs via `@property`
 
@@ -268,13 +279,13 @@ sheet =
 
 view model =
     div
-        [ Css.class c.toast
-        , Css.vars sheet
-            { enter =
-                Css.animationName
-                    (if model.reducedMotion then c.fadeIn else c.slideIn)
-            }
-        ]
+        (Css.class c.toast
+            :: Css.vars sheet
+                { enter =
+                    Css.animationName
+                        (if model.reducedMotion then c.fadeIn else c.slideIn)
+                }
+        )
         []
 ```
 
