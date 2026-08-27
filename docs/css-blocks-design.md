@@ -168,7 +168,12 @@ properties (they require `style.setProperty`). `Css.vars` therefore needs an
 `elm/virtual-dom` patched with
 `docs/patches/elm-virtual-dom-custom-properties.patch`, consumed as a
 git-dependency like the elm/core patches for task ports and comparable
-newtypes. Everything else works with the stock virtual-dom.
+newtypes. The patch routes all style facts through `setProperty`; note that
+`setProperty` only accepts hyphenated CSS names, so camelCase keys like
+`Html.Attributes.style "backgroundColor" ...` (which happened to work via
+named-property assignment) become no-ops — use `"background-color"`, the
+documented elm/html convention. Everything except `Css.vars` works with the
+stock virtual-dom.
 
 ### Typing inputs via `@property`
 
