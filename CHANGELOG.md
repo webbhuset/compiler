@@ -146,7 +146,7 @@ users : Dict Id User
 
 ## CSS blocks
 
-*[docs](docs/css-blocks-design.md) · runtime in the `webbhuset/css`
+*[docs](docs/css-blocks.md) · runtime in the `webbhuset/css`
 package · `Css.vars` requires a
 [patched elm/virtual-dom](docs/patches/elm-virtual-dom-custom-properties.patch)*
 
