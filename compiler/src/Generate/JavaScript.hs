@@ -54,7 +54,7 @@ generate mode globalGraph@(Opt.GlobalGraph graph _) mains =
       <> toMainExports mode mains
       <> "}(this));"
   in
-  ( javascript, GenCss.generate globalGraph mains )
+  ( javascript, GenCss.generate mode globalGraph mains )
 
 
 -- Everything lives in module scope, which is already strict and does not
@@ -71,7 +71,7 @@ generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains =
       <> stateToBuilder state
       <> toMainExportsEsm mode mains
   in
-  ( javascript, GenCss.generate globalGraph mains )
+  ( javascript, GenCss.generate mode globalGraph mains )
 
 
 addMain :: Mode.Mode -> Graph -> ModuleName.Canonical -> Opt.Main -> State -> State
