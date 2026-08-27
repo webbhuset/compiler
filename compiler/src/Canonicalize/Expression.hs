@@ -160,6 +160,9 @@ canonicalize env (A.At region expression) =
     Src.Shader src tipe ->
         Result.ok (Can.Shader src tipe)
 
+    Src.Css content ->
+        Result.ok (Can.Css (Env._home env) content)
+
 
 
 -- CANONICALIZE TUPLE EXTRAS

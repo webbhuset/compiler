@@ -354,6 +354,9 @@ checkExpr (A.At region expression) errors =
     Can.Shader _ _ ->
       errors
 
+    Can.Css _ _ ->
+      errors
+
 
 
 -- CHECK FIELD

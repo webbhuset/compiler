@@ -17,6 +17,7 @@ module Elm.Package
   , browser, virtualDom, html
   , json, http, url
   , webgl, linearAlgebra
+  , css
   --
   , suggestions
   , nearbyNames
@@ -203,6 +204,18 @@ url =
 webgl :: Name
 webgl =
   toName elm_explorations "webgl"
+
+
+{-# NOINLINE css #-}
+css :: Name
+css =
+  toName webbhuset "css"
+
+
+{-# NOINLINE webbhuset #-}
+webbhuset :: Author
+webbhuset =
+  Utf8.fromChars "webbhuset"
 
 
 {-# NOINLINE linearAlgebra #-}

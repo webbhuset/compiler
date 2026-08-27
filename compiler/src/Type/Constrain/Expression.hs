@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Name as Name
 
 import qualified AST.Canonical as Can
+import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Data.Index as Index
 import qualified Elm.ModuleName as ModuleName
@@ -149,6 +150,9 @@ constrain rtv (A.At region expression) expected =
 
     Can.Shader _src types ->
       constrainShader region types expected
+
+    Can.Css _home (Css.Content _ types) ->
+      constrainCss region types expected
 
 
 
@@ -501,6 +505,56 @@ glToType glType =
     Shader.Int -> Type.int
     Shader.Float -> Type.float
     Shader.Texture -> Type.texture
+
+
+
+-- CONSTRAIN CSS
+
+
+constrainCss :: A.Region -> Css.Types -> Expected Type -> IO Constraint
+constrainCss region (Css.Types classes keyframes vars) expected =
+  let
+    classFields =
+      Map.union
+        (Map.fromSet (const (cssAppN "Class")) classes)
+        (Map.fromSet (const (cssAppN "Animation")) keyframes)
+
+    varFields =
+      Map.map propToType vars
+
+    cssType =
+      AppN ModuleName.cssStyles (Name.fromChars "Stylesheet")
+        [ toCssRecord classFields
+        , toCssRecord varFields
+        ]
+  in
+  return (CEqual region CssBlock cssType expected)
+
+
+toCssRecord :: Map.Map Name.Name Type -> Type
+toCssRecord fields =
+  if Map.null fields then
+    EmptyRecordN
+  else
+    RecordN fields EmptyRecordN
+
+
+propToType :: Css.PropType -> Type
+propToType propType =
+  case propType of
+    Css.Value      -> cssAppN "Value"
+    Css.Length     -> cssAppN "Length"
+    Css.Percentage -> cssAppN "Percentage"
+    Css.Color      -> cssAppN "Color"
+    Css.Number     -> Type.float
+    Css.Integer    -> Type.int
+    Css.Duration   -> cssAppN "Duration"
+    Css.Angle      -> cssAppN "Angle"
+
+
+cssAppN :: [Char] -> Type
+cssAppN name =
+  AppN ModuleName.cssStyles (Name.fromChars name) []
 
 
 
