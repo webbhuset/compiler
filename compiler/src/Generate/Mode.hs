@@ -1,8 +1,10 @@
 module Generate.Mode
   ( Mode(..)
+  , ShortNames(..)
   , isDebug
   , ShortFieldNames
   , shortenFieldNames
+  , ShortCssNames
   )
   where
 
@@ -14,6 +16,7 @@ import qualified Data.Name as Name
 
 import qualified AST.Optimized as Opt
 import qualified Elm.Compiler.Type.Extract as Extract
+import qualified Elm.ModuleName as ModuleName
 import qualified Generate.JavaScript.Name as JsName
 
 
@@ -23,7 +26,21 @@ import qualified Generate.JavaScript.Name as JsName
 
 data Mode
   = Dev (Maybe Extract.Types)
-  | Prod ShortFieldNames
+  | Prod ShortNames
+
+
+data ShortNames =
+  ShortNames
+    { _fields :: ShortFieldNames
+    , _cssNames :: ShortCssNames
+    }
+
+
+-- The short names emitted for CSS classes, custom properties, and
+-- keyframes, keyed by home module and record field name. Built by
+-- Generate.Css.shortenNames.
+type ShortCssNames =
+  Map.Map (ModuleName.Canonical, Name.Name) Name.Name
 
 
 isDebug :: Mode -> Bool

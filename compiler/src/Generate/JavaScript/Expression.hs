@@ -178,12 +178,12 @@ generate mode expression =
       let
         toClassField field =
           ( generateField mode field
-          , JS.String (CssGen.classNameBuilder home field)
+          , JS.String (CssGen.classNameBuilder mode home field)
           )
 
         toVarField field =
           ( generateField mode field
-          , JS.String (CssGen.varNameBuilder home field)
+          , JS.String (CssGen.varNameBuilder mode home field)
           )
       in
       JsExpr $ JS.Object $
@@ -295,8 +295,8 @@ generateRecord mode fields =
 generateField :: Mode.Mode -> Name.Name -> JsName.Name
 generateField mode name =
   case mode of
-    Mode.Dev _       -> JsName.fromLocal name
-    Mode.Prod fields -> fields ! name
+    Mode.Dev _           -> JsName.fromLocal name
+    Mode.Prod shortNames -> Mode._fields shortNames ! name
 
 
 

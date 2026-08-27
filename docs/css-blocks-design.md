@@ -5,8 +5,7 @@ typing, JS codegen, sidecar/inline CSS output); the `webbhuset/css`
 companion package with the kernel runtime lives in a separate repository.
 `Css.vars` requires an `elm/virtual-dom` patched with
 `docs/patches/elm-virtual-dom-custom-properties.patch` (stock virtual-dom
-silently ignores custom properties). Not yet done: CSS name shortening in
-`--optimize` (names are module-qualified in all modes for now).**
+silently ignores custom properties).**
 
 Elm already embeds one foreign language with compiler support: GLSL. A
 `[glsl| ... |]` block is parsed at compile time, its `attribute` / `uniform` /
@@ -105,10 +104,14 @@ sides of the name and can rewrite it:
   `Page-Checkout--card`, giving CSS-Modules-style local scoping. Two modules
   can both declare `.card` without collision, and devtools show where a class
   came from.
-- **`--optimize`:** class names go through the same shortening table as record
-  fields (the shader codegen already does this for attribute names via
-  `generateField`), so classes minify to one or two characters, consistently
-  between the `.css` output and the JS.
+- **`--optimize`:** class names minify to one or two characters,
+  consistently between the `.css` output and the JS. The table is separate
+  from the record-field shortening table (`Generate.Css.shortenNames`),
+  keyed by qualified name — reusing the field table would give two modules'
+  `.card` the same short name. Classes, keyframes, and custom properties
+  share the table (properties always carry a `--` prefix at emission), and
+  the name generator skips animation keywords so a generated `@keyframes`
+  name can never misparse in the `animation` shorthand.
 
 The compiled stylesheet value carries a translation object
 `{ card: "Page-Checkout--card", ... }`, exactly like the shader's
@@ -335,8 +338,9 @@ Contents and ordering:
   (topological module order, source order within a module), so the cascade is
   stable across builds. Scoped class names make cross-block cascade order
   mostly irrelevant anyway.
-- Dev builds prefix each block with `/* Module.Name (src/Module/Name.elm) */`;
-  `--optimize` minifies whitespace and uses the shortened names.
+- Dev builds prefix each block with a `/* Module.Name */` comment;
+  `--optimize` drops the comments and uses the shortened names. Whitespace
+  inside blocks is preserved as written (chunks are raw text).
 
 
 ## What is checked, what is not

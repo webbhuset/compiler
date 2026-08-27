@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Generate.Css
   ( generate
+  , shortenNames
   , classNameBuilder
   , varNameBuilder
   )
@@ -8,6 +9,9 @@ module Generate.Css
 
 
 import qualified Data.ByteString.Builder as B
+import qualified Data.Char as Char
+import qualified Data.List as List
+import Data.Map ((!))
 import qualified Data.Map as Map
 import qualified Data.Name as Name
 import qualified Data.Set as Set
@@ -15,19 +19,22 @@ import qualified Data.Set as Set
 import qualified AST.Optimized as Opt
 import qualified AST.Utils.Css as Css
 import qualified Elm.ModuleName as ModuleName
+import qualified Generate.Mode as Mode
 
 
 
 -- GENERATE
 --
 -- Collect every [css| ... |] block that is reachable from the given mains
--- and render them as one stylesheet. Names are emitted module-qualified,
--- e.g. class `card` in module Page.Checkout becomes `Page-Checkout--card`,
--- matching what Generate.JavaScript.Expression emits for the block object.
+-- and render them as one stylesheet. In dev, names are emitted
+-- module-qualified, e.g. class `card` in module Page.Checkout becomes
+-- `Page-Checkout--card`; in --optimize they are shortened via the table in
+-- the mode. Either way they match what Generate.JavaScript.Expression
+-- emits for the block object.
 
 
-generate :: Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Maybe B.Builder
-generate (Opt.GlobalGraph nodes _) mains =
+generate :: Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Maybe B.Builder
+generate mode (Opt.GlobalGraph nodes _) mains =
   let
     seen =
       Map.foldlWithKey'
@@ -35,13 +42,8 @@ generate (Opt.GlobalGraph nodes _) mains =
         Set.empty
         mains
 
-    fromMain main bs =
-      case main of
-        Opt.Static -> bs
-        Opt.Dynamic _ decoder -> addExpr decoder bs
-
     blocks =
-      Map.foldr fromMain
+      Map.foldr mainBlocks
         (concatMap (\g -> maybe [] nodeBlocks (Map.lookup g nodes)) (Set.toList seen))
         mains
   in
@@ -50,21 +52,26 @@ generate (Opt.GlobalGraph nodes _) mains =
       Nothing
 
     _ ->
-      Just (mconcat (map render blocks))
+      Just (mconcat (map (render mode) blocks))
 
 
 
 -- NAMES
 
 
-classNameBuilder :: ModuleName.Canonical -> Name.Name -> B.Builder
-classNameBuilder home name =
-  homeToBuilder home <> "--" <> Name.toBuilder name
+classNameBuilder :: Mode.Mode -> ModuleName.Canonical -> Name.Name -> B.Builder
+classNameBuilder mode home name =
+  case mode of
+    Mode.Dev _ ->
+      homeToBuilder home <> "--" <> Name.toBuilder name
+
+    Mode.Prod shortNames ->
+      Name.toBuilder (Mode._cssNames shortNames ! (home, name))
 
 
-varNameBuilder :: ModuleName.Canonical -> Name.Name -> B.Builder
-varNameBuilder home name =
-  "--" <> homeToBuilder home <> "--" <> Name.toBuilder name
+varNameBuilder :: Mode.Mode -> ModuleName.Canonical -> Name.Name -> B.Builder
+varNameBuilder mode home name =
+  "--" <> classNameBuilder mode home name
 
 
 homeToBuilder :: ModuleName.Canonical -> B.Builder
@@ -78,23 +85,99 @@ dotToDash c =
 
 
 
+-- SHORTEN NAMES
+--
+-- Assign every (home module, name) pair in the program a short CSS name,
+-- walking all blocks in a deterministic order. Classes, keyframes, and
+-- custom properties share one table; a class and a custom property with
+-- the same name in one module share a short name, which is fine since
+-- custom properties are always emitted with a `--` prefix.
+
+
+shortenNames :: Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Mode.ShortCssNames
+shortenNames (Opt.GlobalGraph nodes _) mains =
+  let
+    blocks =
+      Map.foldr mainBlocks (concatMap nodeBlocks (Map.elems nodes)) mains
+
+    blockKeys (home, Css.Content _ (Css.Types classes keyframes vars)) =
+      map ((,) home) (Set.toAscList classes ++ Set.toAscList keyframes ++ Map.keys vars)
+
+    addKey (stream, table) key =
+      if Map.member key table then
+        (stream, table)
+      else
+        case stream of
+          short : rest -> (rest, Map.insert key (Name.fromChars short) table)
+          [] -> error "cssShortNameStream is infinite"
+  in
+  snd (List.foldl' addKey (cssShortNameStream, Map.empty) (concatMap blockKeys blocks))
+
+
+cssShortNameStream :: [[Char]]
+cssShortNameStream =
+  let
+    firstChars = ['a'..'z'] ++ ['A'..'Z']
+    restChars = firstChars ++ ['0'..'9'] ++ ['_']
+
+    combos n =
+      if n <= 0
+        then [[]]
+        else [ c : rest | c <- restChars, rest <- combos (n - 1 :: Int) ]
+
+    names =
+      concatMap (\n -> [ c : rest | c <- firstChars, rest <- combos (n - 1) ]) [1 ..]
+  in
+  filter (\name -> Set.notMember (map Char.toLower name) cssReservedShortNames) names
+
+
+-- CSS keywords are matched case-insensitively, so a generated @keyframes
+-- name must never spell an animation keyword or the `animation` shorthand
+-- would misparse. Same set as the declaration check in Parse.Css.
+cssReservedShortNames :: Set.Set [Char]
+cssReservedShortNames =
+  Set.fromList
+    [ "initial", "inherit", "unset", "revert", "default"
+    , "none", "auto"
+    , "normal", "reverse", "alternate"
+    , "forwards", "backwards", "both"
+    , "running", "paused"
+    , "infinite"
+    , "linear", "ease"
+    ]
+
+
+
 -- RENDER
 
 
-render :: (ModuleName.Canonical, Css.Content) -> B.Builder
-render (home@(ModuleName.Canonical _ moduleName), Css.Content chunks _) =
-  "/* " <> Name.toBuilder moduleName <> " */"
-  <> foldMap (renderChunk home) chunks
+render :: Mode.Mode -> (ModuleName.Canonical, Css.Content) -> B.Builder
+render mode (home@(ModuleName.Canonical _ moduleName), Css.Content chunks _) =
+  let
+    comment =
+      case mode of
+        Mode.Dev _ -> "/* " <> Name.toBuilder moduleName <> " */"
+        Mode.Prod _ -> mempty
+  in
+  comment
+  <> foldMap (renderChunk mode home) chunks
   <> "\n"
 
 
-renderChunk :: ModuleName.Canonical -> Css.Chunk -> B.Builder
-renderChunk home chunk =
+renderChunk :: Mode.Mode -> ModuleName.Canonical -> Css.Chunk -> B.Builder
+renderChunk mode home chunk =
   case chunk of
     Css.Text text        -> B.byteString text
-    Css.ClassRef name    -> classNameBuilder home name
-    Css.KeyframesRef name -> classNameBuilder home name
-    Css.VarRef name      -> varNameBuilder home name
+    Css.ClassRef name    -> classNameBuilder mode home name
+    Css.KeyframesRef name -> classNameBuilder mode home name
+    Css.VarRef name      -> varNameBuilder mode home name
+
+
+mainBlocks :: Opt.Main -> [(ModuleName.Canonical, Css.Content)] -> [(ModuleName.Canonical, Css.Content)]
+mainBlocks main blocks =
+  case main of
+    Opt.Static -> blocks
+    Opt.Dynamic _ decoder -> addExpr decoder blocks
 
 
 
