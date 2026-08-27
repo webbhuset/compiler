@@ -37,7 +37,7 @@ buildReactorFrontEnd =
         runTaskUnsafe $
         do  details    <- Task.eio Exit.ReactorBadDetails $ Details.load writer Reporting.silent root stuff
             artifacts  <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths writer Reporting.silent root stuff details paths
-            javascript <- Task.mapError Exit.ReactorBadGenerate $ Generate.prod Generate.Iife stuff details artifacts
+            (javascript, _css) <- Task.mapError Exit.ReactorBadGenerate $ Generate.prod Generate.Iife stuff details artifacts
             return (LBS.toStrict (B.toLazyByteString javascript))
 
 

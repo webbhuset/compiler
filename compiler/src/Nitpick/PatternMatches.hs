@@ -232,6 +232,9 @@ checkExpr (A.At region expression) errors =
     Can.Triple a b c        -> checkExpr a $ checkExpr b $ checkExpr c errors
     Can.Shader _ _          -> errors
 
+    Can.Css _ _ ->
+      errors
+
 
 
 -- CHECK FIELD

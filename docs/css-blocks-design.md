@@ -1,6 +1,10 @@
 # CSS Blocks — Design Proposal
 
-**Status: proposal, not implemented.**
+**Status: compiler side implemented on the `css-blocks` branch (parse,
+typing, JS codegen, sidecar/inline CSS output). Not yet done: the `Css`
+companion package (kernel code for `classes`/`class`/`vars`), and CSS name
+shortening in `--optimize` (names are module-qualified in all modes for
+now).**
 
 Elm already embeds one foreign language with compiler support: GLSL. A
 `[glsl| ... |]` block is parsed at compile time, its `attribute` / `uniform` /

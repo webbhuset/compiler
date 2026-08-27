@@ -162,9 +162,9 @@ compile path =
           Task.run $
             do  details <- Task.eio Exit.ReactorBadDetails $ Details.load writer Reporting.silent root stuff
                 artifacts <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths writer Reporting.silent root stuff details (NE.List path [])
-                javascript <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife stuff details artifacts
+                (javascript, css) <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife stuff details artifacts
                 let (NE.List name _) = Build.getRootNames artifacts
-                return $ Html.sandwich name javascript
+                return $ Html.sandwich name css javascript
 
 
 

@@ -66,6 +66,7 @@ hasDebug expression =
     Opt.Pair   a b       -> hasDebug a || hasDebug b
     Opt.Triple a b c     -> hasDebug a || hasDebug b || hasDebug c
     Opt.Shader _ _ _     -> False
+    Opt.Css _ _          -> False
 
 
 defHasDebug :: Opt.Def -> Bool

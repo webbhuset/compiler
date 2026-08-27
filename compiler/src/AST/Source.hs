@@ -28,6 +28,7 @@ import qualified AST.Prim.Name as N
 import qualified AST.Prim.Operator as Op
 import qualified AST.Prim.TypeName as T
 import qualified AST.Prim.TypeVar as T
+import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Elm.Float as EF
 import qualified Elm.String as ES
@@ -65,6 +66,7 @@ data Expr_
   | Unit
   | Tuple Expr Expr [Expr]
   | Shader Shader.Source Shader.Types
+  | Css Css.Content
 
 
 data VarType = LowVar | CapVar

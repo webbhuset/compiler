@@ -34,6 +34,7 @@ import qualified Bytes.Encode as E
 import qualified AST.Canonical as Can
 import qualified AST.Prim.Module as Module
 import qualified AST.Prim.Name as N
+import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Data.Index as Index
 import qualified Elm.Float as EF
@@ -79,6 +80,7 @@ data Expr
   | Pair Expr Expr
   | Triple Expr Expr Expr
   | Shader Shader.Source (Set.Set N.Name) (Set.Set N.Name)
+  | Css ModuleName.Canonical Css.Content
 
 
 data Global = Global ModuleName.Canonical N.Name
@@ -293,6 +295,7 @@ eExpr expr =
     Pair   a b       -> E.u8# 25#Word8 <> eExpr a <> eExpr b
     Triple a b c     -> E.u8# 26#Word8 <> eExpr a <> eExpr b <> eExpr c
     Shader s a u     -> E.u8# 27#Word8 <> Shader.eSource s <> E.set32 N.encode a <> E.set32 N.encode u
+    Css h c          -> E.u8# 28#Word8 <> ModuleName.eCanonical h <> Css.eContent c
 
 
 dExpr :: D.Decoder Expr
@@ -327,6 +330,7 @@ dExpr =
         25 -> liftM2 Pair dExpr dExpr
         26 -> liftM3 Triple dExpr dExpr dExpr
         27 -> liftM3 Shader Shader.dSource (D.set32 N.decode) (D.set32 N.decode)
+        28 -> liftM2 Css ModuleName.dCanonical Css.dContent
         _  -> D.expecting "Expr"
 
 

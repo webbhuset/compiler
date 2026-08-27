@@ -30,7 +30,9 @@ import qualified AST.Canonical as Can
 import qualified AST.Optimized as Opt
 import qualified AST.Prim.Module as Module
 import qualified AST.Prim.Name as N
+import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
+import qualified Generate.Css as CssGen
 import qualified Data.Index as Index
 import qualified Elm.Compiler.Type as Type
 import qualified Elm.Compiler.Type.Extract as Extract
@@ -173,6 +175,27 @@ generate mode expression =
         [ ( JsName.fromLocal [N.ascii|src|], JS.String (Shader.toJsStringBuilder src) )
         , ( JsName.fromLocal [N.ascii|attributes|], toTranslationObject attributes )
         , ( JsName.fromLocal [N.ascii|uniforms|], toTranslationObject uniforms )
+        ]
+
+    Opt.Css home (Css.Content _ (Css.Types classes keyframes vars)) ->
+      let
+        toClassField field =
+          ( generateField mode field
+          , JS.String (CssGen.classNameBuilder home field)
+          )
+
+        toVarField field =
+          ( generateField mode field
+          , JS.String (CssGen.varNameBuilder home field)
+          )
+      in
+      JsExpr $ JS.Object $
+        [ ( JsName.fromLocal [N.ascii|classes|]
+          , JS.Object (map toClassField (Set.toList classes ++ Set.toList keyframes))
+          )
+        , ( JsName.fromLocal [N.ascii|vars|]
+          , JS.Object (map toVarField (Map.keys vars))
+          )
         ]
 
 

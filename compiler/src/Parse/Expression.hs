@@ -12,6 +12,7 @@ import qualified AST.Source as Src
 import qualified AST.Prim.Name as N
 import qualified AST.Prim.Operator as Op
 import qualified Parse.Keyword as Keyword
+import qualified Parse.Css as Css
 import qualified Parse.Number as Number
 import qualified Parse.Pattern as Pattern
 import qualified Parse.Shader as Shader
@@ -38,6 +39,7 @@ term =
         , string start
         , number start
         , Shader.shader start
+        , Css.css start
         , list start
         , record start >>= accessible start
         , tuple start >>= accessible start

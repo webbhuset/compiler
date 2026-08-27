@@ -93,11 +93,12 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                       return ()
 
                     [name] ->
-                      do  builder <- toBuilder Generate.Iife stuff details desiredMode artifacts
-                          generate writer style "index.html" (Html.sandwich name builder) (NE.List name [])
+                      do  (builder, css) <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                          generate writer style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
-                      do  builder <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                      do  (builder, css) <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                          writeCss writer "elm.js" css
                           generate writer style "elm.js" builder (NE.List name names)
 
                 Just DevNull ->
@@ -106,7 +107,8 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (JS target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  builder <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                      do  (builder, css) <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                          writeCss writer target css
                           generate writer style target builder (Build.getRootNames artifacts)
 
                     name:names ->
@@ -115,7 +117,8 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (Esm target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  builder <- toBuilder Generate.Esm stuff details desiredMode artifacts
+                      do  (builder, css) <- toBuilder Generate.Esm stuff details desiredMode artifacts
+                          writeCss writer target css
                           generate writer style target builder (Build.getRootNames artifacts)
 
                     name:names ->
@@ -123,8 +126,8 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
 
                 Just (Html target) ->
                   do  name <- hasOneMain artifacts
-                      builder <- toBuilder Generate.Iife stuff details desiredMode artifacts
-                      generate writer style target (Html.sandwich name builder) (NE.List name [])
+                      (builder, css) <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                      generate writer style target (Html.sandwich name css builder) (NE.List name [])
 
 
 
@@ -257,6 +260,20 @@ generate writer style target builder names =
         Reporting.reportGenerate style names target
 
 
+-- Write the sidecar stylesheet next to the JS output, e.g. `elm.mjs.css`
+-- for `--output=elm.mjs`. Only written when the program has CSS blocks.
+writeCss :: File.Writer R.PROJECT -> FilePath -> Maybe B.Builder -> Task ()
+writeCss writer target maybeCss =
+  case maybeCss of
+    Nothing ->
+      return ()
+
+    Just css ->
+      Task.io $
+        do  Dir.createDirectoryIfMissing True (FP.takeDirectory target)
+            File.writeBuilder writer (target ++ ".css") css
+
+
 
 -- TO BUILDER
 
@@ -264,7 +281,7 @@ generate writer style target builder names =
 data DesiredMode = Debug | Dev | Prod
 
 
-toBuilder :: Generate.Format -> R.Stuff -> Details.Details -> DesiredMode -> Build.Artifacts -> Task B.Builder
+toBuilder :: Generate.Format -> R.Stuff -> Details.Details -> DesiredMode -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
 toBuilder format stuff details desiredMode artifacts =
   Task.mapError Exit.MakeBadGenerate $
     case desiredMode of

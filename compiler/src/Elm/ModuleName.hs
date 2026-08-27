@@ -10,6 +10,7 @@ module Elm.ModuleName
   , webgl, texture, vector2, vector3, vector4, matrix4
   --
   , eCanonical, dCanonical
+  , cssStyles
   )
   where
 
@@ -110,6 +111,7 @@ dCanonical =
 -- WEBGL
 
 
+{-# NOINLINE cssStyles #-}; cssStyles :: Canonical; cssStyles = Canonical Pkg.css Module.css
 {-# NOINLINE webgl   #-}; webgl   :: Canonical; webgl   = Canonical Pkg.webgl         Module.webgl
 {-# NOINLINE texture #-}; texture :: Canonical; texture = Canonical Pkg.webgl         Module.webgl_texture
 {-# NOINLINE vector2 #-}; vector2 :: Canonical; vector2 = Canonical Pkg.linearAlgebra Module.math_vector2
