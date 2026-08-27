@@ -16,15 +16,24 @@ import Literals (b)
 -- SANDWICH
 
 
-sandwich :: Name.Name -> B.Builder -> B.Builder
-sandwich moduleName javascript =
-  let name = Name.toBuilder moduleName in
+sandwich :: Name.Name -> Maybe B.Builder -> B.Builder -> B.Builder
+sandwich moduleName maybeCss javascript =
+  let
+    name = Name.toBuilder moduleName
+
+    css =
+      case maybeCss of
+        Nothing -> mempty
+        Just stylesheet -> [b|
+  <style>
+|] <> stylesheet <> [b|</style>|]
+  in
   [b|<!DOCTYPE HTML>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>|] <> name <> [b|</title>
-  <style>body { padding: 0; margin: 0; }</style>
+  <style>body { padding: 0; margin: 0; }</style>|] <> css <> [b|
 </head>
 
 <body>

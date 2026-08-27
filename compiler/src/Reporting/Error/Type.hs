@@ -99,6 +99,7 @@ data Category
   | Tuple
   | Unit
   | Shader
+  | CssBlock
   | Effects
   | Local Name.Name
   | Foreign Name.Name
@@ -357,6 +358,7 @@ addCategory thisIs category =
     Tuple -> thisIs <> " a tuple of type:"
     Unit -> thisIs <> " a unit value:"
     Shader -> thisIs <> " a GLSL shader of type:"
+    CssBlock -> thisIs <> " a CSS block of type:"
     Effects -> thisIs <> " a thing for CORE LIBRARIES ONLY."
     CallResult maybeName ->
       case maybeName of

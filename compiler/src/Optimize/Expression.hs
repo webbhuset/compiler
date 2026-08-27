@@ -15,6 +15,7 @@ import qualified Data.Set as Set
 
 import qualified AST.Canonical as Can
 import qualified AST.Optimized as Opt
+import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Data.Index as Index
 import qualified Elm.ModuleName as ModuleName
@@ -171,6 +172,11 @@ optimize cycle (A.At region expression) =
 
     Can.Shader src (Shader.Types attributes uniforms _varyings) ->
       pure (Opt.Shader src (Map.keysSet attributes) (Map.keysSet uniforms))
+
+    Can.Css home content@(Css.Content _ (Css.Types classes keyframes vars)) ->
+      Names.registerFieldList
+        (Set.toList classes ++ Set.toList keyframes ++ Map.keys vars)
+        (Opt.Css home content)
 
 
 

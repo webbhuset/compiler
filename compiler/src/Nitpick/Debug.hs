@@ -65,6 +65,7 @@ hasDebug expression =
     Opt.Unit             -> False
     Opt.Tuple a b c      -> hasDebug a || hasDebug b || maybe False hasDebug c
     Opt.Shader _ _ _     -> False
+    Opt.Css _ _          -> False
 
 
 defHasDebug :: Opt.Def -> Bool

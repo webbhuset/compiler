@@ -25,6 +25,7 @@ import qualified Elm.ModuleName as ModuleName
 import qualified Generate.JavaScript.Builder as JS
 import qualified Generate.JavaScript.Expression as Expr
 import qualified Generate.JavaScript.Functions as Functions
+import qualified Generate.Css as GenCss
 import qualified Generate.JavaScript.Name as JsName
 import qualified Generate.Mode as Mode
 import qualified Reporting.Doc as D
@@ -40,31 +41,37 @@ type Graph = Map.Map Opt.Global Opt.Node
 type Mains = Map.Map ModuleName.Canonical Opt.Main
 
 
-generate :: Mode.Mode -> Opt.GlobalGraph -> Mains -> B.Builder
-generate mode (Opt.GlobalGraph graph _) mains =
+generate :: Mode.Mode -> Opt.GlobalGraph -> Mains -> (B.Builder, Maybe B.Builder)
+generate mode globalGraph@(Opt.GlobalGraph graph _) mains =
   let
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
+
+    javascript =
+      "(function(scope){\n'use strict';"
+      <> Functions.functions
+      <> perfNote mode
+      <> stateToBuilder state
+      <> toMainExports mode mains
+      <> "}(this));"
   in
-  "(function(scope){\n'use strict';"
-  <> Functions.functions
-  <> perfNote mode
-  <> stateToBuilder state
-  <> toMainExports mode mains
-  <> "}(this));"
+  ( javascript, GenCss.generate globalGraph mains )
 
 
 -- Everything lives in module scope, which is already strict and does not
 -- leak, so no IIFE is needed. The `scope` parameter is only ever used by
 -- _Platform_export, which is never called in this mode.
-generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> B.Builder
-generateEsm mode (Opt.GlobalGraph graph _) mains =
+generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> (B.Builder, Maybe B.Builder)
+generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains =
   let
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
+
+    javascript =
+      Functions.functions
+      <> perfNote mode
+      <> stateToBuilder state
+      <> toMainExportsEsm mode mains
   in
-  Functions.functions
-  <> perfNote mode
-  <> stateToBuilder state
-  <> toMainExportsEsm mode mains
+  ( javascript, GenCss.generate globalGraph mains )
 
 
 addMain :: Mode.Mode -> Graph -> ModuleName.Canonical -> Opt.Main -> State -> State

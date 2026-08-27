@@ -53,14 +53,14 @@ data Format
   | Esm
 
 
-generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> B.Builder
+generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> (B.Builder, Maybe B.Builder)
 generateWith format =
   case format of
     Iife -> JS.generate
     Esm  -> JS.generateEsm
 
 
-debug :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task B.Builder
+debug :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
 debug format root details (Build.Artifacts pkg ifaces roots modules) =
   do  loading <- loadObjects root details modules
       types   <- loadTypes root ifaces modules
@@ -71,7 +71,7 @@ debug format root details (Build.Artifacts pkg ifaces roots modules) =
       return $ generateWith format mode graph mains
 
 
-dev :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task B.Builder
+dev :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
 dev format root details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects root details modules
       let mode = Mode.Dev Nothing
@@ -80,7 +80,7 @@ dev format root details (Build.Artifacts pkg _ roots modules) =
       return $ generateWith format mode graph mains
 
 
-prod :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task B.Builder
+prod :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
 prod format root details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects root details modules
       checkForDebugUses objects

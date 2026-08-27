@@ -228,6 +228,9 @@ data Expr
   | ShaderEndless Cursor
   | ShaderNotUtf8 Cursor
   | ShaderProblem [Char.Char] Cursor
+  | CssEndless Cursor
+  | CssNotUtf8 Cursor
+  | CssProblem [Char.Char] Cursor
   | IndentOperatorRight Name.Name Cursor
 
 
@@ -2664,6 +2667,45 @@ toExprReport source context expr startCur =
               , D.indent 4 $ D.vcat $
                   map D.fromChars (filter (/="") (lines problem))
               ]
+          )
+
+    CssEndless cur ->
+      let
+        region = toRegion cur
+      in
+      Report.Report "ENDLESS CSS" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow "I cannot find the end of this CSS block:"
+          ,
+            D.reflow "Add a |] somewhere after this to end the CSS."
+          )
+
+    CssNotUtf8 cur ->
+      let
+        region = toRegion cur
+      in
+      Report.Report "UNEXPECTED ENCODING" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "Elm files use UTF-8 character encoding, but I ran into something outside of that format:"
+          ,
+            D.reflow $
+              "Is there a way to convert this to a valid UTF-8 character?"
+          )
+
+    CssProblem problem cur ->
+      let
+        region = toRegion cur
+      in
+      Report.Report "CSS PROBLEM" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "I ran into a problem in this CSS block:"
+          ,
+            D.reflow problem
           )
 
     IndentOperatorRight op cur ->

@@ -17,6 +17,7 @@ module Elm.ModuleName
   , virtualDom
   , jsonDecode, jsonEncode
   , webgl, texture, vector2, vector3, vector4, matrix4
+  , cssStyles
   )
   where
 
@@ -255,6 +256,11 @@ jsonEncode = Canonical Pkg.json "Json.Encode"
 
 
 -- WEBGL
+
+
+{-# NOINLINE cssStyles #-}
+cssStyles :: Canonical
+cssStyles = Canonical Pkg.css "Css"
 
 
 {-# NOINLINE webgl #-}

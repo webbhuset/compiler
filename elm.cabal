@@ -140,6 +140,7 @@ executable elm
         AST.Source
         AST.Prim.Variable
         AST.Utils.Binop
+        AST.Utils.Css
         AST.Utils.Shader
         AST.Utils.Type
         Canonicalize.Effects
@@ -152,6 +153,7 @@ executable elm
         Canonicalize.Pattern
         Canonicalize.Type
         Compile
+        Generate.Css
         Generate.Html
         Generate.JavaScript
         Generate.JavaScript.Builder
@@ -174,6 +176,7 @@ executable elm
         Parse.Module
         Parse.Number
         Parse.Pattern
+        Parse.Css
         Parse.Shader
         Parse.Space
         Parse.String
