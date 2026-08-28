@@ -572,7 +572,7 @@ problemToHint problem =
       [ D.toSimpleHint $
           "Both rows have a tag spelled `" ++ Name.toChars name ++ "`, but they\
           \ are DIFFERENT tags: a tag is identified by the module that declares\
-          \ it plus its name. There are probably two `variant " ++ Name.toChars name
+          \ it plus its name. There are probably two `type tag " ++ Name.toChars name
           ++ "` declarations in different modules — double check the imports on\
           \ both sides so they refer to the same one."
       ]

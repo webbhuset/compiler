@@ -261,7 +261,7 @@ toReport source err =
 
     DuplicateTagArg tagName name r1 r2 ->
       nameClash source r1 r2 $
-        "The `" <> Name.toChars tagName <> "` variant declaration has multiple `" <> Name.toChars name <> "` type variables."
+        "The `" <> Name.toChars tagName <> "` tag declaration has multiple `" <> Name.toChars name <> "` type variables."
 
     TagRowNotATag region name ->
       Report.Report "NOT A VARIANT TAG" region [] $
@@ -272,7 +272,7 @@ toReport source err =
               \ but it is used in a structural variant type here:"
           ,
             D.reflow $
-              "Only tags declared with the `variant` keyword can appear in [ ... ] types.\
+              "Only tags declared with `type tag` can appear in [ ... ] types.\
               \ Maybe you want to declare `variant " ++ Name.toChars name ++ "` in some module?"
           )
 
