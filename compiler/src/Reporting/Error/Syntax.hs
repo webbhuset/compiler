@@ -11,6 +11,7 @@ module Reporting.Error.Syntax
   , TypeAlias(..)
   , CustomType(..)
   , DeclDef(..)
+  , DeclTag(..)
   , Port(..)
   --
   , Expr(..)
@@ -32,6 +33,7 @@ module Reporting.Error.Syntax
   , Type(..)
   , TRecord(..)
   , TTuple(..)
+  , TTagRow(..)
   --
   , Char(..)
   , String(..)
@@ -137,8 +139,18 @@ data Decl
   | Port Port Cursor
   | DeclType DeclType Cursor
   | DeclDef Name.Name DeclDef Cursor
+  | DeclTag DeclTag Cursor
   --
   | DeclFreshLineAfterDocComment Cursor
+
+
+data DeclTag
+  = DT_TagSpace Space Cursor
+  | DT_TagName Cursor
+  | DT_TagArg Cursor
+  --
+  | DT_TagIndentName Cursor
+  | DT_TagIndentArg Cursor
 
 
 data DeclDef
@@ -414,11 +426,28 @@ data PList
 data Type
   = TRecord TRecord Cursor
   | TTuple TTuple Cursor
+  | TTagRow TTagRow Cursor
   --
   | TStart Cursor
   | TSpace Space Cursor
   --
   | TIndentStart Cursor
+
+
+data TTagRow
+  = TTagRowOpen Cursor
+  | TTagRowEnd Cursor
+  | TTagRowBar Cursor
+  --
+  | TTagRowTag Cursor
+  | TTagRowType Type Cursor
+  --
+  | TTagRowSpace Space Cursor
+  --
+  | TTagRowIndentOpen Cursor
+  | TTagRowIndentBar Cursor
+  | TTagRowIndentTag Cursor
+  | TTagRowIndentEnd Cursor
 
 
 data TRecord
@@ -1473,6 +1502,9 @@ toDeclarationsReport source decl =
     DeclDef name declDef cur ->
       toDeclDefReport source name declDef cur
 
+    DeclTag tag cur ->
+      toDeclTagReport source tag cur
+
     DeclFreshLineAfterDocComment cur ->
       let
         region = toRegion cur
@@ -1808,6 +1840,77 @@ portNote =
 
 
 -- DECL TYPE
+
+
+toDeclTagReport :: Code.Source -> DeclTag -> Cursor -> Report.Report
+toDeclTagReport source tag startCur =
+  case tag of
+    DT_TagSpace space cur ->
+      toSpaceReport source space cur
+
+    DT_TagName cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "EXPECTING VARIANT NAME" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I just saw the `variant` keyword, so I was expecting a name next, but I got stuck here:"
+          ,
+            D.fillSep
+              ["Variant","declarations","look","like",D.dullyellow "variant Loading","or"
+              ,D.dullyellow "variant Success a" <> ","
+              ,"so","I","was","expecting","a","capitalized","name","next."
+              ]
+          )
+
+    DT_TagArg cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "PROBLEM IN VARIANT DECLARATION" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant declaration, but I got stuck here:"
+          ,
+            D.reflow $
+              "I was expecting a lowercase type variable, like the `a` in `variant Success a`."
+          )
+
+    DT_TagIndentName cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "UNFINISHED VARIANT DECLARATION" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I just saw the `variant` keyword, so I was expecting a name next:"
+          ,
+            D.reflow $
+              "It seems the declaration ends here. Variant declarations look like\
+              \ `variant Loading` or `variant Success a`."
+          )
+
+    DT_TagIndentArg cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "UNFINISHED VARIANT DECLARATION" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant declaration, but I got stuck here:"
+          ,
+            D.reflow $
+              "I was expecting a lowercase type variable or the end of the declaration."
+          )
 
 
 toDeclTypeReport :: Code.Source -> DeclType -> Cursor -> Report.Report
@@ -5412,6 +5515,9 @@ toTypeReport source context tipe startCur =
     TTuple tuple cur ->
       toTTupleReport source context tuple cur
 
+    TTagRow tagRow cur ->
+      toTTagRowReport source context tagRow cur
+
     TStart cur ->
       case Code.whatIsNext source cur of
         Code.Keyword keyword ->
@@ -5492,6 +5598,122 @@ toTypeReport source context tipe startCur =
                   \ next, maybe it is not indented enough?"
               ]
           )
+
+
+toTTagRowReport :: Code.Source -> TContext -> TTagRow -> Cursor -> Report.Report
+toTTagRowReport source context tagRow startCur =
+  case tagRow of
+    TTagRowSpace space cur ->
+      toSpaceReport source space cur
+
+    TTagRowType tipe cur ->
+      toTypeReport source context tipe cur
+
+    TTagRowOpen cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "UNFINISHED VARIANT TYPE" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I just started parsing a variant type, but I got stuck here:"
+          ,
+            D.fillSep
+              ["Variant","types","look","like",D.dullyellow "[ Loading, Success Int ]" <> ","
+              ,"so","I","was","expecting","a","tag","name","next."
+              ]
+          )
+
+    TTagRowEnd cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "UNFINISHED VARIANT TYPE" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant type, but I got stuck here:"
+          ,
+            D.stack
+              [ D.fillSep
+                  ["I","was","expecting","a","closing","square","bracket","before","this,"
+                  ,"so","try","adding","a",D.dullyellow "]","and","see","if","that","helps?"
+                  ]
+              , D.toSimpleNote $
+                  "Tags are separated by commas in variant types, like [ Loading, Success Int ]."
+              ]
+          )
+
+    TTagRowBar cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "UNFINISHED VARIANT TYPE" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant type, but I got stuck here:"
+          ,
+            D.fillSep
+              ["I","just","saw","a","type","variable,","so","I","was","expecting"
+              ,"a",D.dullyellow "|","next,","like","in",D.dullyellow "[ r | Loading ]" <> "."
+              ]
+          )
+
+    TTagRowTag cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "PROBLEM IN VARIANT TYPE" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant type, but I got stuck here:"
+          ,
+            D.fillSep
+              ["I","was","expecting","a","capitalized","tag","name,","like"
+              ,D.dullyellow "Loading","or",D.dullyellow "Success Int" <> "."
+              ]
+          )
+
+    TTagRowIndentOpen cur ->
+      toUnfinishedTagRowReport source startCur cur
+
+    TTagRowIndentBar cur ->
+      toUnfinishedTagRowReport source startCur cur
+
+    TTagRowIndentTag cur ->
+      toUnfinishedTagRowReport source startCur cur
+
+    TTagRowIndentEnd cur ->
+      toUnfinishedTagRowReport source startCur cur
+
+
+toUnfinishedTagRowReport :: Code.Source -> Cursor -> Cursor -> Report.Report
+toUnfinishedTagRowReport source startCur cur =
+  let
+    surroundings = A.Region startCur cur
+    region = toRegion cur
+  in
+  Report.Report "UNFINISHED VARIANT TYPE" region [] $
+    Code.toSnippet source surroundings (Just region)
+      (
+        D.reflow $
+          "I am partway through parsing a variant type, but I got stuck here:"
+      ,
+        D.stack
+          [ D.reflow $
+              "I was expecting to see the rest of the variant type next."
+          , D.toSimpleNote $
+              "I can get confused by indentation. If you think the type continues here,\
+              \ maybe it is not indented enough?"
+          ]
+      )
 
 
 toTRecordReport :: Code.Source -> TContext -> TRecord -> Cursor -> Report.Report

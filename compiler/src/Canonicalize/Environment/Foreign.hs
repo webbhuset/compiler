@@ -99,7 +99,7 @@ isNormal (Src.Import (A.At _ name) maybeAlias _) =
 addImport :: Map.Map ModuleName.Raw I.Interface -> State -> Src.Import -> Result i w State
 addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybeAlias exposing) =
   let
-    (I.Interface pkg defs unions aliases binops _) = ifaces ! name
+    (I.Interface pkg defs unions aliases tags binops _) = ifaces ! name
     !prefix = maybe name id maybeAlias
     !home = ModuleName.Canonical pkg name
 
@@ -110,7 +110,8 @@ addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybe
 
     !vars = Map.map (Env.Specific home) defs
     !types = Map.map (Env.Specific home . fst) rawTypeInfo
-    !ctors = Map.foldr (addExposed . snd) Map.empty rawTypeInfo
+    !tagCtors = Map.map (tagToCtor home) tags
+    !ctors = addExposed (Map.foldr (addExposed . snd) Map.empty rawTypeInfo) tagCtors
 
     !qvs2 = addQualified prefix vars qvs
     !qts2 = addQualified prefix types qts
@@ -128,9 +129,14 @@ addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybe
 
     Src.Explicit exposedList ->
       foldM
-        (addExposedValue home vars rawTypeInfo binops)
+        (addExposedValue home vars rawTypeInfo tagCtors binops)
         (State vs ts cs bs qvs2 qts2 qcs2)
         exposedList
+
+
+tagToCtor :: ModuleName.Canonical -> Can.TagDecl -> Env.Info Env.Ctor
+tagToCtor home (Can.TagDecl params) =
+  Env.Specific home (Env.TagCtor home params)
 
 
 addExposed :: Env.Exposed a -> Env.Exposed a -> Env.Exposed a
@@ -211,11 +217,12 @@ addExposedValue
   :: ModuleName.Canonical
   -> Env.Exposed Can.Annotation
   -> Map.Map Name.Name (Env.Type, Env.Exposed Env.Ctor)
+  -> Env.Exposed Env.Ctor
   -> Map.Map Name.Name I.Binop
   -> State
   -> Src.Exposed
   -> Result i w State
-addExposedValue home vars types binops (State vs ts cs bs qvs qts qcs) exposed =
+addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs) exposed =
   case exposed of
     Src.Lower (A.At region name) ->
       case Map.lookup name vars of
@@ -245,12 +252,17 @@ addExposedValue home vars types binops (State vs ts cs bs qvs qts qcs) exposed =
                   Result.ok (State vs ts2 cs2 bs qvs qts qcs)
 
             Nothing ->
-              case checkForCtorMistake name types of
-                tipe:_ ->
-                  Result.throw $ Error.ImportCtorByName region name tipe
+              case Map.lookup name tagCtors of
+                Just info ->
+                  Result.ok (State vs ts (Map.insertWith Env.mergeInfo name info cs) bs qvs qts qcs)
 
-                [] ->
-                  Result.throw $ Error.ImportExposingNotFound region home name (Map.keys types)
+                Nothing ->
+                  case checkForCtorMistake name types of
+                    tipe:_ ->
+                      Result.throw $ Error.ImportCtorByName region name tipe
+
+                    [] ->
+                      Result.throw $ Error.ImportExposingNotFound region home name (Map.keys types ++ Map.keys tagCtors)
 
         Src.Public dotDotRegion ->
           case Map.lookup name types of
@@ -267,7 +279,10 @@ addExposedValue home vars types binops (State vs ts cs bs qvs qts qcs) exposed =
                   Result.throw (Error.ImportOpenAlias dotDotRegion name)
 
             Nothing ->
-              Result.throw (Error.ImportExposingNotFound region home name (Map.keys types))
+              if Map.member name tagCtors then
+                Result.throw (Error.ImportOpenTag dotDotRegion name)
+              else
+                Result.throw (Error.ImportExposingNotFound region home name (Map.keys types))
 
     Src.Operator region op ->
       case Map.lookup op binops of
@@ -297,6 +312,9 @@ checkForCtorMistake givenName types =
             tipeName : matches
 
           Env.Specific _ (Env.RecordCtor _ _ _) ->
+            matches
+
+          Env.Specific _ (Env.TagCtor _ _) ->
             matches
 
           Env.Ambiguous _ _ ->

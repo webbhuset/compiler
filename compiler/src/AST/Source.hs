@@ -9,6 +9,8 @@ module AST.Source
   , Import(..)
   , Value(..)
   , Union(..)
+  , TagDecl(..)
+  , TagEntry(..)
   , Alias(..)
   , Infix(..)
   , Port(..)
@@ -119,6 +121,11 @@ data Type_
   | TRecord [(A.Located Name, Type)] (Maybe (A.Located Name))
   | TUnit
   | TTuple Type Type [Type]
+  | TTagRow [TagEntry] (Maybe (A.Located Name))
+
+
+data TagEntry =
+  TagEntry A.Region (Maybe Name) Name [Type]
 
 
 
@@ -134,13 +141,14 @@ data Module =
     , _values  :: [A.Located Value]
     , _unions  :: [A.Located Union]
     , _aliases :: [A.Located Alias]
+    , _tagDecls :: [A.Located TagDecl]
     , _binops  :: [A.Located Infix]
     , _effects :: Effects
     }
 
 
 getName :: Module -> Name
-getName (Module maybeName _ _ _ _ _ _ _ _) =
+getName (Module maybeName _ _ _ _ _ _ _ _ _) =
   case maybeName of
     Just (A.At _ name) ->
       name
@@ -164,6 +172,7 @@ data Import =
 
 data Value = Value (A.Located Name) [Pattern] Expr (Maybe Type)
 data Union = Union (A.Located Name) [A.Located Name] [(A.Located Name, [Type])]
+data TagDecl = TagDecl (A.Located Name) [A.Located Name]
 data Alias = Alias (A.Located Name) [A.Located Name] Type
 data Infix = Infix Name Binop.Associativity Binop.Precedence Name
 data Port = Port (A.Located Name) Type

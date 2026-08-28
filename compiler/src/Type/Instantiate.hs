@@ -79,6 +79,17 @@ fromSrcType freeVars sourceType =
             Just ext ->
               return (freeVars ! ext)
 
+    Can.TTagRow tags maybeExt ->
+      TagRowN
+        <$> traverse (traverse (fromSrcType freeVars)) tags
+        <*>
+          case maybeExt of
+            Nothing ->
+              return EmptyTagRowN
+
+            Just ext ->
+              return (freeVars ! ext)
+
 
 fromSrcFieldType :: Map.Map Name.Name Type -> Can.FieldType -> IO Type
 fromSrcFieldType freeVars (Can.FieldType _ tipe) =

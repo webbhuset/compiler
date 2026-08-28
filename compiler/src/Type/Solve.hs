@@ -397,6 +397,17 @@ adjustRankContent youngMark visitMark groupRank content =
                     Just c ->
                       max (max ma mb) <$> go c
 
+          EmptyTagRow1 ->
+              -- THEORY: an empty tag row never needs to get generalized
+              return outermostRank
+
+          TagRow1 tags extension ->
+              do  extRank <- go extension
+                  foldM
+                    (\rank args -> foldM (\r arg -> max r <$> go arg) rank args)
+                    extRank
+                    tags
+
       Alias _ _ args _ ->
           -- THEORY: anything in the realVar would be outermostRank
           foldM (\rank (_, argVar) -> max rank <$> go argVar) outermostRank args
@@ -465,6 +476,14 @@ typeToVar rank pools aliasDict tipe =
     EmptyRecordN ->
       register rank pools emptyRecord1
 
+    TagRowN tags ext ->
+      do  tagVars <- traverse (traverse go) tags
+          extVar <- go ext
+          register rank pools (Structure (TagRow1 tagVars extVar))
+
+    EmptyTagRowN ->
+      register rank pools emptyTagRow1
+
     UnitN ->
       register rank pools unit1
 
@@ -486,6 +505,12 @@ register rank pools content =
 emptyRecord1 :: Content
 emptyRecord1 =
   Structure EmptyRecord1
+
+
+{-# NOINLINE emptyTagRow1 #-}
+emptyTagRow1 :: Content
+emptyTagRow1 =
+  Structure EmptyTagRow1
 
 
 {-# NOINLINE unit1 #-}
@@ -539,6 +564,14 @@ srcTypeToVar rank pools flexVars srcType =
               Nothing -> register rank pools emptyRecord1
               Just ext -> return (flexVars ! ext)
           register rank pools (Structure (Record1 fieldVars extVar))
+
+    Can.TTagRow tags maybeExt ->
+      do  tagVars <- traverse (traverse go) tags
+          extVar <-
+            case maybeExt of
+              Nothing -> register rank pools emptyTagRow1
+              Just ext -> return (flexVars ! ext)
+          register rank pools (Structure (TagRow1 tagVars extVar))
 
     Can.TUnit ->
       register rank pools unit1
@@ -692,6 +725,13 @@ restoreContent content =
                 Nothing -> return ()
                 Just c  -> restore c
 
+        EmptyTagRow1 ->
+          return ()
+
+        TagRow1 tags ext ->
+          do  mapM_ (mapM_ restore) tags
+              restore ext
+
     Alias _ _ args var ->
       do  mapM_ (traverse restore) args
           restore var
@@ -724,3 +764,9 @@ traverseFlatType f flatType =
 
     Tuple1 a b cs ->
         liftM3 Tuple1 (f a) (f b) (traverse f cs)
+
+    EmptyTagRow1 ->
+        pure EmptyTagRow1
+
+    TagRow1 tags ext ->
+        liftM2 TagRow1 (traverse (traverse f) tags) (f ext)

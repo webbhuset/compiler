@@ -73,6 +73,7 @@ data DecisionTree
 
 data Test
   = IsCtor ModuleName.Canonical Name.Name Index.ZeroBased Int Can.CtorOpts
+  | IsTag ModuleName.Canonical Name.Name
   | IsCons
   | IsNil
   | IsTuple
@@ -150,6 +151,13 @@ isComplete tests =
 
     IsTuple ->
       True
+
+    IsTag _ _ ->
+      -- The type checker closes variant rows to exactly the matched tags,
+      -- so a tag column with no wildcard ends up with no fallback branches.
+      -- That case becomes `Decision path edges Nothing` where the last edge
+      -- is treated as the default. So tags never claim completeness here.
+      False
 
     IsChr _ ->
       False
@@ -232,6 +240,9 @@ flatten pathPattern@(path, A.At region pattern) otherPathPatterns =
       pathPattern : otherPathPatterns
 
     Can.PBool _ _ ->
+      pathPattern : otherPathPatterns
+
+    Can.PTag _ _ _ _ ->
       pathPattern : otherPathPatterns
 
 
@@ -318,6 +329,9 @@ testAtPath selectedPath (Branch _ pathPatterns) =
         Can.PCtor home _ (Can.Union _ _ numAlts opts) name index _ ->
             Just (IsCtor home name index numAlts opts)
 
+        Can.PTag home name _ _ ->
+            Just (IsTag home name)
+
         Can.PList ps ->
             Just (case ps of { [] -> IsNil ; _ -> IsCons })
 
@@ -381,6 +395,15 @@ toRelevantBranch test path branch@(Branch goal pathPatterns) =
 
                       args ->
                         start ++ subPositions path args ++ end
+
+                _ ->
+                  Nothing
+
+          Can.PTag home name _ args ->
+              case test of
+                IsTag testHome testName | name == testName && home == testHome ->
+                  Just $ Branch goal $
+                    start ++ subPositions path args ++ end
 
                 _ ->
                   Nothing
@@ -508,6 +531,7 @@ needsTests (A.At _ pattern) =
     Can.PAnything         -> False
     Can.PRecord _         -> False
     Can.PCtor _ _ _ _ _ _ -> True
+    Can.PTag _ _ _ _      -> True
     Can.PList _           -> True
     Can.PCons _ _         -> True
     Can.PUnit             -> True
@@ -606,6 +630,7 @@ instance Binary Test where
       IsStr a          -> putWord8 5 >> put a
       IsInt a          -> putWord8 6 >> put a
       IsBool a         -> putWord8 7 >> put a
+      IsTag a b        -> putWord8 8 >> put a >> put b
 
   get =
     do  word <- getWord8
@@ -618,6 +643,7 @@ instance Binary Test where
           5 -> liftM  IsStr get
           6 -> liftM  IsInt get
           7 -> liftM  IsBool get
+          8 -> liftM2 IsTag get get
           _ -> fail "problem getting DecisionTree.Test binary"
 
 

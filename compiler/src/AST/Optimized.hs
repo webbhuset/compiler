@@ -154,6 +154,7 @@ data Node
   = Define Expr (Set.Set Global)
   | DefineTailFunc [Name] Expr (Set.Set Global)
   | Ctor Index.ZeroBased Int
+  | Tag Int
   | Enum Index.ZeroBased
   | Box
   | Link Global
@@ -425,6 +426,7 @@ instance Binary Node where
       PortIncoming a b     -> putWord8  9 >> put a >> put b
       PortOutgoing a b     -> putWord8 10 >> put a >> put b
       PortTask a b c       -> putWord8 11 >> put a >> put b >> put c
+      Tag a                -> putWord8 12 >> put a
 
   get =
     do  word <- getWord8
@@ -441,6 +443,7 @@ instance Binary Node where
           9  -> liftM2 PortIncoming get get
           10 -> liftM2 PortOutgoing get get
           11 -> liftM3 PortTask get get get
+          12 -> liftM  Tag get
           _  -> fail "problem getting Opt.Node binary"
 
 

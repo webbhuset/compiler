@@ -39,6 +39,9 @@ toEncoder tipe =
     Can.TUnit ->
       Opt.Function [Name.dollar] <$> encode "null"
 
+    Can.TTagRow _ _ ->
+      error "toEncoder: structural variants are not allowed through ports"
+
     Can.TTuple a b c ->
       encodeTuple a b c
 
@@ -166,6 +169,9 @@ toDecoder tipe =
 
     Can.TUnit ->
       decodeTuple0
+
+    Can.TTagRow _ _ ->
+      error "toDecoder: structural variants are not allowed through ports"
 
     Can.TTuple a b c ->
       decodeTuple a b c

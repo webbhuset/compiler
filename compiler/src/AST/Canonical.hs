@@ -22,6 +22,8 @@ module AST.Canonical
   , Binop(..)
   , Union(..)
   , Ctor(..)
+  , TagDecl(..)
+  , TagKey
   , Exports(..)
   , Export(..)
   , Effects(..)
@@ -82,6 +84,7 @@ data Expr_
   | VarKernel Name Name
   | VarForeign ModuleName.Canonical Name Annotation
   | VarCtor CtorOpts ModuleName.Canonical Name Index.ZeroBased Annotation
+  | VarTag ModuleName.Canonical Name [Name] -- CACHE type params for inference
   | VarDebug ModuleName.Canonical Name Annotation
   | VarOperator Name ModuleName.Canonical Name Annotation -- CACHE real name for optimization
   | Chr Char
@@ -168,6 +171,12 @@ data Pattern_
       -- CACHE _p_index to replace _p_name in PROD code gen
       -- CACHE _p_opts to allocate less in PROD code gen
       -- CACHE _p_alts and _p_numAlts for exhaustiveness checker
+  | PTag
+      { _pt_home :: ModuleName.Canonical
+      , _pt_name :: Name
+      , _pt_params :: [Name] -- CACHE type params for inference
+      , _pt_args :: [Pattern]
+      }
 
 
 data PatternCtorArg =
@@ -197,7 +206,13 @@ data Type
   | TUnit
   | TTuple Type Type (Maybe Type)
   | TAlias ModuleName.Canonical Name [(Name, Type)] AliasType
+  | TTagRow (Map.Map TagKey [Type]) (Maybe Name)
   deriving (Eq)
+
+
+-- The canonical identity of a structural variant tag: its
+-- declaring module plus its name.
+type TagKey = (ModuleName.Canonical, Name)
 
 
 data AliasType
@@ -238,9 +253,17 @@ data Module =
     , _decls   :: Decls
     , _unions  :: Map.Map Name Union
     , _aliases :: Map.Map Name Alias
+    , _tags    :: Map.Map Name TagDecl
     , _binops  :: Map.Map Name Binop
     , _effects :: Effects
     }
+
+
+-- A structural variant tag declaration: `variant Success a` becomes
+-- `TagDecl ["a"]`. The params double as the argument types, so the
+-- arity is the length of the list.
+newtype TagDecl = TagDecl [Name]
+  deriving (Eq)
 
 
 data Alias = Alias [Name] Type
@@ -288,6 +311,7 @@ data Export
   | ExportUnionOpen
   | ExportUnionClosed
   | ExportPort
+  | ExportTag
 
 
 
@@ -361,8 +385,9 @@ instance Binary Type where
       TUnit              -> putWord8 3
       TTuple a b c       -> putWord8 4 >> put a >> put b >> put c
       TAlias a b c d     -> putWord8 5 >> put a >> put b >> put c >> put d
+      TTagRow a b        -> putWord8 7 >> put a >> put b
       TType home name ts ->
-        let potentialWord = length ts + 7 in
+        let potentialWord = length ts + 8 in
         if potentialWord <= fromIntegral (maxBound :: Word8) then
           do  putWord8 (fromIntegral potentialWord)
               put home
@@ -381,7 +406,8 @@ instance Binary Type where
           4 -> liftM3 TTuple get get get
           5 -> liftM4 TAlias get get get get
           6 -> liftM3 TType get get get
-          n -> liftM3 TType get get (replicateM (fromIntegral (n - 7)) get)
+          7 -> liftM2 TTagRow get get
+          n -> liftM3 TType get get (replicateM (fromIntegral (n - 8)) get)
 
 
 instance Binary AliasType where
@@ -401,3 +427,8 @@ instance Binary AliasType where
 instance Binary FieldType where
   get = liftM2 FieldType get get
   put (FieldType a b) = put a >> put b
+
+
+instance Binary TagDecl where
+  get = liftM TagDecl get
+  put (TagDecl a) = put a

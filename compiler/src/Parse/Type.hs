@@ -53,6 +53,24 @@ term =
                     chompTupleEnd start tipe []
               ]
         ,
+          -- structural variant rows
+          inContext E.TTagRow (word1 0x5B#Word8 {- [ -} E.TStart) $
+            do  Space.chompAndCheckIndent E.TTagRowSpace E.TTagRowIndentOpen
+                oneOf E.TTagRowOpen
+                  [ do  word1 0x5D#Word8 {-]-} E.TTagRowEnd
+                        addEnd start (Src.TTagRow [] Nothing)
+                  , do  ext <- addLocation (Var.lower E.TTagRowTag)
+                        Space.chompAndCheckIndent E.TTagRowSpace E.TTagRowIndentBar
+                        word1 0x7C#Word8 {-|-} E.TTagRowBar
+                        Space.chompAndCheckIndent E.TTagRowSpace E.TTagRowIndentTag
+                        entry <- chompTagEntry
+                        entries <- chompTagRowEnd [entry]
+                        addEnd start (Src.TTagRow entries (Just ext))
+                  , do  entry <- chompTagEntry
+                        entries <- chompTagRowEnd [entry]
+                        addEnd start (Src.TTagRow entries Nothing)
+                  ]
+        ,
           -- records
           inContext E.TRecord (word1 0x7B#Word8 {- { -} E.TStart) $
             do  Space.chompAndCheckIndent E.TRecordSpace E.TRecordIndentOpen
@@ -189,6 +207,40 @@ chompField =
       (tipe, end) <- specialize E.TRecordType expression
       Space.checkIndent end E.TRecordIndentEnd
       return (name, tipe)
+
+
+
+-- STRUCTURAL VARIANT ROWS
+
+
+chompTagEntry :: Parser E.TTagRow Src.TagEntry
+chompTagEntry =
+  do  start <- getPosition
+      upper <- Var.foreignUpper E.TTagRowTag
+      upperEnd <- getPosition
+      Space.chomp E.TTagRowSpace
+      (args, end) <- specialize E.TTagRowType (chompArgs [] upperEnd)
+      Space.checkIndent end E.TTagRowIndentEnd
+      let region = A.region start upperEnd
+      return $
+        case upper of
+          Var.Unqualified name ->
+            Src.TagEntry region Nothing name args
+
+          Var.Qualified home name ->
+            Src.TagEntry region (Just home) name args
+
+
+chompTagRowEnd :: [Src.TagEntry] -> Parser E.TTagRow [Src.TagEntry]
+chompTagRowEnd entries =
+  oneOf E.TTagRowEnd
+    [ do  word1 0x2C#Word8 {-,-} E.TTagRowEnd
+          Space.chompAndCheckIndent E.TTagRowSpace E.TTagRowIndentTag
+          entry <- chompTagEntry
+          chompTagRowEnd (entry : entries)
+    , do  word1 0x5D#Word8 {-]-} E.TTagRowEnd
+          return (reverse entries)
+    ]
 
 
 

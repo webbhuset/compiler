@@ -6,6 +6,7 @@ module Canonicalize.Type
   where
 
 
+import Control.Monad (foldM)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Name as Name
@@ -82,6 +83,45 @@ canonicalize env (A.At typeRegion tipe) =
               _ ->
                 Result.throw $ Error.TupleLargerThanThree typeRegion
 
+    Src.TTagRow entries ext ->
+        do  centries <- traverse (canonicalizeTagEntry env) entries
+            tagMap <- foldM insertTagEntry Map.empty centries
+            Result.ok $ Can.TTagRow tagMap (fmap A.toValue ext)
+
+
+canonicalizeTagEntry :: Env.Env -> Src.TagEntry -> Result i w (A.Region, Can.TagKey, [Can.Type])
+canonicalizeTagEntry env (Src.TagEntry region maybeHome name args) =
+  do  ctor <-
+        case maybeHome of
+          Nothing ->
+            Env.findCtor region env name
+
+          Just home ->
+            Env.findCtorQual region env home name
+
+      case ctor of
+        Env.TagCtor tagHome params ->
+          do  cargs <- traverse (canonicalize env) args
+              checkArity (length params) region name args
+                (region, (tagHome, name), cargs)
+
+        Env.Ctor _ _ _ _ _ ->
+          Result.throw (Error.TagRowNotATag region name)
+
+        Env.RecordCtor _ _ _ ->
+          Result.throw (Error.TagRowNotATag region name)
+
+
+insertTagEntry
+  :: Map.Map Can.TagKey [Can.Type]
+  -> (A.Region, Can.TagKey, [Can.Type])
+  -> Result i w (Map.Map Can.TagKey [Can.Type])
+insertTagEntry tagMap (region, key@(_, name), args) =
+  if Map.member key tagMap then
+    Result.throw (Error.TagRowDuplicate region name)
+  else
+    Result.ok (Map.insert key args tagMap)
+
 
 canonicalizeFields :: Env.Env -> [(A.Located Name.Name, Src.Type)] -> [(A.Located Name.Name, Result i w Can.FieldType)]
 canonicalizeFields env fields =
@@ -154,6 +194,12 @@ addFreeVars freeVars tipe =
 
     Can.TAlias _ _ args _ ->
       List.foldl' (\fvs (_,arg) -> addFreeVars fvs arg) freeVars args
+
+    Can.TTagRow tags Nothing ->
+      Map.foldl (List.foldl' addFreeVars) freeVars tags
+
+    Can.TTagRow tags (Just ext) ->
+      Map.foldl (List.foldl' addFreeVars) (Map.insert ext () freeVars) tags
 
 
 addFieldFreeVars :: Map.Map Name.Name () -> Can.FieldType -> Map.Map Name.Name ()

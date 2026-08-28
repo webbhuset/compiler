@@ -62,6 +62,9 @@ add (A.At region pattern) expectation state =
     Can.PCtor home typeName (Can.Union typeVars _ _ _) ctorName _ args ->
       addCtor region home typeName typeVars ctorName args expectation state
 
+    Can.PTag home name params args ->
+      addTag region home name params args expectation state
+
     Can.PList patterns ->
       do  entryVar <- mkFlexVar
           let entryType = VarN entryVar
@@ -234,3 +237,39 @@ addCtorArg region ctorName freeVarDict state (Can.PatternCtorArg index srcType p
   do  tipe <- Instantiate.fromSrcType freeVarDict srcType
       let expectation = E.PFromContext region (E.PCtorArg ctorName index) tipe
       add pattern expectation state
+
+
+
+-- CONSTRAIN STRUCTURAL VARIANT TAGS
+
+
+-- A tag pattern constrains the scrutinee to an OPEN row containing this tag.
+-- Exhaustiveness comes from a separate row-closing constraint generated for
+-- `case` expressions (and for single-pattern destructuring) in
+-- Type.Constrain.Expression.
+--
+addTag :: A.Region -> ModuleName.Canonical -> Name.Name -> [Name.Name] -> [Can.Pattern] -> E.PExpected Type -> State -> IO State
+addTag region home name params args expectation state =
+  do  paramVars <- traverse nameToFlex params
+      let paramTypes = map VarN paramVars
+      extVar <- mkFlexVar
+
+      (State headers vars revCons) <-
+        foldM (addTagArg region name) state $
+          zip (Index.indexedMap (,) args) paramTypes
+
+      let rowType = TagRowN (Map.singleton (home, name) paramTypes) (VarN extVar)
+      let tagCon = CPattern region (E.PCtor name) rowType expectation
+
+      return $
+        State
+          { _headers = headers
+          , _vars = extVar : paramVars ++ vars
+          , _revCons = tagCon : revCons
+          }
+
+
+addTagArg :: A.Region -> Name.Name -> State -> ((Index.ZeroBased, Can.Pattern), Type) -> IO State
+addTagArg region tagName state ((index, pattern), tipe) =
+  let expectation = E.PFromContext region (E.PCtorArg tagName index) tipe in
+  add pattern expectation state

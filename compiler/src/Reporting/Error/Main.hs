@@ -86,6 +86,15 @@ toReport localizer source err =
                 "But the exact shape of the record must be known at compile time. No type variables!"
             )
 
+          E.StructuralVariant ->
+            (
+              "a structural variant"
+            ,
+              D.reflow $
+                "But structural variant types cannot flow in from JavaScript. Use a\
+                \ record or a JSON value instead."
+            )
+
           E.Function ->
             (
               "a function"

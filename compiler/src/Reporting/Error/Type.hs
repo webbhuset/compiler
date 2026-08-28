@@ -117,6 +117,7 @@ data PExpected tipe
 data PContext
   = PTypedArg Name.Name Index.ZeroBased
   | PCaseMatch Index.ZeroBased
+  | PCaseTags
   | PCtorArg Name.Name Index.ZeroBased
   | PListEntry Index.ZeroBased
   | PTail
@@ -128,6 +129,7 @@ data PCategory
   | PTuple
   | PList
   | PCtor Name.Name
+  | PTags
   | PInt
   | PStr
   | PChr
@@ -235,6 +237,20 @@ toPatternReport source localizer patternRegion category tipe expected =
                   ]
               )
 
+          PCaseTags ->
+            (
+              D.reflow $
+                "The patterns in this `case` do not cover all the possible variant tags:"
+            ,
+              patternTypeComparison localizer tipe expectedType
+                (addPatternCategory "The branches cover" category)
+                "But the expression between `case` and `of` is:"
+                [ D.reflow $
+                    "Add branches until all the tags are covered, or add a final `_` branch\
+                    \ to handle everything else."
+                ]
+            )
+
           PCtorArg name index ->
             ( D.reflow $
                 "The " <> D.ordinal index <> " argument to `" <> Name.toChars name <> "` is weird."
@@ -299,6 +315,7 @@ addPatternCategory iAmTryingToMatch category =
       PTuple -> " tuples of type:"
       PList -> " lists of type:"
       PCtor name -> " `" <> Name.toChars name <> "` values of type:"
+      PTags -> " variants of type:"
       PInt -> " integers:"
       PStr -> " strings:"
       PChr -> " characters:"
@@ -450,6 +467,7 @@ problemToHint problem =
         T.RigidSuper s _ -> badRigidSuper s (toASuperThing super)
         T.Type _ _ _     -> badFlexSuper direction super tipe
         T.Record _ _     -> badFlexSuper direction super tipe
+        T.TagRow _ _     -> badFlexSuper direction super tipe
         T.Unit           -> badFlexSuper direction super tipe
         T.Tuple _ _ _    -> badFlexSuper direction super tipe
         T.Alias _ _ _ _  -> badFlexSuper direction super tipe
@@ -465,6 +483,7 @@ problemToHint problem =
         T.RigidSuper _ y -> badDoubleRigid x y
         T.Type _ n _     -> badRigidVar x ("a `" ++ Name.toChars n ++ "` value")
         T.Record _ _     -> badRigidVar x "a record"
+        T.TagRow _ _     -> badRigidVar x "a structural variant"
         T.Unit           -> badRigidVar x "a unit value"
         T.Tuple _ _ _    -> badRigidVar x "a tuple"
         T.Alias _ n _ _  -> badRigidVar x ("a `" ++ Name.toChars n ++ "` value")
@@ -480,6 +499,7 @@ problemToHint problem =
         T.RigidSuper _ y -> badDoubleRigid x y
         T.Type _ n _     -> badRigidSuper super ("a `" ++ Name.toChars n ++ "` value")
         T.Record _ _     -> badRigidSuper super "a record"
+        T.TagRow _ _     -> badRigidSuper super "a structural variant"
         T.Unit           -> badRigidSuper super "a unit value"
         T.Tuple _ _ _    -> badRigidSuper super "a tuple"
         T.Alias _ n _ _  -> badRigidSuper super ("a `" ++ Name.toChars n ++ "` value")
@@ -513,6 +533,42 @@ problemToHint problem =
           , D.toSimpleHint
               "Can more type annotations be added? Type annotations always help me give\
               \ more specific messages, and I think they could help a lot in this case!"
+          ]
+
+    T.TagsMissing tags ->
+      case map (D.green . D.fromName) tags of
+        [] ->
+          []
+
+        [t1] ->
+          [ D.toFancyHint
+              ["It","looks","like","the",t1,"tag","is","not","handled.","If","a"
+              ,"`case`","is","involved,","try","adding","a","branch","for","it!"
+              ]
+          ]
+
+        tagDocs ->
+          [ D.toFancyHint $
+              ["It","looks","like","the"] ++ D.commaSep "and" id tagDocs
+              ++ ["tags","are","not","handled.","If","a","`case`","is","involved,"
+                 ,"try","adding","branches","for","them!"
+                 ]
+          ]
+
+    T.TagTypo typo possibilities ->
+      case Suggest.sort (Name.toChars typo) Name.toChars possibilities of
+        [] ->
+          []
+
+        nearest:_ ->
+          [ D.toFancyHint $
+              ["Seems","like","a","variant","tag","typo.","Maybe"
+              ,D.dullyellow (D.fromName typo),"should","be"
+              ,D.green (D.fromName nearest) <> "?"
+              ]
+          , D.toSimpleHint
+              "These tags are matched by canonical name, so `Loading` declared in two\
+              \ different modules gives two different tags. Maybe an import is off?"
           ]
 
 

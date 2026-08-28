@@ -24,6 +24,7 @@ nodeHasDebug node =
     Opt.Define expr _           -> hasDebug expr
     Opt.DefineTailFunc _ expr _ -> hasDebug expr
     Opt.Ctor _ _                -> False
+    Opt.Tag _                   -> False
     Opt.Enum _                  -> False
     Opt.Box                     -> False
     Opt.Link _                  -> False

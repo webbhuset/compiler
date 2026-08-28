@@ -252,6 +252,41 @@ Worker.spawn Counter.main
   code plus an effect manager), consumed as a git dependency. No elm/core
   or virtual-dom patches needed.
 
+## Structural variants
+
+*[docs](docs/structural-variants.md)*
+
+Anonymous, row-polymorphic sum types — the dual of extensible records. Tags
+are declared once and then combined structurally, so functions can accept
+exactly the tags they handle without a shared custom type:
+
+```elm
+variant Loading
+variant Success value
+
+state : Int -> [ r | Loading, Success Int ]
+state n =
+    if n > 0 then Success n else Loading
+
+describe : [ Loading, Success Int ] -> String
+describe s =
+    case s of
+        Loading -> "loading"
+        Success n -> "got " ++ String.fromInt n
+```
+
+- `[ A, B Int ]` is a closed row (exactly these tags); `[ r | A, B Int ]`
+  is open (at least these tags), mirroring record extension syntax.
+- Exhaustiveness is part of type checking: a `case` without a `_` branch
+  closes the row, so an unhandled tag is a type error naming the tag.
+- Tags are canonical (module + name): same-spelled tags from different
+  modules are distinct and can coexist in one union. Export and import
+  them like constructors.
+- Restrictions: tag patterns cannot sit inside tuple/list/constructor
+  patterns; recursion needs a nominal wrapper type; no ports; not
+  comparable; not shown in docs.json.
+- Runtime: `{ $: "pkg:Module.Tag", a = ... }` in dev and prod; `==` works.
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
