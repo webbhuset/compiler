@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main
   ( main
   )
@@ -6,6 +7,7 @@ module Main
 
 
 import Prelude hiding (init)
+import qualified BuildStamp
 import qualified Data.List as List
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 import Text.Read (readMaybe)
@@ -47,9 +49,10 @@ intro =
   P.vcat
     [ P.fillSep
         ["Hi,","thank","you","for","trying","out"
+        ,P.green "Webbhuset"
         ,P.green "Elm"
-        ,P.green (P.text (V.toChars V.compiler)) <> "."
-        ,"I hope you like it!"
+        ,P.green (P.text (V.toChars V.compiler))
+        ,P.text ("(build " ++ $(BuildStamp.commitCount) ++ ")")
         ]
     , ""
     , P.black "-------------------------------------------------------------------------------"
