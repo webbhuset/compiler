@@ -73,6 +73,7 @@ data Expr
   | Tuple Expr Expr (Maybe Expr)
   | Shader Shader.Source (Set.Set Name) (Set.Set Name)
   | Css ModuleName.Canonical Css.Content
+  | WorkerRef Global
 
 
 data Global = Global ModuleName.Canonical Name
@@ -280,6 +281,7 @@ instance Binary Expr where
       Tuple a b c      -> putWord8 25 >> put a >> put b >> put c
       Shader a b c     -> putWord8 26 >> put a >> put b >> put c
       Css a b          -> putWord8 27 >> put a >> put b
+      WorkerRef a      -> putWord8 28 >> put a
 
   get =
     do  word <- getWord8
@@ -312,6 +314,7 @@ instance Binary Expr where
           25 -> liftM3 Tuple get get get
           26 -> liftM3 Shader get get get
           27 -> liftM2 Css get get
+          28 -> liftM  WorkerRef get
           _  -> fail "problem getting Opt.Expr binary"
 
 

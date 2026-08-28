@@ -2,6 +2,7 @@
 module Generate.JavaScript
   ( generate
   , generateEsm
+  , generateWorkerBundle
   , generateForRepl
   , generateForReplEndpoint
   )
@@ -41,8 +42,8 @@ type Graph = Map.Map Opt.Global Opt.Node
 type Mains = Map.Map ModuleName.Canonical Opt.Main
 
 
-generate :: Mode.Mode -> Opt.GlobalGraph -> Mains -> (B.Builder, Maybe B.Builder)
-generate mode globalGraph@(Opt.GlobalGraph graph _) mains =
+generate :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
+generate mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
   let
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
 
@@ -54,24 +55,49 @@ generate mode globalGraph@(Opt.GlobalGraph graph _) mains =
       <> toMainExports mode mains
       <> "}(this));"
   in
-  ( javascript, GenCss.generate mode globalGraph mains )
+  ( javascript, GenCss.generate mode globalGraph mains workerRoots )
 
 
 -- Everything lives in module scope, which is already strict and does not
 -- leak, so no IIFE is needed. The `scope` parameter is only ever used by
 -- _Platform_export, which is never called in this mode.
-generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> (B.Builder, Maybe B.Builder)
-generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains =
+generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
+generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
   let
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
 
     javascript =
-      Functions.functions
+      metaUrlLine
+      <> Functions.functions
       <> perfNote mode
       <> stateToBuilder state
       <> toMainExportsEsm mode mains
   in
-  ( javascript, GenCss.generate mode globalGraph mains )
+  ( javascript, GenCss.generate mode globalGraph mains workerRoots )
+
+
+-- Worker files are loaded relative to the bundle that spawns them, which
+-- only ES modules can know (import.meta). The kernel in webbhuset/worker
+-- reads this variable; it is only emitted in ESM output, where the syntax
+-- is legal.
+metaUrlLine :: B.Builder
+metaUrlLine =
+  "var __elmWorkerBaseUrl = import.meta.url;\n"
+
+
+-- A web worker bundle: an ES module with no exports that boots the given
+-- worker program via the _Worker_run harness (webbhuset/worker kernel).
+-- The program's dependency graph necessarily includes that kernel, since
+-- worker programs are built with Worker.worker.
+generateWorkerBundle :: Mode.Mode -> Opt.GlobalGraph -> Opt.Global -> B.Builder
+generateWorkerBundle mode (Opt.GlobalGraph graph _) root@(Opt.Global home name) =
+  let
+    state = addGlobal mode graph emptyState root
+  in
+  metaUrlLine
+  <> Functions.functions
+  <> stateToBuilder state
+  <> "_Worker_run(" <> JsName.toBuilder (JsName.fromGlobal home name) <> ");"
 
 
 addMain :: Mode.Mode -> Graph -> ModuleName.Canonical -> Opt.Main -> State -> State

@@ -23,6 +23,7 @@ import qualified Reporting.Error.Canonicalize as Canonicalize
 import qualified Reporting.Error.Docs as Docs
 import qualified Reporting.Error.Import as Import
 import qualified Reporting.Error.Main as Main
+import qualified Nitpick.Workers as Workers
 import qualified Reporting.Error.Pattern as Pattern
 import qualified Reporting.Error.Syntax as Syntax
 import qualified Reporting.Error.Type as Type
@@ -56,6 +57,7 @@ data Error
   | BadTypes L.Localizer (NE.List Type.Error)
   | BadMains L.Localizer (OneOrMore.OneOrMore Main.Error)
   | BadPatterns (NE.List Pattern.Error)
+  | BadWorkers (NE.List Workers.Error)
   | BadDocs Docs.Error
 
 
@@ -83,6 +85,9 @@ toReports source err =
 
     BadPatterns errs ->
       fmap (Pattern.toReport source) errs
+
+    BadWorkers errs ->
+      fmap (Workers.toReport source) errs
 
     BadDocs docsErr ->
       Docs.toReports source docsErr

@@ -29,6 +29,7 @@ import qualified AST.Optimized as Opt
 import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Generate.Css as CssGen
+import qualified Generate.Workers as Workers
 import qualified Data.Index as Index
 import qualified Elm.Compiler.Type as Type
 import qualified Elm.Compiler.Type.Extract as Extract
@@ -173,6 +174,11 @@ generate mode expression =
         , ( JsName.fromLocal "attributes", toTranslationObject attributes )
         , ( JsName.fromLocal "uniforms", toTranslationObject uniforms )
         ]
+
+    Opt.WorkerRef global ->
+      -- placeholder token; replaced with the worker bundle's file name
+      -- once all bundles are rendered and hashed (Generate.Workers)
+      JsExpr $ JS.String (Workers.tokenBuilder global)
 
     Opt.Css home (Css.Content _ (Css.Types classes keyframes vars)) ->
       let
