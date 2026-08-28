@@ -37,7 +37,14 @@ like Elm versions (`1.2.0`):
 - `elm publish` rejects packages that have git dependencies, since their
   dependencies are not publicly resolvable.
 - A name+version is expected to be immutable: if you move a tag, delete
-  the package's directory from `ELM_HOME` to force a fresh clone.
+  the package's directory from `ELM_HOME` to force a fresh clone. The same
+  applies when the *URL spelling* for a name+version changes (e.g. a local
+  path vs. the GitLab URL): equivalent spellings count as different
+  origins.
+- `elm init` writes a project that starts on the patched forks: elm/core,
+  elm/browser, and elm/virtual-dom are pinned to the fork versions and
+  listed in `"git-dependencies"` pointing at the GitLab repositories;
+  everything else resolves from the registry as usual.
 
 ## Kernel code in git dependencies
 
