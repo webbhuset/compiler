@@ -17,33 +17,22 @@ import System.Process (readProcess)
 -- COMMIT COUNT
 --
 -- The number of commits in HEAD at compile time, e.g. "1234", used as a
--- build number. The splice depends on the git ref files, so committing or
--- switching branches recompiles the module using it. (If the ref has been
--- packed by `git gc` the file dependency degrades and the count can go
--- stale until the module recompiles for other reasons.) Building without
--- git or outside a checkout gives "unknown".
+-- build number. The splice depends on the HEAD reflog, which git appends
+-- to on every commit, checkout, merge, and reset — so any of those
+-- recompiles the module using the splice. (Loose ref files would not work:
+-- repos on the reftable backend have none.) Building without git or
+-- outside a checkout gives "unknown".
 
 
 commitCount :: TH.Q TH.Exp
 commitCount =
-  do  addGitDependencies
+  do  addIfExists ".git/HEAD"
+      addIfExists ".git/logs/HEAD"
       result <- TH.runIO (E.try (readProcess "git" ["rev-list", "--count", "HEAD"] ""))
       TH.lift $
         case (result :: Either E.SomeException String) of
           Right output -> filter (not . isSpace) output
           Left _ -> "unknown"
-
-
-addGitDependencies :: TH.Q ()
-addGitDependencies =
-  do  addIfExists ".git/HEAD"
-      contents <- TH.runIO (E.try (readFile ".git/HEAD"))
-      case (contents :: Either E.SomeException String) of
-        Right ('r':'e':'f':':':' ':ref) ->
-          addIfExists (".git/" ++ filter (/= '\n') ref)
-
-        _ ->
-          return ()
 
 
 addIfExists :: FilePath -> TH.Q ()
