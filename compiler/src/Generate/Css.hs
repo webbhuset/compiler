@@ -36,14 +36,16 @@ import qualified Generate.Mode as Mode
 -- emits for the block object.
 
 
-generate :: Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Maybe B.Builder
-generate mode (Opt.GlobalGraph nodes _) mains =
+generate :: Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> [Opt.Global] -> Maybe B.Builder
+generate mode (Opt.GlobalGraph nodes _) mains extraRoots =
   let
     seen =
-      Map.foldlWithKey'
-        (\set home _ -> addGlobal nodes set (Opt.Global home N.main))
-        Set.empty
-        mains
+      List.foldl' (addGlobal nodes)
+        (Map.foldlWithKey'
+          (\set home _ -> addGlobal nodes set (Opt.Global home N.main))
+          Set.empty
+          mains)
+        extraRoots
 
     blocks =
       Map.foldr mainBlocks
@@ -289,6 +291,7 @@ addExpr expression blocks =
     Opt.Pair a b -> addExpr a (addExpr b blocks)
     Opt.Triple a b c -> addExpr a (addExpr b (addExpr c blocks))
     Opt.Shader _ _ _ -> blocks
+    Opt.WorkerRef _ -> blocks
 
 
 addDecider :: Opt.Decider Opt.Choice -> [(ModuleName.Canonical, Css.Content)] -> [(ModuleName.Canonical, Css.Content)]

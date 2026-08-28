@@ -1,6 +1,9 @@
 {-# LANGUAGE BangPatterns, TemplateHaskell #-}
 module Generate
   ( Format(..)
+  , Bundles(..)
+  , WorkerBundle(..)
+  , finalize
   , debug
   , dev
   , prod
@@ -12,7 +15,12 @@ module Generate
 import Prelude hiding (cycle, print)
 import Control.Concurrent (readMVar)
 import Control.Monad (liftM2)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.UTF8 as BS_UTF8
+import qualified Data.Digest.Pure.SHA as SHA
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Map.Utils as Map
 import qualified Data.Maybe as Maybe
@@ -33,6 +41,7 @@ import qualified File
 import qualified Generate.Css as GenCss
 import qualified Generate.JavaScript as JS
 import qualified Generate.Mode as Mode
+import qualified Generate.Workers as Workers
 import qualified Nitpick.Debug as Nitpick
 import qualified Reporting.Exit as Exit
 import qualified Reporting.Task as Task
@@ -57,14 +66,47 @@ data Format
   | Esm
 
 
-generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> (B.Builder, Maybe B.Builder)
+-- The compiled program: the main bundle, its stylesheet, and one bundle
+-- per spawned worker program. Worker bundles are in dependency order and
+-- contain placeholder tokens where worker file names go; `finalize` turns
+-- everything into writable bytes.
+data Bundles =
+  Bundles
+    { _mainJs :: B.Builder
+    , _css :: Maybe B.Builder
+    , _workerBundles :: [WorkerBundle]
+    }
+
+
+data WorkerBundle =
+  WorkerBundle
+    { _workerGlobal :: Opt.Global
+    , _workerJs :: B.Builder
+    }
+
+
+generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
 generateWith format =
   case format of
     Iife -> JS.generate
     Esm  -> JS.generateEsm
 
 
-debug :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
+toBundles :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Task Bundles
+toBundles format mode graph mains =
+  case Workers.plan graph mains of
+    Left cycleNames ->
+      Task.throw (Exit.GenerateWorkerCycle cycleNames)
+
+    Right workerRoots ->
+      let
+        (js, css) = generateWith format mode graph mains workerRoots
+        workers = map (\g -> WorkerBundle g (JS.generateWorkerBundle mode graph g)) workerRoots
+      in
+      return (Bundles js css workers)
+
+
+debug :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
 debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
   do  loading <- loadObjects stuff details modules
       types   <- loadTypes stuff ifaces modules
@@ -72,26 +114,76 @@ debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
       let mode = Mode.Dev (Just types)
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      return $ generateWith format mode graph mains
+      toBundles format mode graph mains
 
 
-dev :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
+dev :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
 dev format stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       let mode = Mode.Dev Nothing
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      return $ generateWith format mode graph mains
+      toBundles format mode graph mains
 
 
-prod :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
+prod :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
 prod format stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       checkForDebugUses objects
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
       let mode = Mode.Prod (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
-      return $ generateWith format mode graph mains
+      toBundles format mode graph mains
+
+
+
+-- FINALIZE
+--
+-- Render worker bundles in dependency order, substituting the file names
+-- of the workers each bundle spawns, hashing the result to name its file.
+-- Then substitute all the names into the main bundle.
+
+
+finalize :: String -> Bundles -> ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
+finalize base (Bundles js css workers) =
+  let
+    step (table, files) (WorkerBundle global builder) =
+      let
+        bytes = substitute table (render builder)
+        hash = take 16 (SHA.showDigest (SHA.sha1 (LBS.fromStrict bytes)))
+        name = base ++ "." ++ hash ++ ".mjs"
+      in
+      ( (Workers.token global, BS_UTF8.fromString name) : table
+      , (name, bytes) : files
+      )
+
+    (finalTable, revFiles) = List.foldl' step ([], []) workers
+  in
+  ( reverse revFiles
+  , substitute finalTable (render js)
+  , fmap render css
+  )
+
+
+render :: B.Builder -> BS.ByteString
+render builder =
+  LBS.toStrict (B.toLazyByteString builder)
+
+
+substitute :: [(BS.ByteString, BS.ByteString)] -> BS.ByteString -> BS.ByteString
+substitute table bytes =
+  List.foldl' replaceAll bytes table
+
+
+replaceAll :: BS.ByteString -> (BS.ByteString, BS.ByteString) -> BS.ByteString
+replaceAll haystack (needle, replacement) =
+  BS.concat (go haystack)
+  where
+    go bytes =
+      case BS.breakSubstring needle bytes of
+        (prefix, rest)
+          | BS.null rest -> [prefix]
+          | otherwise -> prefix : replacement : go (BS.drop (BS.length needle) rest)
 
 
 repl :: R.Stuff -> Details.Details -> Bool -> Build.ReplArtifacts -> N.Name -> Task B.Builder

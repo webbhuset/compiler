@@ -201,6 +201,49 @@ view model =
   still be referenced explicitly, e.g.
   `Css.value "var(--brand-color)"` for a page-level design token.
 
+## Native web workers
+
+*[docs](docs/web-workers.md) · runtime in the `webbhuset/worker` package ·
+requires `--output=something.mjs`*
+
+A worker is an Elm module whose `main` is a `Worker.Program`, compiled into
+its own JavaScript file by the same `elm make` that compiles the app
+spawning it. Because both sides share one compilation (and one `--optimize`
+rename table), messages cross the boundary as ordinary Elm values via
+structured clone — custom types included, no JSON encoders to drift:
+
+```elm
+-- Counter.elm
+main : Worker.Program Args ToParent Msg Model
+main =
+    Worker.worker { init = init, update = update, subscriptions = subscriptions }
+
+
+-- Main.elm
+Worker.spawn Counter.main
+    { initial = 10 }
+    { onSpawn = GotCounter, onMessage = FromCounter, onCrash = CounterCrashed }
+```
+
+- `elm make src/Main.elm --output=main.mjs` writes `main.mjs` plus one
+  content-hashed `main.<hash>.mjs` per spawned worker. Workers can spawn
+  workers; only the workers reachable from `main` are emitted.
+- The worker's `init` receives the spawner's `Channel` for messages upward;
+  the spawner gets a `Worker` handle (send + `kill`). A worker can `stop`
+  itself; a channel can only send, so a worker cannot kill its parent.
+- Subscriptions, tasks, and effect managers work normally inside workers —
+  anything that does not need the DOM. Timers in workers keep running while
+  the page tab is hidden.
+- The spawned program must be a direct reference to a top-level value
+  (`Worker.spawn Counter.main args handlers`); anything else is a compile
+  error, as is compiling a worker-spawning program to `.js`/`.html`.
+- Messages must be function-free (structured clone); violations fail at
+  runtime via `onCrash`. CSS blocks inside worker code land in the same
+  `.css` sidecar as the rest of the program.
+- The `Worker` module ships in the `webbhuset/worker` package (kernel code
+  plus an effect manager), consumed as a git dependency. No elm/core or
+  virtual-dom patches needed.
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
@@ -218,6 +261,6 @@ view model =
   package artifacts automatically. Do not alternate this fork and the
   official compiler on the same `ELM_HOME` — they will repeatedly
   invalidate each other's caches.
-- **Object files**: task ports add a node kind and CSS blocks an
-  expression kind to the `.elmo` format; stale `elm-stuff` from other
-  compilers is detected and rebuilt.
+- **Object files**: task ports add a node kind, and CSS blocks and web
+  workers each add an expression kind to the `.elmo` format; stale
+  `elm-stuff` from other compilers is detected and rebuilt.

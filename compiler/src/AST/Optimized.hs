@@ -81,6 +81,7 @@ data Expr
   | Triple Expr Expr Expr
   | Shader Shader.Source (Set.Set N.Name) (Set.Set N.Name)
   | Css ModuleName.Canonical Css.Content
+  | WorkerRef Global
 
 
 data Global = Global ModuleName.Canonical N.Name
@@ -296,6 +297,7 @@ eExpr expr =
     Triple a b c     -> E.u8# 26#Word8 <> eExpr a <> eExpr b <> eExpr c
     Shader s a u     -> E.u8# 27#Word8 <> Shader.eSource s <> E.set32 N.encode a <> E.set32 N.encode u
     Css h c          -> E.u8# 28#Word8 <> ModuleName.eCanonical h <> Css.eContent c
+    WorkerRef g      -> E.u8# 29#Word8 <> eGlobal g
 
 
 dExpr :: D.Decoder Expr
@@ -331,6 +333,7 @@ dExpr =
         26 -> liftM3 Triple dExpr dExpr dExpr
         27 -> liftM3 Shader Shader.dSource (D.set32 N.decode) (D.set32 N.decode)
         28 -> liftM2 Css ModuleName.dCanonical Css.dContent
+        29 -> liftM  WorkerRef dGlobal
         _  -> D.expecting "Expr"
 
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
 module Optimize.Expression
   ( optimize
   , destructArgs
@@ -95,7 +95,7 @@ optimize cycle (A.At region expression) =
     Can.Call func args ->
       Opt.Call
         <$> optimize cycle func
-        <*> traverse (optimize cycle) args
+        <*> optimizeArgs cycle func args
 
     Can.If branches finally ->
       let
@@ -183,6 +183,38 @@ optimize cycle (A.At region expression) =
       Names.registerFieldList
         (Set.toList classes ++ Set.toList keyframes ++ Map.keys vars)
         (Opt.Css home content)
+
+
+
+-- OPTIMIZE ARGS
+--
+-- The first argument of Worker.spawn is a direct reference to a top-level
+-- worker program (Nitpick.Workers guarantees the shape). It compiles to a
+-- WorkerRef, which becomes the URL of a separately generated bundle, and
+-- deliberately does NOT register the referenced global as a dependency:
+-- the worker's code must not end up in the spawning bundle.
+
+
+optimizeArgs :: Cycle -> Can.Expr -> [Can.Expr] -> Names.Tracker [Opt.Expr]
+optimizeArgs cycle func args =
+  case (A.toValue func, args) of
+    (Can.VarForeign home name _, A.At _ (Can.VarForeign progHome progName _) : rest)
+      | isWorkerSpawn home name ->
+          (:) (Opt.WorkerRef (Opt.Global progHome progName))
+            <$> traverse (optimize cycle) rest
+
+    (Can.VarForeign home name _, A.At _ (Can.VarTopLevel progHome progName) : rest)
+      | isWorkerSpawn home name ->
+          (:) (Opt.WorkerRef (Opt.Global progHome progName))
+            <$> traverse (optimize cycle) rest
+
+    _ ->
+      traverse (optimize cycle) args
+
+
+isWorkerSpawn :: ModuleName.Canonical -> N.Name -> Bool
+isWorkerSpawn home name =
+  home == ModuleName.workers && name == [N.ascii|spawn|]
 
 
 
@@ -375,7 +407,7 @@ optimizeTail :: Cycle -> N.Name -> [N.Name] -> Can.Expr -> Names.Tracker Opt.Exp
 optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
   case expression of
     Can.Call func args ->
-      do  oargs <- traverse (optimize cycle) args
+      do  oargs <- optimizeArgs cycle func args
 
           let isMatchingName =
                 case A.toValue func of

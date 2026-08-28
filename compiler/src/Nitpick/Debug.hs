@@ -67,6 +67,7 @@ hasDebug expression =
     Opt.Triple a b c     -> hasDebug a || hasDebug b || hasDebug c
     Opt.Shader _ _ _     -> False
     Opt.Css _ _          -> False
+    Opt.WorkerRef _      -> False
 
 
 defHasDebug :: Opt.Def -> Bool

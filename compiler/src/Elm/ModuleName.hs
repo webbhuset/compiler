@@ -11,6 +11,7 @@ module Elm.ModuleName
   --
   , eCanonical, dCanonical
   , cssStyles
+  , workers
   )
   where
 
@@ -118,5 +119,8 @@ dCanonical =
 {-# NOINLINE vector3 #-}; vector3 :: Canonical; vector3 = Canonical Pkg.linearAlgebra Module.math_vector3
 {-# NOINLINE vector4 #-}; vector4 :: Canonical; vector4 = Canonical Pkg.linearAlgebra Module.math_vector4
 {-# NOINLINE matrix4 #-}; matrix4 :: Canonical; matrix4 = Canonical Pkg.linearAlgebra Module.math_matrix4
+
+
+{-# NOINLINE workers #-}; workers :: Canonical; workers = Canonical Pkg.worker Module.worker
 
 

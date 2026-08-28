@@ -18,6 +18,7 @@ import qualified Canonicalize.Module as Canonicalize
 import qualified Elm.Interface as I
 import qualified Elm.Package as Pkg
 import qualified Nitpick.PatternMatches as PatternMatches
+import qualified Nitpick.Workers as Workers
 import qualified Optimize.Module as Optimize
 import qualified Reporting.Error as E
 import qualified Reporting.Result as R
@@ -78,12 +79,12 @@ typeCheck comparables modul canonical =
 
 nitpick :: Can.Module -> Either E.Error ()
 nitpick canonical =
-  case PatternMatches.check canonical of
-    Right () ->
-      Right ()
-
-    Left errors ->
-      Left (E.BadPatterns errors)
+  do  case PatternMatches.check canonical of
+        Right () -> Right ()
+        Left errors -> Left (E.BadPatterns errors)
+      case Workers.check canonical of
+        Right () -> Right ()
+        Left errors -> Left (E.BadWorkers errors)
 
 
 optimize :: Src.Module -> Map.Map N.Name Can.Annotation -> Can.Module -> Either E.Error Opt.LocalGraph
