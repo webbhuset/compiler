@@ -471,3 +471,14 @@ Ord.compare (Card a) (Card b) =
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.
+
+## Cross-platform release binaries
+
+Pushing a `v*` tag builds native binaries for `linux-x64`, `linux-arm64`,
+`darwin-arm64`, and `win32-x64` via `.github/workflows/release.yml` and
+attaches them (gzip / zip) to a **draft** GitHub Release for review before
+publishing. Linux binaries are fully static (built on Alpine/musl); each binary
+is smoke-tested with `elm --version` in CI before it is uploaded. (Intel macOS,
+`darwin-x64`, is not built: GitHub retired the `macos-13` runner image on
+2025-12-04, and it is the last hosted Intel image. Only Apple Silicon macOS,
+`darwin-arm64`, is produced.)
