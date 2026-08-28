@@ -1,0 +1,446 @@
+From d5eb8f34a81d536e71cacf84e45703c6ea133be7 Mon Sep 17 00:00:00 2001
+From: Albert Dahlin <info@albertdahlin.com>
+Date: Fri, 28 Aug 2026 11:56:39 +0200
+Subject: [PATCH] Add Browser.Worker: natively compiled web workers
+
+Runtime for the web workers feature in webbhuset/compiler: the
+Worker.Program type that a worker module's main declares, spawn/send/
+kill/stop, and the typed Channel/Worker handles. An effect manager
+routes worker messages into the app via Platform.sendToApp; the kernel
+harness (_Worker_run) is a minimal _Platform_initialize wired to the
+worker's message port, so subscriptions and commands work normally
+inside workers.
+
+The compiler compiles each spawned worker program into its own bundle
+next to the main one and replaces the program reference with that
+file's name; both bundles share one compilation, so messages cross the
+boundary as structured clones of ordinary Elm values, custom types
+included, with no JSON encoding.
+
+Versioned 1.0.3 as an unpublished fork version, consumed as a
+git-dependency.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ elm.json                 |   7 +-
+ src/Browser/Worker.elm   | 200 +++++++++++++++++++++++++++++++++++++++
+ src/Elm/Kernel/Worker.js | 173 +++++++++++++++++++++++++++++++++
+ 3 files changed, 377 insertions(+), 3 deletions(-)
+ create mode 100644 src/Browser/Worker.elm
+ create mode 100644 src/Elm/Kernel/Worker.js
+
+diff --git a/elm.json b/elm.json
+index 8bc083f..f782091 100644
+--- a/elm.json
++++ b/elm.json
+@@ -3,12 +3,13 @@
+     "name": "elm/browser",
+     "summary": "Run Elm in browsers, with access to browser history for single-page apps (SPAs)",
+     "license": "BSD-3-Clause",
+-    "version": "1.0.2",
++    "version": "1.0.3",
+     "exposed-modules": [
+         "Browser",
+         "Browser.Dom",
+         "Browser.Events",
+-        "Browser.Navigation"
++        "Browser.Navigation",
++        "Browser.Worker"
+     ],
+     "elm-version": "0.19.0 <= v < 0.20.0",
+     "dependencies": {
+@@ -20,4 +21,4 @@
+         "elm/virtual-dom": "1.0.2 <= v < 2.0.0"
+     },
+     "test-dependencies": {}
+-}
++}
+\ No newline at end of file
+diff --git a/src/Browser/Worker.elm b/src/Browser/Worker.elm
+new file mode 100644
+index 0000000..9c5a7d9
+--- /dev/null
++++ b/src/Browser/Worker.elm
+@@ -0,0 +1,200 @@
++effect module Browser.Worker where { command = MyCmd } exposing
++    ( Program, worker
++    , Worker, Channel, channel
++    , spawn, send, kill, stop
++    )
++
++{-| Runtime support for natively compiled web workers.
++
++A worker is a module with a `main : Worker.Program args toParent msg model`
++(with `import Browser.Worker as Worker`).
++The compiler turns each spawned worker program into a separate JavaScript
++file, and messages cross the boundary as ordinary Elm values via structured
++clone — no JSON encoding.
++
++
++# Define a worker
++
++@docs Program, worker
++
++
++# Spawn and talk to workers
++
++@docs Worker, Channel, channel, spawn, send, kill, stop
++
++-}
++
++import Elm.Kernel.Worker
++import Platform
++import Task exposing (Task)
++
++
++
++-- PROGRAMS
++
++
++{-| A worker program: what a worker module's `main` is.
++
++    main : Worker.Program Args ToParent Msg Model
++
++  - `args` is what the spawner passes to `init`.
++  - `toParent` is what this worker sends to its spawner.
++  - `msg` and `model` are the worker's internal update loop.
++
++Arguments and messages cross the worker boundary as structured clones, so
++they must not contain functions. Custom types, records, lists, and so on
++are all fine.
++
++-}
++type Program args toParent msg model
++    = Program
++
++
++{-| Define a worker program. The `init` receives the spawner's channel, for
++sending `toParent` messages upward:
++
++    main : Worker.Program Args ToParent Msg Model
++    main =
++        Worker.worker
++            { init = init
++            , update = update
++            , subscriptions = subscriptions
++            }
++
++    init : Args -> Worker.Channel ToParent -> ( Model, Cmd Msg )
++
++Subscriptions and commands work normally inside a worker — anything that
++does not need the DOM.
++
++-}
++worker :
++    { init : args -> Channel toParent -> ( model, Cmd msg )
++    , update : msg -> model -> ( model, Cmd msg )
++    , subscriptions : model -> Sub msg
++    }
++    -> Program args toParent msg model
++worker =
++    Elm.Kernel.Worker.toProgram
++
++
++
++-- HANDLES
++
++
++{-| A handle to a spawned worker, from `spawn`. It can send (via
++[`channel`](#channel)) and [`kill`](#kill).
++-}
++type Worker msg
++    = Worker
++
++
++{-| The send-end of one typed link. The parent gets one from a spawned
++[`Worker`](#Worker); the worker gets its parent's channel in `init`.
++A channel can only send — a worker cannot kill its parent.
++
++Channels cannot be sent in messages (they are not structured-cloneable).
++
++-}
++type Channel msg
++    = Channel
++
++
++{-| The channel of a spawned worker.
++-}
++channel : Worker msg -> Channel msg
++channel =
++    Elm.Kernel.Worker.channel
++
++
++
++-- SPAWN AND TALK
++
++
++{-| Spawn a worker program. The program must be referenced directly, like
++`Counter.main` — the compiler turns it into a separate JavaScript file next
++to the compiled bundle, and the reference becomes its URL.
++
++    Worker.spawn Counter.main
++        { initial = 10 }
++        { onSpawn = GotCounter
++        , onMessage = MsgFromCounter
++        , onCrash = CounterCrashed
++        }
++
++`onSpawn` delivers the handle. `onMessage` delivers every `toParent`
++message the worker sends. `onCrash` fires if the worker throws or fails
++to load.
++
++-}
++spawn :
++    Program args toParent msg model
++    -> args
++    ->
++        { onSpawn : Worker msg -> parentMsg
++        , onMessage : toParent -> parentMsg
++        , onCrash : String -> parentMsg
++        }
++    -> Cmd parentMsg
++spawn program args handlers =
++    command (MyCmd (Elm.Kernel.Worker.spawnOp program args handlers.onSpawn handlers.onMessage handlers.onCrash))
++
++
++{-| Send a message over a channel. Messages sent right after `spawn` are
++queued by the browser until the worker is ready, so there is no race.
++-}
++send : Channel msg -> msg -> Cmd a
++send chan msg =
++    command (MyCmd (Elm.Kernel.Worker.sendOp chan msg))
++
++
++{-| Terminate a worker immediately. Messages it already sent still arrive.
++-}
++kill : Worker msg -> Cmd a
++kill w =
++    command (MyCmd (Elm.Kernel.Worker.killOp w))
++
++
++{-| Inside a worker: terminate this worker. Anything the parent should know
++must be sent (in the same or an earlier update) before stopping; sends are
++flushed first.
++-}
++stop : Cmd a
++stop =
++    command (MyCmd Elm.Kernel.Worker.stopOp)
++
++
++
++-- EFFECT MANAGER
++
++
++type Op msg
++    = Op
++
++
++type MyCmd msg
++    = MyCmd (Op msg)
++
++
++cmdMap : (a -> b) -> MyCmd a -> MyCmd b
++cmdMap f (MyCmd op) =
++    MyCmd (Elm.Kernel.Worker.mapOp f op)
++
++
++init : Task Never ()
++init =
++    Task.succeed ()
++
++
++onEffects : Platform.Router msg Never -> List (MyCmd msg) -> () -> Task Never ()
++onEffects router cmds () =
++    List.foldl
++        (\(MyCmd op) task ->
++            task |> Task.andThen (\() -> Elm.Kernel.Worker.execute router op)
++        )
++        (Task.succeed ())
++        cmds
++
++
++onSelfMsg : Platform.Router msg Never -> Never -> () -> Task Never ()
++onSelfMsg _ _ () =
++    Task.succeed ()
+diff --git a/src/Elm/Kernel/Worker.js b/src/Elm/Kernel/Worker.js
+new file mode 100644
+index 0000000..52d736d
+--- /dev/null
++++ b/src/Elm/Kernel/Worker.js
+@@ -0,0 +1,173 @@
++/*
++
++import Elm.Kernel.Platform exposing (sendToApp, setupEffects, enqueueEffects)
++import Elm.Kernel.Scheduler exposing (binding, succeed, rawSpawn)
++import Elm.Kernel.Utils exposing (Tuple0)
++
++*/
++
++
++
++// PROGRAMS
++//
++// A worker program is the plain implementation record. At a Worker.spawn
++// call site, the compiler replaces the reference to the program with the
++// file name of its separately generated bundle, so in the SPAWNING bundle
++// the "program" value is a string.
++
++
++function _Worker_toProgram(impl)
++{
++	return impl;
++}
++
++
++
++// MESSAGE PROTOCOL
++//
++// parent -> worker:  { $: 0, a: args }  initializes the program
++//                    { $: 1, a: msg }   feeds update
++// worker -> parent:  the toParent value, raw
++
++
++var _Worker_INIT = 0;
++var _Worker_MSG = 1;
++
++
++
++// OPS
++//
++// Commands are built as opaque op values so the effect manager can stay a
++// single generic pipeline. Handles are { a: channel, b: rawWorker } and
++// channels are { a: postFunction }.
++
++
++var _Worker_spawnOp = F5(function(url, args, onSpawn, onMessage, onCrash)
++{
++	return { $: 'spawn', a: url, b: args, c: onSpawn, d: onMessage, e: onCrash };
++});
++
++var _Worker_sendOp = F2(function(channel, msg)
++{
++	return { $: 'send', a: channel, b: msg };
++});
++
++function _Worker_killOp(worker)
++{
++	return { $: 'kill', a: worker };
++}
++
++var _Worker_stopOp = { $: 'stop' };
++
++
++var _Worker_mapOp = F2(function(func, op)
++{
++	return op.$ !== 'spawn'
++		? op
++		: { $: 'spawn', a: op.a, b: op.b
++		  , c: function(x) { return func(op.c(x)); }
++		  , d: function(x) { return func(op.d(x)); }
++		  , e: function(x) { return func(op.e(x)); }
++		  };
++});
++
++
++function _Worker_channel(worker)
++{
++	return worker.a;
++}
++
++
++var _Worker_execute = F2(function(router, op)
++{
++	return __Scheduler_binding(function(callback)
++	{
++		switch (op.$)
++		{
++			case 'spawn':
++				var w = new Worker(new URL(op.a, _Worker_baseUrl()), { type: 'module' });
++				var chan = { a: function(msg) { w.postMessage({ $: _Worker_MSG, a: msg }); } };
++				var handle = { a: chan, b: w };
++				w.onmessage = function(e)
++				{
++					__Scheduler_rawSpawn(A2(__Platform_sendToApp, router, op.d(e.data)));
++				};
++				w.onerror = function(e)
++				{
++					__Scheduler_rawSpawn(A2(__Platform_sendToApp, router, op.e(e.message || 'The worker crashed.')));
++				};
++				w.postMessage({ $: _Worker_INIT, a: op.b });
++				__Scheduler_rawSpawn(A2(__Platform_sendToApp, router, op.c(handle)));
++				break;
++
++			case 'send':
++				try
++				{
++					op.a.a(op.b);
++				}
++				catch (error)
++				{
++					console.error('Worker.send failed. Messages must be structured-cloneable (no functions):', error);
++				}
++				break;
++
++			case 'kill':
++				op.a.b.terminate();
++				break;
++
++			case 'stop':
++				self.close();
++				break;
++		}
++		callback(__Scheduler_succeed(__Utils_Tuple0));
++	});
++});
++
++
++// The main bundle defines __elmWorkerBaseUrl as import.meta.url (only ES
++// modules can, which is why workers require --output=something.mjs).
++function _Worker_baseUrl()
++{
++	return typeof __elmWorkerBaseUrl !== 'undefined' ? __elmWorkerBaseUrl : self.location.href;
++}
++
++
++
++// RUN
++//
++// The entry point of a worker bundle: essentially _Platform_initialize
++// wired to the worker's message port instead of flags and ports. The
++// program initializes when the spawner's INIT message arrives; the
++// browser queues messages posted before the module finishes loading.
++
++
++function _Worker_run(impl)
++{
++	var managers = {};
++	var model;
++
++	function sendToApp(msg, viewMetadata)
++	{
++		var pair = A2(impl.__$update, msg, model);
++		model = pair.a;
++		__Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
++	}
++
++	var parentChannel = { a: function(msg) { self.postMessage(msg); } };
++
++	self.onmessage = function(e)
++	{
++		var data = e.data;
++		if (data.$ === _Worker_INIT)
++		{
++			var pair = A2(impl.__$init, data.a, parentChannel);
++			model = pair.a;
++			__Platform_setupEffects(managers, sendToApp);
++			__Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
++		}
++		else
++		{
++			sendToApp(data.a);
++		}
++	};
++}
+-- 
+2.43.0
+
