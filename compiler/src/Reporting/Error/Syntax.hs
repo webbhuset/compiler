@@ -140,7 +140,6 @@ data Decl
   | Port Port Cursor
   | DeclType DeclType Cursor
   | DeclDef N.Name DeclDef Cursor
-  | DeclTag DeclTag Cursor
   --
   | DeclFreshLineAfterDocComment Cursor
 
@@ -188,6 +187,7 @@ data DeclType
   | DT_Name Cursor
   | DT_Alias TypeAlias Cursor
   | DT_Union CustomType Cursor
+  | DT_Tag DeclTag Cursor
   --
   | DT_IndentName Cursor
 
@@ -1504,9 +1504,6 @@ toDeclarationsReport source decl =
     DeclDef name declDef cur ->
       toDeclDefReport source name declDef cur
 
-    DeclTag tag cur ->
-      toDeclTagReport source tag cur
-
     DeclFreshLineAfterDocComment cur ->
       let
         region = toRegion cur
@@ -1855,15 +1852,15 @@ toDeclTagReport source tag startCur =
         surroundings = A.Region startCur cur
         region = toRegion cur
       in
-      Report.Report "EXPECTING VARIANT NAME" region [] $
+      Report.Report "EXPECTING TAG NAME" region [] $
         Code.toSnippet source surroundings (Just region)
           (
             D.reflow $
-              "I just saw the `variant` keyword, so I was expecting a name next, but I got stuck here:"
+              "I just saw `type tag`, so I was expecting a tag name next, but I got stuck here:"
           ,
             D.fillSep
-              ["Variant","declarations","look","like",D.dullyellow "variant Loading","or"
-              ,D.dullyellow "variant Success a" <> ","
+              ["Tag","declarations","look","like",D.dullyellow "type tag Loading","or"
+              ,D.dullyellow "type tag Success a" <> ","
               ,"so","I","was","expecting","a","capitalized","name","next."
               ]
           )
@@ -1873,14 +1870,14 @@ toDeclTagReport source tag startCur =
         surroundings = A.Region startCur cur
         region = toRegion cur
       in
-      Report.Report "PROBLEM IN VARIANT DECLARATION" region [] $
+      Report.Report "PROBLEM IN TAG DECLARATION" region [] $
         Code.toSnippet source surroundings (Just region)
           (
             D.reflow $
-              "I am partway through parsing a variant declaration, but I got stuck here:"
+              "I am partway through parsing a tag declaration, but I got stuck here:"
           ,
             D.reflow $
-              "I was expecting a lowercase type variable, like the `a` in `variant Success a`."
+              "I was expecting a lowercase type variable, like the `a` in `type tag Success a`."
           )
 
     DT_TagArgType cur ->
@@ -1888,20 +1885,20 @@ toDeclTagReport source tag startCur =
         surroundings = A.Region startCur cur
         region = toRegion cur
       in
-      Report.Report "TYPE IN VARIANT DECLARATION" region [] $
+      Report.Report "TYPE IN TAG DECLARATION" region [] $
         Code.toSnippet source surroundings (Just region)
           (
             D.reflow $
-              "I am partway through parsing a variant declaration, but I got stuck on\
+              "I am partway through parsing a tag declaration, but I got stuck on\
               \ what looks like a type:"
           ,
             D.stack
               [ D.reflow $
-                  "A variant declaration only takes lowercase type variables, like the\
+                  "A tag declaration only takes lowercase type variables, like the\
                   \ `a` in:"
-              , D.indent 4 $ D.dullyellow "variant Display a"
+              , D.indent 4 $ D.dullyellow "type tag Display a"
               , D.reflow $
-                  "The concrete payload type is written where the variant is used, for\
+                  "The concrete payload type is written where the tag is used, for\
                   \ example:"
               , D.indent 4 $ D.dullyellow "view : [ Loading, Display String ] -> Html msg"
               ]
@@ -1912,15 +1909,15 @@ toDeclTagReport source tag startCur =
         surroundings = A.Region startCur cur
         region = toRegion cur
       in
-      Report.Report "UNFINISHED VARIANT DECLARATION" region [] $
+      Report.Report "UNFINISHED TAG DECLARATION" region [] $
         Code.toSnippet source surroundings (Just region)
           (
             D.reflow $
-              "I just saw the `variant` keyword, so I was expecting a name next:"
+              "I just saw `type tag`, so I was expecting a tag name next:"
           ,
             D.reflow $
-              "It seems the declaration ends here. Variant declarations look like\
-              \ `variant Loading` or `variant Success a`."
+              "It seems the declaration ends here. Tag declarations look like\
+              \ `type tag Loading` or `type tag Success a`."
           )
 
     DT_TagIndentArg cur ->
@@ -1928,11 +1925,11 @@ toDeclTagReport source tag startCur =
         surroundings = A.Region startCur cur
         region = toRegion cur
       in
-      Report.Report "UNFINISHED VARIANT DECLARATION" region [] $
+      Report.Report "UNFINISHED TAG DECLARATION" region [] $
         Code.toSnippet source surroundings (Just region)
           (
             D.reflow $
-              "I am partway through parsing a variant declaration, but I got stuck here:"
+              "I am partway through parsing a tag declaration, but I got stuck here:"
           ,
             D.reflow $
               "I was expecting a lowercase type variable or the end of the declaration."
@@ -1967,6 +1964,9 @@ toDeclTypeReport source declType startCur =
 
     DT_Alias typeAlias cur ->
       toTypeAliasReport source typeAlias cur
+
+    DT_Tag tag cur ->
+      toDeclTagReport source tag cur
 
     DT_Union customType cur ->
       toCustomTypeReport source customType cur

@@ -5,9 +5,9 @@ records. Where a record type lists the fields a value *has*, a variant type
 lists the tags a value *can be*:
 
 ```elm
-variant Loading
-variant Success value
-variant Failure error
+type tag Loading
+type tag Success value
+type tag Failure error
 
 
 state : Int -> [ r | Loading, Success Int ]
@@ -39,13 +39,14 @@ tags it handles.
 
 ## Declaring tags
 
-Tags are declared at the top level with the `variant` keyword (which is now
+Tags are declared at the top level with `type tag` (`tag` is contextual, like
+the `alias` in `type alias`, so it is not
 reserved):
 
 ```elm
-variant Loading                 -- no arguments
-variant Success value           -- one argument
-variant Pair first second       -- two arguments
+type tag Loading                 -- no arguments
+type tag Success value           -- one argument
+type tag Pair first second       -- two arguments
 ```
 
 The lowercase names are type parameters, one per argument. They must be
@@ -184,8 +185,8 @@ construction is always open.
   ```elm
   type Tree = Tree [ Leaf, Node Tree Tree ]
 
-  variant Leaf
-  variant Node left right
+  type tag Leaf
+  type tag Node left right
   ```
 
 - **No ports.** Variant values cannot flow through ports; convert to records

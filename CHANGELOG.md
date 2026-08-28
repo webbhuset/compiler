@@ -261,8 +261,8 @@ are declared once and then combined structurally, so functions can accept
 exactly the tags they handle without a shared custom type:
 
 ```elm
-variant Loading
-variant Success value
+type tag Loading
+type tag Success value
 
 state : Int -> [ r | Loading, Success Int ]
 state n =
