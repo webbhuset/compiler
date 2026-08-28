@@ -55,8 +55,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - asset: elm-darwin-x64
-            runner: macos-13      # Intel
+          # Intel (macos-13) was dropped: GitHub retired the macos-13 runner
+          # image on 2025-12-04, so an x86_64 build would queue forever. Apple
+          # Silicon customers use darwin-arm64; it also runs under Rosetta 2.
           - asset: elm-darwin-arm64
             runner: macos-14      # Apple Silicon
     runs-on: ${{ matrix.runner }}
