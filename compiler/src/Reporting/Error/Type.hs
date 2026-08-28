@@ -566,9 +566,38 @@ problemToHint problem =
               ,D.dullyellow (D.fromName typo),"should","be"
               ,D.green (D.fromName nearest) <> "?"
               ]
-          , D.toSimpleHint
-              "These tags are matched by canonical name, so `Loading` declared in two\
-              \ different modules gives two different tags. Maybe an import is off?"
+          ]
+
+    T.TagNameClash name ->
+      [ D.toSimpleHint $
+          "Both rows have a tag spelled `" ++ Name.toChars name ++ "`, but they\
+          \ are DIFFERENT tags: a tag is identified by the module that declares\
+          \ it plus its name. There are probably two `variant " ++ Name.toChars name
+          ++ "` declarations in different modules — double check the imports on\
+          \ both sides so they refer to the same one."
+      ]
+
+    T.TagsUnhandled tags ->
+      case map (D.green . D.fromName) tags of
+        [] ->
+          []
+
+        [t1] ->
+          [ D.toFancyHint $
+              ["The",t1,"tag","can","still","occur","at","this","point,","but","it"
+              ,"is","not","handled","here.","Handle","it","before","this","point,"
+              ,"or","add","it","to","the","variant","row","that","is","expected!"
+              ]
+          ]
+
+        tagDocs ->
+          [ D.toFancyHint $
+              ["The"] ++ D.commaSep "and" id tagDocs
+              ++ ["tags","can","still","occur","at","this","point,","but","they"
+                 ,"are","not","handled","here.","Handle","them","before","this"
+                 ,"point,","or","add","them","to","the","variant","row","that"
+                 ,"is","expected!"
+                 ]
           ]
 
 

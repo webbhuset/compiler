@@ -25,6 +25,7 @@ import qualified Data.Name as Name
 import qualified Data.Bag as Bag
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Doc as D
+import qualified Reporting.Suggest as Suggest
 import qualified Type.Comparable as Comparable
 import qualified Reporting.Render.Type as RT
 import qualified Reporting.Render.Type.Localizer as L
@@ -198,6 +199,8 @@ data Problem
   | FieldTypo Name.Name [Name.Name]
   | FieldsMissing [Name.Name]
   | TagTypo Name.Name [Name.Name]
+  | TagNameClash Name.Name
+  | TagsUnhandled [Name.Name]
   | TagsMissing [Name.Name]
 
 
@@ -556,25 +559,58 @@ diffTagRow localizer tags1 ext1 tags2 ext2 =
   Diff doc1 doc2 $ merge status $
     case (hasFixedFields ext1, hasFixedFields ext2) of
       (True, True) ->
-        case Map.lookupMin left of
-          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags2))
-          Nothing ->
+        if not (Map.null left)
+          then Different $ Bag.one $ extraTagsProblem left tags2
+          else
             if Map.null right
               then Similar
               else Different $ Bag.one $ TagsMissing (map snd (Map.keys right))
 
       (False, True) ->
-        case Map.lookupMin left of
-          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags2))
-          Nothing        -> Similar
+        if Map.null left
+          then Similar
+          else Different $ Bag.one $ extraTagsProblem left tags2
 
       (True, False) ->
-        case Map.lookupMin right of
-          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags1))
-          Nothing        -> Similar
+        if Map.null right
+          then Similar
+          else Different $ Bag.one $ extraTagsProblem right tags1
 
       (False, False) ->
         Similar
+
+
+-- Tags on one side that a fixed row on the other side does not have. A
+-- same-spelled tag on the other side means a module mixup (tags are
+-- canonical), a near name is probably a typo, and anything else means the
+-- tags are simply not covered by the other row.
+extraTagsProblem
+  :: Map.Map (ModuleName.Canonical, Name.Name) v
+  -> Map.Map (ModuleName.Canonical, Name.Name) w
+  -> Problem
+extraTagsProblem extras others =
+  let
+    names = map snd (Map.keys extras)
+    otherNames = map snd (Map.keys others)
+
+    isClash t = elem t otherNames
+
+    isTypo t =
+      case Suggest.rank (Name.toChars t) Name.toChars otherNames of
+        (dist, _) : _ -> dist <= 2 && dist < length (Name.toChars t)
+        [] -> False
+  in
+  case filter isClash names of
+    t : _ ->
+      TagNameClash t
+
+    [] ->
+      case names of
+        [t] | isTypo t ->
+          TagTypo t otherNames
+
+        _ ->
+          TagsUnhandled names
 
 
 
