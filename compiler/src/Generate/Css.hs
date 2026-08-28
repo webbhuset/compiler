@@ -205,6 +205,7 @@ nodeDeps node =
     Opt.Define _ deps          -> deps
     Opt.DefineTailFunc _ _ deps -> deps
     Opt.Ctor _ _               -> Set.empty
+    Opt.Tag _                  -> Set.empty
     Opt.Enum _                 -> Set.empty
     Opt.Box                    -> Set.empty
     Opt.Link global            -> Set.singleton global
