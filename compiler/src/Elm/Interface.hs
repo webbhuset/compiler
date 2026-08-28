@@ -41,6 +41,7 @@ data Interface =
     , _values  :: Map.Map Name.Name Can.Annotation
     , _unions  :: Map.Map Name.Name Union
     , _aliases :: Map.Map Name.Name Alias
+    , _tags    :: Map.Map Name.Name Can.TagDecl
     , _binops  :: Map.Map Name.Name Binop
     , _comparables :: Set.Set (ModuleName.Canonical, Name.Name)
       -- all comparable newtypes visible from this module, including the
@@ -77,12 +78,13 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Set.Set (ModuleName.Canonical, Name.Name) -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations comparables =
+fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotations comparables =
   Interface
     { _home = home
     , _values = restrict exports annotations
     , _unions = restrictUnions exports unions
     , _aliases = restrictAliases exports aliases
+    , _tags = restrict exports tags
     , _binops = restrict exports (Map.map (toOp annotations) binops)
     , _comparables = comparables
     }
@@ -172,7 +174,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _ _) =
+private (Interface pkg _ unions aliases _ _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -203,8 +205,8 @@ privatize di =
 
 
 instance Binary Interface where
-  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get
-  put (Interface a b c d e f) = put a >> put b >> put c >> put d >> put e >> put f
+  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (Interface a b c d e f g) = put a >> put b >> put c >> put d >> put e >> put f >> put g
 
 
 instance Binary Union where

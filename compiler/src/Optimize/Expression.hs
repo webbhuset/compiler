@@ -53,6 +53,9 @@ optimize cycle (A.At region expression) =
     Can.VarCtor opts home name index _ ->
       Names.registerCtor home name index opts
 
+    Can.VarTag home name _ ->
+      Names.registerGlobal home name
+
     Can.VarDebug home name _ ->
       Names.registerDebug name home region
 
@@ -355,6 +358,29 @@ destructHelp path (A.At region pattern) revDs =
             _ ->
               do  name <- Names.generate
                   foldM (destructCtorArg (Opt.Root name)) (Opt.Destructor name path : revDs) args
+
+    Can.PTag _ _ _ args ->
+      case args of
+        [arg] ->
+          destructHelp (Opt.Index Index.first path) arg revDs
+
+        _ ->
+          case path of
+            Opt.Root _ ->
+              foldM destructTagArg revDs (Index.indexedMap (,) args)
+
+            _ ->
+              do  name <- Names.generate
+                  foldM
+                    (\ds ia -> destructTagArgAt (Opt.Root name) ds ia)
+                    (Opt.Destructor name path : revDs)
+                    (Index.indexedMap (,) args)
+      where
+        destructTagArg revDs_ (index, arg) =
+          destructHelp (Opt.Index index path) arg revDs_
+
+        destructTagArgAt root revDs_ (index, arg) =
+          destructHelp (Opt.Index index root) arg revDs_
 
 
 destructTwo :: Opt.Path -> Can.Pattern -> Can.Pattern -> [Opt.Destructor] -> Names.Tracker [Opt.Destructor]

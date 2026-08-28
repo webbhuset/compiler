@@ -9,6 +9,8 @@ module Type.Unify
 import qualified Data.Map.Strict as Map
 import qualified Data.Name as Name
 
+import qualified AST.Canonical as Can
+
 import qualified Elm.ModuleName as ModuleName
 import qualified Type.Comparable as Comparable
 import qualified Type.Error as Error
@@ -559,6 +561,23 @@ unifyStructure context flatType content otherContent =
                       Unify k ->
                         k vars ok err
 
+          (EmptyTagRow1, EmptyTagRow1) ->
+              merge context otherContent
+
+          (TagRow1 tags ext, EmptyTagRow1) | Map.null tags ->
+              subUnify ext (_second context)
+
+          (EmptyTagRow1, TagRow1 tags ext) | Map.null tags ->
+              subUnify (_first context) ext
+
+          (TagRow1 tags1 ext1, TagRow1 tags2 ext2) ->
+              Unify $ \vars ok err ->
+                do  structure1 <- gatherTags tags1 ext1
+                    structure2 <- gatherTags tags2 ext2
+                    case unifyTagRow context structure1 structure2 of
+                      Unify k ->
+                        k vars ok err
+
           (Tuple1 a b Nothing, Tuple1 x y Nothing) ->
               do  subUnify a x
                   subUnify b y
@@ -689,4 +708,104 @@ gatherFields fields variable =
 
         _ ->
             return (RecordStructure fields variable)
+
+
+
+-- UNIFY TAG ROWS
+
+
+unifyTagRow :: Context -> TagRowStructure -> TagRowStructure -> Unify ()
+unifyTagRow context (TagRowStructure tags1 ext1) (TagRowStructure tags2 ext2) =
+  let
+    sharedTags = Map.intersectionWith (,) tags1 tags2
+    uniqueTags1 = Map.difference tags1 tags2
+    uniqueTags2 = Map.difference tags2 tags1
+  in
+  if Map.null uniqueTags1 then
+
+    if Map.null uniqueTags2 then
+      do  subUnify ext1 ext2
+          unifySharedTags context sharedTags Map.empty ext1
+
+    else
+      do  subTagRow <- fresh context (Structure (TagRow1 uniqueTags2 ext2))
+          subUnify ext1 subTagRow
+          unifySharedTags context sharedTags Map.empty subTagRow
+
+  else
+
+    if Map.null uniqueTags2 then
+      do  subTagRow <- fresh context (Structure (TagRow1 uniqueTags1 ext1))
+          subUnify subTagRow ext2
+          unifySharedTags context sharedTags Map.empty subTagRow
+
+    else
+      do  let otherTags = Map.union uniqueTags1 uniqueTags2
+          ext <- fresh context Type.unnamedFlexVar
+          sub1 <- fresh context (Structure (TagRow1 uniqueTags1 ext))
+          sub2 <- fresh context (Structure (TagRow1 uniqueTags2 ext))
+          subUnify ext1 sub2
+          subUnify sub1 ext2
+          unifySharedTags context sharedTags otherTags ext
+
+
+unifySharedTags :: Context -> Map.Map Can.TagKey ([Variable], [Variable]) -> Map.Map Can.TagKey [Variable] -> Variable -> Unify ()
+unifySharedTags context sharedTags otherTags ext =
+  do  matchingTags <- Map.traverseMaybeWithKey unifyTagArgList sharedTags
+      if Map.size sharedTags == Map.size matchingTags
+        then merge context (Structure (TagRow1 (Map.union matchingTags otherTags) ext))
+        else mismatch
+
+
+unifyTagArgList :: Can.TagKey -> ([Variable], [Variable]) -> Unify (Maybe [Variable])
+unifyTagArgList _ (actuals, expecteds) =
+  if length actuals /= length expecteds then
+    -- should be impossible since both sides come from the same declaration,
+    -- but report a mismatch rather than crash if it ever happens
+    Unify $ \vars ok _ -> ok vars Nothing
+  else
+    unifyTagArgListHelp actuals (zip actuals expecteds)
+
+
+unifyTagArgListHelp :: [Variable] -> [(Variable, Variable)] -> Unify (Maybe [Variable])
+unifyTagArgListHelp actuals pairs =
+  case pairs of
+    [] ->
+      Unify $ \vars ok _ -> ok vars (Just actuals)
+
+    (actual, expected) : rest ->
+      Unify $ \vars ok err ->
+        case subUnify actual expected of
+          Unify k ->
+            k vars
+              (\vs () ->
+                  case unifyTagArgListHelp actuals rest of
+                    Unify k2 -> k2 vs ok err
+              )
+              (\vs () -> ok vs Nothing)
+
+
+
+-- GATHER TAG ROW STRUCTURE
+
+
+data TagRowStructure =
+  TagRowStructure
+    { _tags :: Map.Map Can.TagKey [Variable]
+    , _tagExtension :: Variable
+    }
+
+
+gatherTags :: Map.Map Can.TagKey [Variable] -> Variable -> IO TagRowStructure
+gatherTags tags variable =
+  do  (Descriptor content _ _ _) <- UF.get variable
+      case content of
+        Structure (TagRow1 subTags subExt) ->
+            gatherTags (Map.union tags subTags) subExt
+
+        Alias _ _ _ var ->
+            gatherTags tags var
+
+        _ ->
+            return (TagRowStructure tags variable)
 

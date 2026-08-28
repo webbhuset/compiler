@@ -228,6 +228,9 @@ checkPayload tipe =
     Can.TLambda _ _ ->
         Left (tipe, Error.Function)
 
+    Can.TTagRow _ _ ->
+        Left (tipe, Error.StructuralVariant)
+
     Can.TRecord _ (Just _) ->
         Left (tipe, Error.ExtendedRecord)
 

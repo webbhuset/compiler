@@ -36,6 +36,7 @@ data Decl
   = Value (Maybe Src.Comment) (A.Located Src.Value)
   | Union (Maybe Src.Comment) (A.Located Src.Union)
   | Alias (Maybe Src.Comment) (A.Located Src.Alias)
+  | TagDecl (Maybe Src.Comment) (A.Located Src.TagDecl)
   | Port (Maybe Src.Comment) Src.Port
 
 
@@ -46,6 +47,7 @@ declaration =
       oneOf E.DeclStart
         [ typeDecl maybeDocs start
         , portDecl maybeDocs
+        , tagDecl maybeDocs start
         , valueDecl maybeDocs start
         ]
 
@@ -209,6 +211,35 @@ chompVariants variants end =
           chompVariants (variant:variants) newEnd
     ]
     (reverse variants, end)
+
+
+
+-- STRUCTURAL VARIANT TAGS
+
+
+{-# INLINE tagDecl #-}
+tagDecl :: Maybe Src.Comment -> A.Position -> Space.Parser E.Decl Decl
+tagDecl maybeDocs start =
+  inContext E.DeclTag (Keyword.variant_ E.DeclStart) $
+    do  Space.chompAndCheckIndent E.DT_TagSpace E.DT_TagIndentName
+        name <- addLocation (Var.upper E.DT_TagName)
+        nameEnd <- getPosition
+        Space.chomp E.DT_TagSpace
+        (args, end) <- chompTagArgs [] nameEnd
+        let tag = A.at start end (Src.TagDecl name args)
+        return (TagDecl maybeDocs tag, end)
+
+
+chompTagArgs :: [A.Located Name.Name] -> A.Position -> Space.Parser E.DeclTag [A.Located Name.Name]
+chompTagArgs revArgs end =
+  oneOfWithFallback
+    [ do  Space.checkIndent end E.DT_TagIndentArg
+          arg <- addLocation (Var.lower E.DT_TagArg)
+          newEnd <- getPosition
+          Space.chomp E.DT_TagSpace
+          chompTagArgs (arg:revArgs) newEnd
+    ]
+    (reverse revArgs, end)
 
 
 

@@ -299,7 +299,7 @@ precDecoder =
 
 
 fromModule :: Can.Module -> IO (Either E.Error Module)
-fromModule modul@(Can.Module _ exports docs _ _ _ _ _) =
+fromModule modul@(Can.Module _ exports docs _ _ _ _ _ _) =
   case exports of
     Can.ExportEverything region ->
       return $ Left $ E.ImplicitExposing region
@@ -474,7 +474,7 @@ onlyInExports name (A.At region _) =
 
 
 checkDefs :: Map.Map Name.Name (A.Located Can.Export) -> Src.Comment -> Map.Map Name.Name Src.Comment -> Can.Module -> Either E.Error Module
-checkDefs exportDict overview comments (Can.Module name _ _ decls unions aliases infixes effects) =
+checkDefs exportDict overview comments (Can.Module name _ _ decls unions aliases _ infixes effects) =
   let
     types = gatherTypes decls Map.empty
     info = Info comments types unions aliases infixes effects
@@ -533,6 +533,12 @@ checkExport info name (A.At region export) =
           comment <- getComment region name info
           Result.ok $ \m ->
             m { _unions = Map.insert name (Union comment tvars []) (_unions m) }
+
+    Can.ExportTag ->
+      do  _comment <- getComment region name info
+          -- structural variant tags are not part of the docs.json format,
+          -- so the doc comment is checked but nothing is emitted
+          Result.ok $ \m -> m
 
     Can.ExportPort ->
       do  tipe <- getType name info

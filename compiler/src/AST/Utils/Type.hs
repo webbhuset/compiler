@@ -70,6 +70,9 @@ dealiasHelp typeTable tipe =
         (dealiasHelp typeTable b)
         (fmap (dealiasHelp typeTable) maybeC)
 
+    TTagRow tags ext ->
+      TTagRow (Map.map (map (dealiasHelp typeTable)) tags) ext
+
 
 dealiasField :: Map.Map Name.Name Type -> FieldType -> FieldType
 dealiasField typeTable (FieldType index tipe) =
@@ -103,6 +106,9 @@ deepDealias tipe =
 
     TTuple a b c ->
       TTuple (deepDealias a) (deepDealias b) (fmap deepDealias c)
+
+    TTagRow tags ext ->
+      TTagRow (Map.map (map deepDealias) tags) ext
 
 
 deepDealiasField :: FieldType -> FieldType

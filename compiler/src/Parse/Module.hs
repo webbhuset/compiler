@@ -90,16 +90,16 @@ chompModule projectType =
 checkModule :: ProjectType -> Module -> Either E.Error Src.Module
 checkModule projectType (Module maybeHeader imports infixes decls) =
   let
-    (values, unions, aliases, ports) = categorizeDecls [] [] [] [] decls
+    (values, unions, aliases, tags, ports) = categorizeDecls [] [] [] [] [] decls
   in
   case maybeHeader of
     Just (Header name effects exports docs) ->
-      Src.Module (Just name) exports (toDocs docs decls) imports values unions aliases infixes
+      Src.Module (Just name) exports (toDocs docs decls) imports values unions aliases tags infixes
         <$> checkEffects projectType ports effects
 
     Nothing ->
       Right $
-        Src.Module Nothing (A.At A.zero Src.Open) (Src.NoDocs A.zero) imports values unions aliases infixes $
+        Src.Module Nothing (A.At A.zero Src.Open) (Src.NoDocs A.zero) imports values unions aliases tags infixes $
           case ports of
             [] -> Src.NoEffects
             _:_ -> Src.Ports ports
@@ -138,18 +138,19 @@ checkEffects projectType ports effects =
 
 
 
-categorizeDecls :: [A.Located Src.Value] -> [A.Located Src.Union] -> [A.Located Src.Alias] -> [Src.Port] -> [Decl.Decl] -> ( [A.Located Src.Value], [A.Located Src.Union], [A.Located Src.Alias], [Src.Port] )
-categorizeDecls values unions aliases ports decls =
+categorizeDecls :: [A.Located Src.Value] -> [A.Located Src.Union] -> [A.Located Src.Alias] -> [A.Located Src.TagDecl] -> [Src.Port] -> [Decl.Decl] -> ( [A.Located Src.Value], [A.Located Src.Union], [A.Located Src.Alias], [A.Located Src.TagDecl], [Src.Port] )
+categorizeDecls values unions aliases tags ports decls =
   case decls of
     [] ->
-      (values, unions, aliases, ports)
+      (values, unions, aliases, tags, ports)
 
     decl:otherDecls ->
       case decl of
-        Decl.Value _ value -> categorizeDecls (value:values) unions aliases ports otherDecls
-        Decl.Union _ union -> categorizeDecls values (union:unions) aliases ports otherDecls
-        Decl.Alias _ alias -> categorizeDecls values unions (alias:aliases) ports otherDecls
-        Decl.Port  _ port_ -> categorizeDecls values unions aliases (port_:ports) otherDecls
+        Decl.Value _ value  -> categorizeDecls (value:values) unions aliases tags ports otherDecls
+        Decl.Union _ union  -> categorizeDecls values (union:unions) aliases tags ports otherDecls
+        Decl.Alias _ alias  -> categorizeDecls values unions (alias:aliases) tags ports otherDecls
+        Decl.TagDecl _ tag  -> categorizeDecls values unions aliases (tag:tags) ports otherDecls
+        Decl.Port  _ port_  -> categorizeDecls values unions aliases tags (port_:ports) otherDecls
 
 
 
@@ -174,10 +175,11 @@ getComments decls comments =
 
     decl:otherDecls ->
       case decl of
-        Decl.Value c (A.At _ (Src.Value n _ _ _)) -> getComments otherDecls (addComment c n comments)
-        Decl.Union c (A.At _ (Src.Union n _ _  )) -> getComments otherDecls (addComment c n comments)
-        Decl.Alias c (A.At _ (Src.Alias n _ _  )) -> getComments otherDecls (addComment c n comments)
-        Decl.Port  c         (Src.Port  n _    )  -> getComments otherDecls (addComment c n comments)
+        Decl.Value c (A.At _ (Src.Value n _ _ _))  -> getComments otherDecls (addComment c n comments)
+        Decl.Union c (A.At _ (Src.Union n _ _  ))  -> getComments otherDecls (addComment c n comments)
+        Decl.Alias c (A.At _ (Src.Alias n _ _  ))  -> getComments otherDecls (addComment c n comments)
+        Decl.TagDecl c (A.At _ (Src.TagDecl n _))  -> getComments otherDecls (addComment c n comments)
+        Decl.Port  c         (Src.Port  n _    )   -> getComments otherDecls (addComment c n comments)
 
 
 addComment :: Maybe Src.Comment -> A.Located Name.Name -> [(Name.Name,Src.Comment)] -> [(Name.Name,Src.Comment)]

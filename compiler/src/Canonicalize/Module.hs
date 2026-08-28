@@ -41,19 +41,19 @@ type Result i w a =
 
 
 canonicalize :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Result i [W.Warning] Can.Module
-canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ binops effects) =
+canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ binops effects) =
   do  let home = ModuleName.Canonical pkg (Src.getName modul)
       let cbinops = Map.fromList (map canonicalizeBinop binops)
 
-      (env, cunions, caliases) <-
+      (env, cunions, caliases, ctags) <-
         Local.add modul =<<
           Foreign.createInitialEnv home ifaces imports
 
       cvalues <- canonicalizeValues env values
       ceffects <- Effects.canonicalize env values cunions effects
-      cexports <- canonicalizeExports values cunions caliases cbinops ceffects exports
+      cexports <- canonicalizeExports values cunions caliases ctags cbinops ceffects exports
 
-      return $ Can.Module home cexports docs cvalues cunions caliases cbinops ceffects
+      return $ Can.Module home cexports docs cvalues cunions caliases ctags cbinops ceffects
 
 
 
@@ -209,18 +209,19 @@ canonicalizeExports
   :: [A.Located Src.Value]
   -> Map.Map Name.Name union
   -> Map.Map Name.Name alias
+  -> Map.Map Name.Name tag
   -> Map.Map Name.Name binop
   -> Can.Effects
   -> A.Located Src.Exposing
   -> Result i w Can.Exports
-canonicalizeExports values unions aliases binops effects (A.At region exposing) =
+canonicalizeExports values unions aliases tags binops effects (A.At region exposing) =
   case exposing of
     Src.Open ->
       Result.ok (Can.ExportEverything region)
 
     Src.Explicit exposeds ->
       do  let names = Map.fromList (map valueToName values)
-          infos <- traverse (checkExposed names unions aliases binops effects) exposeds
+          infos <- traverse (checkExposed names unions aliases tags binops effects) exposeds
           Can.Export <$> Dups.detect Error.ExportDuplicate (Dups.unions infos)
 
 
@@ -233,11 +234,12 @@ checkExposed
   :: Map.Map Name.Name value
   -> Map.Map Name.Name union
   -> Map.Map Name.Name alias
+  -> Map.Map Name.Name tag
   -> Map.Map Name.Name binop
   -> Can.Effects
   -> Src.Exposed
   -> Result i w (Dups.Dict (A.Located Can.Export))
-checkExposed values unions aliases binops effects exposed =
+checkExposed values unions aliases tags binops effects exposed =
   case exposed of
     Src.Lower (A.At region name) ->
       if Map.member name values then
@@ -263,18 +265,22 @@ checkExposed values unions aliases binops effects exposed =
         ok name region Can.ExportUnionOpen
       else if Map.member name aliases then
         Result.throw $ Error.ExportOpenAlias dotDotRegion name
+      else if Map.member name tags then
+        Result.throw $ Error.ExportOpenTag dotDotRegion name
       else
         Result.throw $ Error.ExportNotFound region Error.BadType name $
-          Map.keys unions ++ Map.keys aliases
+          Map.keys unions ++ Map.keys aliases ++ Map.keys tags
 
     Src.Upper (A.At region name) Src.Private ->
       if Map.member name unions then
         ok name region Can.ExportUnionClosed
       else if Map.member name aliases then
         ok name region Can.ExportAlias
+      else if Map.member name tags then
+        ok name region Can.ExportTag
       else
         Result.throw $ Error.ExportNotFound region Error.BadType name $
-          Map.keys unions ++ Map.keys aliases
+          Map.keys unions ++ Map.keys aliases ++ Map.keys tags
 
 
 checkPorts :: Can.Effects -> Name.Name -> Maybe [Name.Name]

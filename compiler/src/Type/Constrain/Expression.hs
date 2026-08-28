@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Type.Constrain.Expression
   ( constrain
   , constrainDef
@@ -54,6 +55,9 @@ constrain rtv (A.At region expression) expected =
 
     Can.VarCtor _ _ name _ annotation ->
       return $ CForeign region name annotation expected
+
+    Can.VarTag home name params ->
+      return $ CForeign region name (toTagAnnotation home name params) expected
 
     Can.VarDebug _ name annotation ->
       return $ CForeign region name annotation expected
@@ -153,6 +157,110 @@ constrain rtv (A.At region expression) expected =
 
     Can.Css _home (Css.Content _ types) ->
       constrainCss region types expected
+
+
+
+-- CONSTRAIN STRUCTURAL VARIANT TAGS
+
+
+-- Using a tag like `Loading` as an expression gives it the annotation
+--
+--     Loading : [ r | Loading ]
+--
+-- and a tag with arguments like `variant Success a` gives
+--
+--     Success : a -> [ r | Success a ]
+--
+-- The row is open so that branches can add more tags.
+--
+toTagAnnotation :: ModuleName.Canonical -> Name.Name -> [Name.Name] -> Can.Annotation
+toTagAnnotation home name params =
+  let
+    ext = freshExtName params
+    freeVars = Map.fromList (map (\v -> (v, ())) (ext : params))
+    rowType = Can.TTagRow (Map.singleton (home, name) (map Can.TVar params)) (Just ext)
+    tipe = foldr (Can.TLambda . Can.TVar) rowType params
+  in
+  Can.Forall freeVars tipe
+
+
+freshExtName :: [Name.Name] -> Name.Name
+freshExtName params =
+  freshExtNameHelp params (0 :: Int)
+
+
+freshExtNameHelp :: [Name.Name] -> Int -> Name.Name
+freshExtNameHelp params n =
+  let name = if n == 0 then "r" else Name.fromTypeVariable "r" n in
+  if elem name params then
+    freshExtNameHelp params (n + 1)
+  else
+    name
+
+
+
+-- TAG ROW CLOSING
+--
+-- A `case` with only tag patterns (and no catch-all) constrains its scrutinee
+-- to a CLOSED row containing exactly the matched tags. This is what makes tag
+-- matches exhaustive: an unhandled tag becomes a type error. The closing is
+-- computed recursively, so nested tag patterns close their payload rows too.
+-- A wildcard/variable pattern anywhere in a column leaves that row open.
+
+
+closeTagColumn :: [Can.Pattern] -> IO (Maybe ([Variable], Type))
+closeTagColumn column =
+  let
+    heads = map (dropAliases . A.toValue) column
+
+    isTag p =
+      case p of
+        Can.PTag _ _ _ _ -> True
+        _ -> False
+
+    addGroup p groups =
+      case p of
+        Can.PTag home name _ args -> Map.insertWith (++) (home, name) [args] groups
+        _ -> groups
+  in
+  if null heads || not (all isTag heads) then
+    return Nothing
+  else
+    do  let groups = foldr addGroup Map.empty heads
+        results <- traverse closeTagGroup groups
+        let vars = Map.foldr (\(vs, _) acc -> vs ++ acc) [] results
+        let tags = Map.map snd results
+        return $ Just (vars, TagRowN tags EmptyTagRowN)
+
+
+dropAliases :: Can.Pattern_ -> Can.Pattern_
+dropAliases pattern =
+  case pattern of
+    Can.PAlias subPattern _ -> dropAliases (A.toValue subPattern)
+    _ -> pattern
+
+
+closeTagGroup :: [[Can.Pattern]] -> IO ([Variable], [Type])
+closeTagGroup rows =
+  case rows of
+    [] ->
+      return ([], [])
+
+    firstRow : _ ->
+      do  results <- traverse (\i -> closeTagArg (map (!! i) rows)) [0 .. length firstRow - 1]
+          return (concatMap fst results, map snd results)
+
+
+closeTagArg :: [Can.Pattern] -> IO ([Variable], Type)
+closeTagArg column =
+  do  maybeClosing <- closeTagColumn column
+      case maybeClosing of
+        Just closing ->
+          return closing
+
+        Nothing ->
+          do  var <- mkFlexVar
+              return ([var], VarN var)
 
 
 
@@ -339,6 +447,17 @@ constrainCase rtv region expr branches expected =
       let ptrnType = VarN ptrnVar
       exprCon <- constrain rtv expr (NoExpectation ptrnType)
 
+      maybeClosing <- closeTagColumn (map (\(Can.CaseBranch p _) -> p) branches)
+      let (closingVars, closingCons) =
+            case maybeClosing of
+              Nothing ->
+                ([], [])
+
+              Just (cvars, closedType) ->
+                ( cvars
+                , [CPattern region E.PTags closedType (PFromContext region E.PCaseTags ptrnType)]
+                )
+
       case expected of
         FromAnnotation name arity _ tipe ->
           do  branchCons <- Index.indexedForA branches $ \index branch ->
@@ -346,7 +465,7 @@ constrainCase rtv region expr branches expected =
                   (PFromContext region (PCaseMatch index) ptrnType)
                   (FromAnnotation name arity (TypedCaseBranch index) tipe)
 
-              return $ exists [ptrnVar] $ CAnd (exprCon:branchCons)
+              return $ exists (ptrnVar:closingVars) $ CAnd (exprCon:branchCons ++ closingCons)
 
         _ ->
           do  branchVar <- mkFlexVar
@@ -357,10 +476,11 @@ constrainCase rtv region expr branches expected =
                   (PFromContext region (PCaseMatch index) ptrnType)
                   (FromContext region (CaseBranch index) branchType)
 
-              return $ exists [ptrnVar,branchVar] $
+              return $ exists (ptrnVar:branchVar:closingVars) $
                 CAnd
                   [ exprCon
                   , CAnd branchCons
+                  , CAnd closingCons
                   , CEqual region Case branchType expected
                   ]
 
@@ -566,13 +686,32 @@ constrainDestruct rtv region pattern expr bodyCon =
   do  patternVar <- mkFlexVar
       let patternType = VarN patternVar
 
-      (Pattern.State headers pvars revCons) <-
-        Pattern.add pattern (PNoExpectation patternType) Pattern.emptyState
+      state <-
+        addTagClosing region patternType [pattern] =<<
+          Pattern.add pattern (PNoExpectation patternType) Pattern.emptyState
+
+      let (Pattern.State headers pvars revCons) = state
 
       exprCon <-
         constrain rtv expr (FromContext region Destructure patternType)
 
       return $ CLet [] (patternVar:pvars) headers (CAnd (reverse (exprCon:revCons))) bodyCon
+
+
+-- Close the variant row when a tag pattern appears in a position that must
+-- be irrefutable (function arguments and `let` destructuring).
+addTagClosing :: A.Region -> Type -> [Can.Pattern] -> Pattern.State -> IO Pattern.State
+addTagClosing region tipe column state@(Pattern.State headers vars revCons) =
+  do  maybeClosing <- closeTagColumn column
+      case maybeClosing of
+        Nothing ->
+          return state
+
+        Just (cvars, closedType) ->
+          return $ Pattern.State
+            headers
+            (cvars ++ vars)
+            (CPattern region E.PTags closedType (PNoExpectation tipe) : revCons)
 
 
 
@@ -753,13 +892,14 @@ argsHelp args state =
           let resultType = VarN resultVar
           return $ Args [resultVar] resultType resultType state
 
-    pattern : otherArgs ->
+    pattern@(A.At region _) : otherArgs ->
       do  argVar <- mkFlexVar
           let argType = VarN argVar
 
           (Args vars tipe result newState) <-
             argsHelp otherArgs =<<
-              Pattern.add pattern (PNoExpectation argType) state
+              addTagClosing region argType [pattern] =<<
+                Pattern.add pattern (PNoExpectation argType) state
 
           return (Args (argVar:vars) (FunN argType tipe) result newState)
 
@@ -794,6 +934,7 @@ typedArgsHelp rtv name index args srcResultType state =
 
           (TypedArgs tipe resultType newState) <-
             typedArgsHelp rtv name (Index.next index) otherArgs srcResultType =<<
-              Pattern.add pattern expected state
+              addTagClosing region argType [pattern] =<<
+                Pattern.add pattern expected state
 
           return (TypedArgs (FunN argType tipe) resultType newState)

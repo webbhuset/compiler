@@ -72,6 +72,7 @@ reservedWords =
     , "import", "exposing"
     , "as"
     , "port"
+    , "variant"
     ]
 
 

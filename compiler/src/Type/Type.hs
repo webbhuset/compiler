@@ -85,6 +85,8 @@ data FlatType
     | Record1 (Map.Map Name.Name Variable) Variable
     | Unit1
     | Tuple1 Variable Variable (Maybe Variable)
+    | EmptyTagRow1
+    | TagRow1 (Map.Map Can.TagKey [Variable]) Variable
 
 
 data Type
@@ -97,6 +99,8 @@ data Type
     | RecordN (Map.Map Name.Name Type) Type
     | UnitN
     | TupleN Type Type (Maybe Type)
+    | EmptyTagRowN
+    | TagRowN (Map.Map Can.TagKey [Type]) Type
 
 
 
@@ -420,6 +424,23 @@ termToCanType term =
         <*> variableToCanType b
         <*> traverse variableToCanType maybeC
 
+    EmptyTagRow1 ->
+      return $ Can.TTagRow Map.empty Nothing
+
+    TagRow1 tags extension ->
+      do  canTags <- traverse (traverse variableToCanType) tags
+          canExt <- Type.iteratedDealias <$> variableToCanType extension
+          return $
+              case canExt of
+                Can.TTagRow subTags subExt ->
+                    Can.TTagRow (Map.union subTags canTags) subExt
+
+                Can.TVar name ->
+                    Can.TTagRow canTags (Just name)
+
+                _ ->
+                    error "Used toAnnotation on a type that is not well-formed"
+
 
 fieldToCanType :: Variable -> StateT NameState IO Can.FieldType
 fieldToCanType variable =
@@ -547,6 +568,26 @@ termToErrorType term =
         <$> variableToErrorType a
         <*> variableToErrorType b
         <*> traverse variableToErrorType maybeC
+
+    EmptyTagRow1 ->
+      return $ ET.TagRow Map.empty ET.Closed
+
+    TagRow1 tags extension ->
+      do  errTags <- traverse (traverse variableToErrorType) tags
+          errExt <- ET.iteratedDealias <$> variableToErrorType extension
+          return $
+              case errExt of
+                ET.TagRow subTags subExt ->
+                    ET.TagRow (Map.union subTags errTags) subExt
+
+                ET.FlexVar ext ->
+                    ET.TagRow errTags (ET.FlexOpen ext)
+
+                ET.RigidVar ext ->
+                    ET.TagRow errTags (ET.RigidOpen ext)
+
+                _ ->
+                    error "Used toErrorType on a type that is not well-formed"
 
 
 
@@ -699,6 +740,13 @@ getVarNames var takenNames =
 
                   Tuple1 a b (Just c) ->
                     getVarNames a =<< getVarNames b =<< getVarNames c takenNames
+
+                  EmptyTagRow1 ->
+                    return takenNames
+
+                  TagRow1 tags extension ->
+                    getVarNames extension =<<
+                      foldrM (\args names -> foldrM getVarNames names args) takenNames (Map.elems tags)
 
 
 

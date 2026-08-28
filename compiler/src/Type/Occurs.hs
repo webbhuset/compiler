@@ -72,6 +72,16 @@ occursHelp seen var foundCycle =
                           occursHelp newSeen b =<<
                             occursHelp newSeen c foundCycle
 
+                EmptyTagRow1 ->
+                    return foundCycle
+
+                TagRow1 tags ext ->
+                    occursHelp newSeen ext =<<
+                      foldrM
+                        (\args acc -> foldrM (occursHelp newSeen) acc args)
+                        foundCycle
+                        (Map.elems tags)
+
           Alias _ _ args _ ->
               foldrM (occursHelp (var:seen)) foundCycle (map snd args)
 

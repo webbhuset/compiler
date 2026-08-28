@@ -253,6 +253,11 @@ addGlobalHelp mode graph global state =
         var global (Expr.generateCtor mode global index arity)
       )
 
+    Opt.Tag arity ->
+      addStmt state (
+        var global (Expr.generateTagCtor global arity)
+      )
+
     Opt.Link linkedGlobal ->
       addGlobal mode graph state linkedGlobal
 

@@ -47,6 +47,7 @@ data Type
   | Unit
   | Tuple Type Type (Maybe Type)
   | Alias ModuleName.Canonical Name.Name [(Name.Name, Type)] Type
+  | TagRow (Map.Map (ModuleName.Canonical, Name.Name) [Type]) Extension
 
 
 data Super
@@ -112,6 +113,9 @@ toDoc localizer ctx tipe =
     Record fields ext ->
       RT.record (fieldsToDocs localizer fields) (extToDoc ext)
 
+    TagRow tags ext ->
+      RT.tagRow (tagsToDocs localizer tags) (extToDoc ext)
+
     Unit ->
       "()"
 
@@ -144,6 +148,18 @@ addField localizer fieldName fieldType docs =
     t = toDoc localizer RT.None fieldType
   in
   (f,t) : docs
+
+
+tagsToDocs :: L.Localizer -> Map.Map (ModuleName.Canonical, Name.Name) [Type] -> [D.Doc]
+tagsToDocs localizer tags =
+  map (tagToDoc localizer) (Map.toList tags)
+
+
+tagToDoc :: L.Localizer -> ((ModuleName.Canonical, Name.Name), [Type]) -> D.Doc
+tagToDoc localizer ((home, name), args) =
+  RT.apply RT.None
+    (L.toDoc localizer home name)
+    (map (toDoc localizer RT.App) args)
 
 
 extToDoc :: Extension -> Maybe D.Doc
@@ -181,6 +197,8 @@ data Problem
   | BadRigidSuper Super Name.Name Type
   | FieldTypo Name.Name [Name.Name]
   | FieldsMissing [Name.Name]
+  | TagTypo Name.Name [Name.Name]
+  | TagsMissing [Name.Name]
 
 
 data Direction = Have | Need
@@ -273,6 +291,9 @@ toDiff localizer ctx tipe1 tipe2 =
 
     (Record fields1 ext1, Record fields2 ext2) ->
       diffRecord localizer fields1 ext1 fields2 ext2
+
+    (TagRow tags1 ext1, TagRow tags2 ext2) ->
+      diffTagRow localizer tags1 ext1 tags2 ext2
 
     (Type home1 name1 args1, Type home2 name2 args2) | home1 == home2 && name1 == name2 ->
       RT.apply ctx (L.toDoc localizer home1 name1)
@@ -481,8 +502,79 @@ diffAliasedRecord localizer t1 t2 =
     (Record fields1 ext1, Record fields2 ext2) ->
       Just (diffRecord localizer fields1 ext1 fields2 ext2)
 
+    (TagRow tags1 ext1, TagRow tags2 ext2) ->
+      Just (diffTagRow localizer tags1 ext1 tags2 ext2)
+
     _ ->
       Nothing
+
+
+
+-- TAG ROW DIFFS
+
+
+diffTagRow
+  :: L.Localizer
+  -> Map.Map (ModuleName.Canonical, Name.Name) [Type]
+  -> Extension
+  -> Map.Map (ModuleName.Canonical, Name.Name) [Type]
+  -> Extension
+  -> Diff D.Doc
+diffTagRow localizer tags1 ext1 tags2 ext2 =
+  let
+    toUnknownDoc key args =
+      D.dullyellow (tagToDoc localizer (key, args))
+
+    toOverlapDoc key@(home, name) args1 args2 =
+      if length args1 == length args2 then
+        RT.apply RT.None (L.toDoc localizer home name)
+          <$> sequenceA (zipWith (toDiff localizer RT.App) args1 args2)
+      else
+        different
+          (D.dullyellow (tagToDoc localizer (key, args1)))
+          (D.dullyellow (tagToDoc localizer (key, args2)))
+          Bag.empty
+
+    left = Map.mapWithKey toUnknownDoc (Map.difference tags1 tags2)
+    both = Map.intersectionWithKey toOverlapDoc tags1 tags2
+    right = Map.mapWithKey toUnknownDoc (Map.difference tags2 tags1)
+
+    tagsDiff =
+      Map.elems <$>
+        if Map.null left && Map.null right then
+          sequenceA both
+        else
+          Map.union
+            <$> sequenceA both
+            <*> Diff left right (Different Bag.empty)
+
+    (Diff doc1 doc2 status) =
+      RT.tagRow
+        <$> tagsDiff
+        <*> extToDiff ext1 ext2
+  in
+  Diff doc1 doc2 $ merge status $
+    case (hasFixedFields ext1, hasFixedFields ext2) of
+      (True, True) ->
+        case Map.lookupMin left of
+          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags2))
+          Nothing ->
+            if Map.null right
+              then Similar
+              else Different $ Bag.one $ TagsMissing (map snd (Map.keys right))
+
+      (False, True) ->
+        case Map.lookupMin left of
+          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags2))
+          Nothing        -> Similar
+
+      (True, False) ->
+        case Map.lookupMin right of
+          Just ((_,t),_) -> Different $ Bag.one $ TagTypo t (map snd (Map.keys tags1))
+          Nothing        -> Similar
+
+      (False, False) ->
+        Similar
 
 
 

@@ -40,12 +40,13 @@ type Annotations =
 
 
 optimize :: Annotations -> Can.Module -> Result i [W.Warning] Opt.LocalGraph
-optimize annotations (Can.Module home _ _ decls unions aliases _ effects) =
+optimize annotations (Can.Module home _ _ decls unions aliases tags _ effects) =
   addDecls home annotations decls $
     addEffects home effects $
       addUnions home unions $
-        addAliases home aliases $
-          Opt.LocalGraph Nothing Map.empty Map.empty
+        addTags home tags $
+          addAliases home aliases $
+            Opt.LocalGraph Nothing Map.empty Map.empty
 
 
 
@@ -64,6 +65,16 @@ addUnions home unions (Opt.LocalGraph main nodes fields) =
 addUnion :: ModuleName.Canonical -> Can.Union -> Nodes -> Nodes
 addUnion home (Can.Union _ ctors _ opts) nodes =
   List.foldl' (addCtorNode home opts) nodes ctors
+
+
+addTags :: ModuleName.Canonical -> Map.Map Name.Name Can.TagDecl -> Opt.LocalGraph -> Opt.LocalGraph
+addTags home tags (Opt.LocalGraph main nodes fields) =
+  Opt.LocalGraph main (Map.foldrWithKey (addTagNode home) nodes tags) fields
+
+
+addTagNode :: ModuleName.Canonical -> Name.Name -> Can.TagDecl -> Nodes -> Nodes
+addTagNode home name (Can.TagDecl params) nodes =
+  Map.insert (Opt.Global home name) (Opt.Tag (length params)) nodes
 
 
 addCtorNode :: ModuleName.Canonical -> Can.CtorOpts -> Nodes -> Can.Ctor -> Nodes

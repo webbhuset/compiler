@@ -603,7 +603,7 @@ crawlFile foreignDeps mvar pkg src docsStatus expectedName path =
   do  bytes <- File.readUtf8 path
       result <- Parse.fromByteString (Parse.Package pkg) bytes
       case result of
-        Right modul@(Src.Module (Just (A.At _ actualName)) _ _ imports _ _ _ _ _) | expectedName == actualName ->
+        Right modul@(Src.Module (Just (A.At _ actualName)) _ _ imports _ _ _ _ _ _) | expectedName == actualName ->
           do  deps <- crawlImports foreignDeps mvar pkg src imports
               return (Just (SLocal docsStatus deps modul))
 
@@ -644,7 +644,7 @@ crawlKernel foreignDeps mvar pkg src name =
 getDepHome :: ForeignInterface -> Maybe Pkg.Name
 getDepHome fi =
   case fi of
-    ForeignSpecific (I.Interface pkg _ _ _ _ _) -> Just pkg
+    ForeignSpecific (I.Interface pkg _ _ _ _ _ _) -> Just pkg
     ForeignAmbiguous                          -> Nothing
 
 

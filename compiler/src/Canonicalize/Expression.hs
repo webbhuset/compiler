@@ -762,3 +762,6 @@ toVarCtor name ctor =
         freeVars = Map.fromList (map (\v -> (v, ())) vars)
       in
       Can.VarCtor Can.Normal home name Index.first (Can.Forall freeVars tipe)
+
+    Env.TagCtor home params ->
+      Can.VarTag home name params

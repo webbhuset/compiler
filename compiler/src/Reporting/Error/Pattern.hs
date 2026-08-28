@@ -145,6 +145,16 @@ patternToDoc context pattern =
       else
         ctorDoc
 
+    NonList (P.Tag (_, name) args) ->
+      let
+        tagDoc =
+          D.hsep (D.fromName name : map (patternToDoc Arg) args)
+      in
+      if context == Arg && length args > 0 then
+        "(" <> tagDoc <> ")"
+      else
+        tagDoc
+
     FiniteList [] ->
       "[]"
 

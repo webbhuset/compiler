@@ -40,6 +40,7 @@ data Type
   | Record [(Name.Name, Type)] (Maybe Name.Name)
   | Unit
   | Tuple Type Type [Type]
+  | TagRow [(Name.Name, [Type])] (Maybe Name.Name)
 
 
 data DebugMetadata =
@@ -90,6 +91,18 @@ toDoc localizer context tipe =
       RT.record
         (map (entryToDoc localizer) fields)
         (fmap D.fromName ext)
+
+    TagRow tags ext ->
+      RT.tagRow
+        (map (tagToDoc localizer) tags)
+        (fmap D.fromName ext)
+
+
+tagToDoc :: L.Localizer -> (Name.Name, [Type]) -> D.Doc
+tagToDoc localizer (tag, args) =
+  RT.apply RT.None
+    (D.fromName tag)
+    (map (toDoc localizer RT.App) args)
 
 
 entryToDoc :: L.Localizer -> (Name.Name, Type) -> (D.Doc, D.Doc)
@@ -153,6 +166,12 @@ fromRawType (A.At _ astType) =
         let fromField (A.At _ field, tipe) = (field, fromRawType tipe) in
         Record
           (map fromField fields)
+          (fmap A.toValue ext)
+
+    Src.TTagRow entries ext ->
+        let fromEntry (Src.TagEntry _ _ tag args) = (tag, map fromRawType args) in
+        TagRow
+          (map fromEntry entries)
           (fmap A.toValue ext)
 
 
