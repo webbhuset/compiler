@@ -8,6 +8,7 @@ module Type.Constrain.Expression
 
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Name as Name
 
 import qualified AST.Canonical as Can
@@ -264,6 +265,112 @@ closeTagArg column =
 
 
 
+-- CATCH-ALL NARROWING (ROW SUBTRACTION)
+--
+-- In `case s of Loading -> x ; other -> ...` the `other` variable can never
+-- hold a Loading value at runtime, so it is bound at the scrutinee row MINUS
+-- the tags matched by the earlier branches:
+--
+--     s ~ [ tail | Loading ]      other : tail
+--
+-- This is what makes row subtraction expressible:
+--
+--     removeLoading : r -> [ r | Loading ] -> r
+--
+-- Only tags that are matched IRREFUTABLY are subtracted: `Wrap (Ok n)` does
+-- not consume the whole Wrap tag, since `Wrap (Err e)` values still reach the
+-- catch-all branch. Tags matched with refutable arguments simply flow into
+-- the tail like any other unmatched tag.
+
+
+narrowTagColumn :: [Can.Pattern] -> IO (Maybe ([Variable], Type, Variable))
+narrowTagColumn patterns =
+  case reverse patterns of
+    lastPattern : earlierRev | not (null earlierRev) ->
+      let
+        earlier = map (dropAliases . A.toValue) earlierRev
+
+        isTag p =
+          case p of
+            Can.PTag _ _ _ _ -> True
+            _ -> False
+
+        subtractable p =
+          case p of
+            Can.PTag home name _ args | all isIrrefutable args ->
+              Just ((home, name), length args)
+
+            _ ->
+              Nothing
+
+        tagsToCut = Map.fromList (Maybe.mapMaybe subtractable earlier)
+      in
+      if not (all isTag earlier) || Map.null tagsToCut || not (bindsCatchAll lastPattern) then
+        return Nothing
+      else
+        do  tailVar <- mkFlexVar
+            tagArgs <- traverse (\arity -> traverse (\_ -> mkFlexVar) [1 .. arity]) tagsToCut
+            let rowType = TagRowN (Map.map (map VarN) tagArgs) (VarN tailVar)
+            let vars = tailVar : concat (Map.elems tagArgs)
+            return $ Just (vars, rowType, tailVar)
+
+    _ ->
+      return Nothing
+
+
+-- Is this pattern a variable (or an alias over a wildcard/variable) so that
+-- narrowing actually binds something?
+bindsCatchAll :: Can.Pattern -> Bool
+bindsCatchAll (A.At _ pattern) =
+  case pattern of
+    Can.PVar _ ->
+      True
+
+    Can.PAlias subPattern _ ->
+      isCatchAllShape subPattern
+
+    _ ->
+      False
+
+
+isCatchAllShape :: Can.Pattern -> Bool
+isCatchAllShape (A.At _ pattern) =
+  case pattern of
+    Can.PAnything -> True
+    Can.PVar _ -> True
+    Can.PAlias subPattern _ -> isCatchAllShape subPattern
+    _ -> False
+
+
+isIrrefutable :: Can.Pattern -> Bool
+isIrrefutable (A.At _ pattern) =
+  case pattern of
+    Can.PAnything ->
+      True
+
+    Can.PVar _ ->
+      True
+
+    Can.PRecord _ ->
+      True
+
+    Can.PUnit ->
+      True
+
+    Can.PAlias subPattern _ ->
+      isIrrefutable subPattern
+
+    Can.PTuple a b maybeC ->
+      isIrrefutable a && isIrrefutable b && maybe True isIrrefutable maybeC
+
+    Can.PCtor _ _ (Can.Union _ _ numAlts _) _ _ args ->
+      numAlts == 1 && all (\(Can.PatternCtorArg _ _ arg) -> isIrrefutable arg) args
+
+    _ ->
+      False
+
+
+
 -- CONSTRAIN LAMBDA
 
 
@@ -447,25 +554,50 @@ constrainCase rtv region expr branches expected =
       let ptrnType = VarN ptrnVar
       exprCon <- constrain rtv expr (NoExpectation ptrnType)
 
-      maybeClosing <- closeTagColumn (map (\(Can.CaseBranch p _) -> p) branches)
-      let (closingVars, closingCons) =
-            case maybeClosing of
-              Nothing ->
-                ([], [])
+      let patterns = map (\(Can.CaseBranch p _) -> p) branches
+      maybeClosing <- closeTagColumn patterns
 
-              Just (cvars, closedType) ->
-                ( cvars
-                , [CPattern region E.PTags closedType (PFromContext region E.PCaseTags ptrnType)]
-                )
+      (rowVars, narrowCons, closingCons, maybeTailType) <-
+        case maybeClosing of
+          Just (cvars, closedType) ->
+            return
+              ( cvars
+              , []
+              , [CPattern region E.PTags closedType (PFromContext region E.PCaseTags ptrnType)]
+              , Nothing
+              )
+
+          Nothing ->
+            do  maybeNarrowing <- narrowTagColumn patterns
+                case maybeNarrowing of
+                  Nothing ->
+                    return ([], [], [], Nothing)
+
+                  Just (nvars, rowType, tailVar) ->
+                    return
+                      ( nvars
+                      , [CPattern region E.PTags rowType (PNoExpectation ptrnType)]
+                      , []
+                      , Just (VarN tailVar)
+                      )
+
+      let numBranches = length branches
+
+      -- the catch-all branch (if narrowing applies) matches the scrutinee row
+      -- minus the subtracted tags
+      let branchPatternType index =
+            case maybeTailType of
+              Just tailType | Index.toHuman index == numBranches -> tailType
+              _ -> ptrnType
 
       case expected of
         FromAnnotation name arity _ tipe ->
           do  branchCons <- Index.indexedForA branches $ \index branch ->
                 constrainCaseBranch rtv branch
-                  (PFromContext region (PCaseMatch index) ptrnType)
+                  (PFromContext region (PCaseMatch index) (branchPatternType index))
                   (FromAnnotation name arity (TypedCaseBranch index) tipe)
 
-              return $ exists (ptrnVar:closingVars) $ CAnd (exprCon:branchCons ++ closingCons)
+              return $ exists (ptrnVar:rowVars) $ CAnd (exprCon : narrowCons ++ branchCons ++ closingCons)
 
         _ ->
           do  branchVar <- mkFlexVar
@@ -473,12 +605,13 @@ constrainCase rtv region expr branches expected =
 
               branchCons <- Index.indexedForA branches $ \index branch ->
                 constrainCaseBranch rtv branch
-                  (PFromContext region (PCaseMatch index) ptrnType)
+                  (PFromContext region (PCaseMatch index) (branchPatternType index))
                   (FromContext region (CaseBranch index) branchType)
 
-              return $ exists (ptrnVar:branchVar:closingVars) $
+              return $ exists (ptrnVar:branchVar:rowVars) $
                 CAnd
                   [ exprCon
+                  , CAnd narrowCons
                   , CAnd branchCons
                   , CAnd closingCons
                   , CEqual region Case branchType expected
