@@ -94,6 +94,8 @@ data FlatType
     | Unit1
     | Pair1 Variable Variable
     | Triple1 Variable Variable Variable
+    | EmptyTagRow1
+    | TagRow1 (Map.Map Can.TagKey [Variable]) Variable
 
 
 data Type
@@ -107,6 +109,8 @@ data Type
     | UnitN
     | PairN Type Type
     | TripleN Type Type Type
+    | EmptyTagRowN
+    | TagRowN (Map.Map Can.TagKey [Type]) Type
 
 
 
@@ -417,6 +421,23 @@ termToCanType aliasArgs term =
         <*> go b
         <*> go c
 
+    EmptyTagRow1 ->
+      return $ Can.TTagRow Map.empty Nothing
+
+    TagRow1 tags extension ->
+      do  canTags <- traverse (traverse go) tags
+          canExt <- Type.iteratedDealias <$> go extension
+          return $
+              case canExt of
+                Can.TTagRow subTags subExt ->
+                    Can.TTagRow (Map.union subTags canTags) subExt
+
+                Can.TVar name ->
+                    Can.TTagRow canTags (Just name)
+
+                _ ->
+                    $(Crash.crash 'termToCanType) "Used toAnnotation on a type that is not well-formed"
+
 
 fieldToCanType :: [(Variable, Can.Type)] -> Variable -> StateT NameState IO Can.FieldType
 fieldToCanType aliasArgs variable =
@@ -577,6 +598,26 @@ termToErrorType aliasArgs term =
     Pair1   a b   -> ET.Pair   <$> go a <*> go b
     Triple1 a b c -> ET.Triple <$> go a <*> go b <*> go c
 
+    EmptyTagRow1 ->
+      return $ ET.TagRow Map.empty ET.Closed
+
+    TagRow1 tags extension ->
+      do  errTags <- traverse (traverse go) tags
+          errExt <- ET.iteratedDealias <$> go extension
+          return $
+              case errExt of
+                ET.TagRow subTags subExt ->
+                    ET.TagRow (Map.union subTags errTags) subExt
+
+                ET.FlexVar ext ->
+                    ET.TagRow errTags (ET.FlexOpen ext)
+
+                ET.RigidVar ext ->
+                    ET.TagRow errTags (ET.RigidOpen ext)
+
+                _ ->
+                    $(Crash.crash 'termToErrorType) "Used toErrorType on a type that is not well-formed"
+
 
 
 -- MANAGE FRESH VARIABLE NAMES
@@ -699,6 +740,13 @@ getVarNames var takenNames =
                   Unit1         -> return takenNames
                   Pair1   a b   -> getVarNames a =<< getVarNames b takenNames
                   Triple1 a b c -> getVarNames a =<< getVarNames b =<< getVarNames c takenNames
+
+                  EmptyTagRow1 ->
+                    return takenNames
+
+                  TagRow1 tags extension ->
+                    getVarNames extension =<<
+                      foldrM (\args names -> foldrM getVarNames names args) takenNames (Map.elems tags)
 
 
 

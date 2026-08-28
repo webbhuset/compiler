@@ -88,7 +88,7 @@ data Binop = Binop Comment Type.Type Op.Associativity Op.Precedence
 
 
 fromModule :: Can.Module -> IO (Either E.Error Module)
-fromModule modul@(Can.Module _ exports docs _ _ _ _ _) =
+fromModule modul@(Can.Module _ exports docs _ _ _ _ _ _) =
   case exports of
     Can.ExportEverything region ->
       return $ Left $ E.ImplicitExposing region
@@ -517,7 +517,7 @@ onlyInDocs errDup errDoc name regions =
 
 
 checkDefs :: Map.Map T.Name (A.Region, Can.ExportType) -> Map.Map N.Name A.Region -> Map.Map Op.Name A.Region -> Src.Comment -> Map.Map N.Name Src.Comment -> Map.Map T.Name Src.Comment -> Can.Module -> Either E.Error Module
-checkDefs exportTypes exportValues exportBinops (Src.Comment overview) vComments tComments (Can.Module (ModuleName.Canonical _ name) _ _ decls unions aliases binops _) =
+checkDefs exportTypes exportValues exportBinops (Src.Comment overview) vComments tComments (Can.Module (ModuleName.Canonical _ name) _ _ decls unions aliases _ binops _) =
   case snd $ Result.run checker of
     Right a -> Right a
     Left xs -> Left $ E.DefProblems (OOM.destruct NE.List xs)
@@ -525,12 +525,18 @@ checkDefs exportTypes exportValues exportBinops (Src.Comment overview) vComments
     env =
       Env tComments unions aliases vComments (gatherTypes decls Map.empty)
 
+    -- structural variant tags are not part of the docs.json format,
+    -- so their doc comments are checked but nothing is emitted
+    (exportTags, exportRealTypes) =
+      Map.partition (\(_, export) -> case export of { Can.ExportTag -> True ; _ -> False }) exportTypes
+
     checker =
-      (\ts vs bs ->
+      (\_ ts vs bs ->
           let (us,as) = Map.mapEither id ts in
           Module name (Json.fromComment overview) us as vs bs
       )
-        <$> Map.traverseWithKey (checkType  env) exportTypes
+        <$> Map.traverseWithKey (checkTag   env) exportTags
+        <*> Map.traverseWithKey (checkType  env) exportRealTypes
         <*> Map.traverseWithKey (checkValue env) exportValues
         <*> Map.traverseWithKey (checkBinop env binops) exportBinops
 
@@ -543,6 +549,12 @@ data Env =
     , _v_comments :: Map.Map N.Name Src.Comment
     , _v_types    :: Map.Map N.Name (Either A.Region Can.Type)
     }
+
+
+checkTag :: Env -> T.Name -> (A.Region, Can.ExportType) -> Result.Result x w E.DefProblem ()
+checkTag (Env _ _ _ comments _) name (region, _) =
+  do  _ <- getComment region (T.nameToName name) comments E.NoComment_Var
+      Result.ok ()
 
 
 checkValue :: Env -> N.Name -> A.Region -> Result.Result x w E.DefProblem Value
@@ -568,6 +580,9 @@ checkType (Env comments unions aliases _ _) name (region, export) =
           Can.ExportUnionClosed ->
             let (Can.Union tvars _ _ _) = $(Map.require 'checkType) name unions T.nameToChars in
             Left $ Union comment tvars []
+
+          Can.ExportTag ->
+            $(Crash.crash 'checkType) "tags are filtered out in checkDefs"
 
 
 checkBinop :: Env -> Map.Map Op.Name Can.Binop -> Op.Name -> A.Region -> Result.Result x w E.DefProblem Binop

@@ -22,6 +22,8 @@ module AST.Canonical
   , Binop(..)
   , Union(..)
   , Ctor(..)
+  , TagDecl(..)
+  , TagKey
   , Exports(..)
   , ExportType(..)
   , Effects(..)
@@ -89,6 +91,7 @@ data Expr_
   | VarKernel Module.Kernel N.Name
   | VarForeign ModuleName.Canonical N.Name Annotation
   | VarCtor CtorOpts ModuleName.Canonical N.Name Index.ZeroBased Annotation
+  | VarTag ModuleName.Canonical N.Name [T.Var] -- CACHE type params for inference
   | VarDebug ModuleName.Canonical N.Name Annotation
   | VarOperator Op.Name ModuleName.Canonical N.Name Annotation -- CACHE real name for optimization
   | Chr Char
@@ -177,6 +180,12 @@ data Pattern_
       -- CACHE _p_index to replace _p_name in PROD code gen
       -- CACHE _p_opts to allocate less in PROD code gen
       -- CACHE _p_alts and _p_numAlts for exhaustiveness checker
+  | PTag
+      { _pt_home :: ModuleName.Canonical
+      , _pt_name :: N.Name
+      , _pt_params :: [T.Var] -- CACHE type params for inference
+      , _pt_args :: [Pattern]
+      }
 
 
 data PatternCtorArg =
@@ -207,7 +216,13 @@ data Type
   | TPair Type Type
   | TTriple Type Type Type
   | TAlias ModuleName.Canonical T.Name [(T.Var, Type)] AliasType
+  | TTagRow (Map.Map TagKey [Type]) (Maybe T.Var)
   deriving (Eq)
+
+
+-- The canonical identity of a structural variant tag: its
+-- declaring module plus its name.
+type TagKey = (ModuleName.Canonical, N.Name)
 
 
 data AliasType
@@ -248,9 +263,17 @@ data Module =
     , _decls   :: Decls
     , _unions  :: Map.Map T.Name Union
     , _aliases :: Map.Map T.Name Alias
+    , _tags    :: Map.Map N.Name TagDecl
     , _binops  :: Map.Map Op.Name Binop
     , _effects :: Effects
     }
+
+
+-- A structural variant tag declaration: `variant Success a` becomes
+-- `TagDecl ["a"]`. The params double as the argument types, so the
+-- arity is the length of the list.
+newtype TagDecl = TagDecl [T.Var]
+  deriving (Eq)
 
 
 data Alias = Alias [T.Var] Type
@@ -299,6 +322,7 @@ data ExportType
   = ExportUnionOpen
   | ExportUnionClosed
   | ExportAlias
+  | ExportTag
 
 
 

@@ -78,6 +78,7 @@ data DecisionTree
 
 data Test
   = IsCtor ModuleName.Canonical N.Name Index.ZeroBased Int Can.CtorOpts
+  | IsTag ModuleName.Canonical N.Name
   | IsCons
   | IsNil
   | IsTuple
@@ -133,10 +134,16 @@ isComplete tests =
     IsCons                 -> length tests == 2
     IsNil                  -> length tests == 2
     IsTuple                -> True
+    IsBool _               -> length tests == 2
+    IsTag _ _              ->
+      -- The type checker closes variant rows to exactly the matched tags,
+      -- so a tag column with no wildcard ends up with no fallback branches.
+      -- That case becomes `Decision path edges Nothing` where the last edge
+      -- is treated as the default. So tags never claim completeness here.
+      False
     IsChr _                -> False
     IsStr _                -> False
     IsInt _                -> False
-    IsBool _               -> length tests == 2
 
 
 
@@ -164,6 +171,7 @@ flatten pathPattern@(path, A.At region pattern) otherPathPatterns =
     Can.PList _   -> pathPattern : otherPathPatterns
     Can.PCons _ _ -> pathPattern : otherPathPatterns
     Can.PUnit     -> otherPathPatterns
+    Can.PTag _ _ _ _ -> pathPattern : otherPathPatterns
 
     Can.PCtor _ _ (Can.Union _ _ numAlts _) _ _ ctorArgs ->
       if numAlts == 1
@@ -265,6 +273,9 @@ testAtPath selectedPath (Branch _ pathPatterns) =
         Can.PCtor h _ (Can.Union _ _ numAlts opts) n i _ ->
             Just (IsCtor h n i numAlts opts)
 
+        Can.PTag h n _ _ ->
+            Just (IsTag h n)
+
         Can.PList ps      -> Just (case ps of { [] -> IsNil ; _ -> IsCons })
         Can.PCons _ _     -> Just IsCons
         Can.PPair   _ _   -> Just IsTuple
@@ -307,6 +318,7 @@ toRelevantBranch test path branch@(Branch goal pathPatterns) =
                 _ ->
                   Nothing
 
+          Can.PTag h n _ ps -> case test of { IsTag h' n' | n == n' && h == h' -> Just (Branch goal (start ++ subPositions path ps ++ end)) ; _ -> Nothing }
           Can.PList []      -> case test of { IsNil  -> Just (Branch goal (start                                                 ++ end)) ; _ -> Nothing }
           Can.PList (p:ps)  -> case test of { IsCons -> Just (Branch goal (start ++ subPositions path [p, A.At r (Can.PList ps)] ++ end)) ; _ -> Nothing }
           Can.PCons  p ps   -> case test of { IsCons -> Just (Branch goal (start ++ subPositions path [p, ps]                    ++ end)) ; _ -> Nothing }
@@ -364,6 +376,7 @@ needsTests (A.At _ pattern) =
     Can.PAnything         -> False
     Can.PRecord _         -> False
     Can.PCtor _ _ _ _ _ _ -> True
+    Can.PTag _ _ _ _      -> True
     Can.PList _           -> True
     Can.PCons _ _         -> True
     Can.PUnit             -> True
@@ -449,6 +462,7 @@ eTest test =
     IsStr s          -> E.u8# 5#Word8 <> ES.encode s
     IsInt i          -> E.u8# 6#Word8 <> E.int i
     IsBool b         -> E.u8# 7#Word8 <> E.bool b
+    IsTag h n        -> E.u8# 8#Word8 <> ModuleName.eCanonical h <> N.encode n
 
 
 dTest :: D.Decoder Test
@@ -463,6 +477,7 @@ dTest =
         5 -> liftM  IsStr ES.decode
         6 -> liftM  IsInt D.int
         7 -> liftM  IsBool D.bool
+        8 -> liftM2 IsTag ModuleName.dCanonical N.decode
         _ -> D.expecting "DecisionTree.Test"
 
 

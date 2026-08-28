@@ -57,6 +57,12 @@ data Error
   | DuplicateField N.Name A.Region A.Region
   | DuplicateAliasArg T.Name T.Var A.Region A.Region
   | DuplicateUnionArg T.Name T.Var A.Region A.Region
+  | DuplicateTagArg N.Name T.Var A.Region A.Region
+  | TagRowNotATag A.Region N.Name
+  | TagRowDuplicate A.Region N.Name
+  | TagPatternNesting A.Region N.Name
+  | ImportOpenTag A.Region T.Name
+  | ExportOpenTag A.Region T.Name
   | DuplicatePattern DuplicatePatternContext N.Name A.Region A.Region
   | EffectNotFound A.Region T.Name
   | EffectFunctionNotFound A.Region N.Name
@@ -102,6 +108,7 @@ data InvalidPayload
   | Function
   | TypeVariable T.Var
   | UnsupportedType T.Name
+  | StructuralVariant
 
 
 data PortProblem
@@ -194,6 +201,76 @@ toReport source err =
     DuplicateUnionArg typeName name r1 r2 ->
       nameClash source r1 r2 $
         "The `" <> T.nameToChars typeName <> "` type has multiple `" <> T.varToChars name <> "` type variables."
+
+    DuplicateTagArg tagName name r1 r2 ->
+      nameClash source r1 r2 $
+        "The `" <> N.toChars tagName <> "` variant declaration has multiple `" <> T.varToChars name <> "` type variables."
+
+    TagRowNotATag region name ->
+      Report.Report "NOT A VARIANT TAG" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "The `" ++ N.toChars name ++ "` name refers to a custom type constructor,\
+              \ but it is used in a structural variant type here:"
+          ,
+            D.reflow $
+              "Only tags declared with the `variant` keyword can appear in [ ... ] types.\
+              \ Maybe you want to declare `variant " ++ N.toChars name ++ "` in some module?"
+          )
+
+    TagRowDuplicate region name ->
+      Report.Report "DUPLICATE TAG" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This variant type lists the `" ++ N.toChars name ++ "` tag more than once:"
+          ,
+            D.reflow $
+              "Remove one of them, each tag can only appear once in a variant type."
+          )
+
+    TagPatternNesting region name ->
+      Report.Report "TAG PATTERN TOO DEEP" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "The `" ++ N.toChars name ++ "` tag pattern is nested inside another kind of pattern:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "Structural variant tags can only be matched at the top of a `case` branch\
+                  \ or inside another tag pattern. They cannot appear inside tuples, lists,\
+                  \ records, or custom type constructor patterns."
+              , D.toSimpleHint $
+                  "Match the outer structure first, and then use a second `case` expression\
+                  \ to match the tag."
+              ]
+          )
+
+    ImportOpenTag region name ->
+      Report.Report "BAD IMPORT" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "The (..) syntax is for exposing variants of a custom type. It cannot be used\
+              \ with a structural variant tag like `" ++ T.nameToChars name ++ "` though."
+          ,
+            D.reflow $
+              "Remove the (..) and you should be fine!"
+          )
+
+    ExportOpenTag region name ->
+      Report.Report "BAD EXPORT" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "The (..) syntax is for exposing variants of a custom type. It cannot be used\
+              \ with a structural variant tag like `" ++ T.nameToChars name ++ "` though."
+          ,
+            D.reflow $
+              "Remove the (..) and you should be fine!"
+          )
 
     DuplicatePattern context name r1 r2 ->
       nameClash source r1 r2 $
@@ -451,6 +528,15 @@ toReport source err =
                     \ to allow other types through as well. More advanced users often just do\
                     \ everything with encoders and decoders for more control and better errors."
                 ]
+            )
+
+          StructuralVariant ->
+            (
+              "a structural variant"
+            ,
+              D.reflow $
+                "But structural variant types cannot flow through ports. Convert the value to\
+                \ a record or a JSON value before sending it through the port."
             )
 
     PortTypeInvalid region name portProblem ->

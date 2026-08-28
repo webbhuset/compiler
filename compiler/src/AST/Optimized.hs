@@ -162,6 +162,7 @@ data Node
   = Define Expr (Set.Set Global)
   | DefineTailFunc [N.Name] Expr (Set.Set Global)
   | Ctor Index.ZeroBased Int
+  | Tag Int
   | Enum Index.ZeroBased
   | Box
   | Link Global
@@ -479,6 +480,7 @@ eNode node =
       PortIncoming e d      -> E.u8#  9#Word8 <> eExpr e <> E.set32 eGlobal d
       PortOutgoing e d      -> E.u8# 10#Word8 <> eExpr e <> E.set32 eGlobal d
       PortTask e1 e2 d      -> E.u8# 11#Word8 <> eExpr e1 <> eExpr e2 <> E.set32 eGlobal d
+      Tag a                 -> E.u8# 12#Word8 <> E.int a
 
 
 dNode :: D.Decoder Node
@@ -497,6 +499,7 @@ dNode =
         9  -> liftM2 PortIncoming dExpr (D.set32 dGlobal)
         10 -> liftM2 PortOutgoing dExpr (D.set32 dGlobal)
         11 -> liftM3 PortTask dExpr dExpr (D.set32 dGlobal)
+        12 -> liftM  Tag D.int
         _  -> D.expecting "Node"
 
 

@@ -9,6 +9,8 @@ module AST.Source
   , Import(..)
   , Value(..)
   , Union(..)
+  , TagDecl(..)
+  , TagEntry(..)
   , Alias(..)
   , Infix(..)
   , Port(..)
@@ -120,6 +122,11 @@ data Type_
   | TRecord [(A.Located N.Name, Type)] (Maybe (A.Located T.Var))
   | TUnit
   | TTuple Type Type [Type]
+  | TTagRow [TagEntry] (Maybe (A.Located T.Var))
+
+
+data TagEntry =
+  TagEntry A.Region (Maybe Module.Prefix) N.Name [Type]
 
 
 
@@ -135,13 +142,14 @@ data Module =
     , _values  :: [A.Located Value]
     , _unions  :: [A.Located Union]
     , _aliases :: [A.Located Alias]
+    , _tagDecls :: [A.Located TagDecl]
     , _binops  :: [A.Located Infix]
     , _effects :: Effects
     }
 
 
 getName :: Module -> Module.Name
-getName (Module maybeName _ _ _ _ _ _ _ _) =
+getName (Module maybeName _ _ _ _ _ _ _ _ _) =
   case maybeName of
     Just (A.At _ name) -> name
     Nothing            -> Module.main
@@ -162,6 +170,7 @@ data Import =
 
 data Value = Value (A.Located N.Name) [Pattern] Expr (Maybe Type)
 data Union = Union (A.Located T.Name) [A.Located T.Var] [(A.Located N.Name, [Type])]
+data TagDecl = TagDecl (A.Located N.Name) [A.Located T.Var]
 data Alias = Alias (A.Located T.Name) [A.Located T.Var] Type
 data Infix = Infix Op.Name Op.Associativity Op.Precedence N.Name
 data Port  = Port (A.Located N.Name) Type

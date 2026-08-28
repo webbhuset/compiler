@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Parse.Keyword
-  ( type_, alias_, port_
+  ( type_, alias_, port_, variant_
   , if_, then_, else_
   , case_, of_
   , let_, in_
@@ -22,6 +22,7 @@ import Parse.Keyword_TH (keyword)
 type_         :: (Cursor -> x) -> Parser x (); type_         = [keyword|type|]
 alias_        :: (Cursor -> x) -> Parser x (); alias_        = [keyword|alias|]
 port_         :: (Cursor -> x) -> Parser x (); port_         = [keyword|port|]
+variant_      :: (Cursor -> x) -> Parser x (); variant_      = [keyword|variant|]
 if_           :: (Cursor -> x) -> Parser x (); if_           = [keyword|if|]
 then_         :: (Cursor -> x) -> Parser x (); then_         = [keyword|then|]
 else_         :: (Cursor -> x) -> Parser x (); else_         = [keyword|else|]

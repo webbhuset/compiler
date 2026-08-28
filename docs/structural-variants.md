@@ -1,0 +1,150 @@
+# Structural variants
+
+Structural variants are anonymous sum types: the dual of Elm's extensible
+records. Where a record type lists the fields a value *has*, a variant type
+lists the tags a value *can be*:
+
+```elm
+variant Loading
+variant Success value
+variant Failure error
+
+
+state : Int -> [ r | Loading, Success Int ]
+state n =
+    if n > 0 then
+        Success n
+
+    else
+        Loading
+
+
+describe : [ Loading, Success Int, Failure String ] -> String
+describe s =
+    case s of
+        Loading ->
+            "loading"
+
+        Success n ->
+            "got " ++ String.fromInt n
+
+        Failure err ->
+            "failed: " ++ err
+```
+
+Unlike custom types, two functions can accept overlapping unions of the same
+tags without a shared type declaration, and a `case` can require exactly the
+tags it handles.
+
+
+## Declaring tags
+
+Tags are declared at the top level with the `variant` keyword (which is now
+reserved):
+
+```elm
+variant Loading                 -- no arguments
+variant Success value           -- one argument
+variant Pair first second       -- two arguments
+```
+
+The lowercase names are type parameters, one per argument. They must be
+distinct. A declaration creates a *tag*, usable as a constructor function, in
+patterns, and in variant types:
+
+```elm
+Success : value -> [ r | Success value ]
+```
+
+**Tags are canonical.** A tag's identity is its declaring module plus its
+name, like everything else in Elm. `Maybe.Just` and your local `Just` are
+*different tags* even though they share a spelling — they can even coexist in
+one variant type. Tags are exported with `exposing (Success)` and imported
+like constructors; there is no `(..)` form. Two packages share a tag only by
+importing it from a common module.
+
+
+## Variant types
+
+- `[ Loading, Success Int ]` — a **closed** row: exactly these tags.
+- `[ r | Loading, Success Int ]` — an **open** row: at least these tags;
+  `r` is a type variable like a record extension.
+- `[]` — the empty row: a type with no values (like `Never`).
+- Tags from other modules can be qualified: `[ Tags.Pending, Pending ]`.
+
+Rules of thumb:
+
+- **Constructing functions** should return an *open* row, so the result can
+  flow anywhere the tags are accepted. This is also what inference produces
+  when you omit the annotation.
+- **Consuming functions** take a *closed* row listing what they handle, or an
+  open row if they have a `_` fallback:
+
+```elm
+isLoading : [ r | Loading ] -> Bool
+isLoading s =
+    case s of
+        Loading ->
+            True
+
+        _ ->
+            False
+```
+
+
+## Exhaustiveness
+
+Exhaustiveness falls out of the type system: a `case` without a `_` branch
+*closes* the scrutinee's row to exactly the matched tags. An unhandled tag is
+a type error at the `case`:
+
+```
+The patterns in this `case` do not cover all the possible variant tags:
+
+The branches cover variants of type:
+
+    [ A, B ]
+
+But the expression between `case` and `of` is:
+
+    [ A, B, C ]
+
+Hint: It looks like the C tag is not handled.
+```
+
+This applies recursively to tags nested in other tag patterns
+(`Wrap (Ok value)`), and to `let` destructuring and function-argument
+patterns, which close the row to a single tag (they must be irrefutable).
+
+
+## Restrictions
+
+- **Tag patterns cannot appear inside tuples, lists, records, or custom type
+  constructor patterns.** Match the outer structure first, then the tag in a
+  second `case`. (Tags nested in *other tag patterns* are fine.)
+- **Recursion needs a named type.** `type alias Json = [ Num Float, Arr (List Json) ]`
+  is still a recursive alias error; tie the knot with a custom type instead:
+
+  ```elm
+  type Tree = Tree [ Leaf, Node Tree Tree ]
+
+  variant Leaf
+  variant Node left right
+  ```
+
+- **No ports.** Variant values cannot flow through ports; convert to records
+  or JSON first.
+- Variant types are **not comparable** and cannot be `Dict` keys.
+- Tags do not appear in `docs.json` (the format has no field for them), so
+  package docs will not render them.
+- `Debug.toString` shows the internal qualified tag name
+  (`author/project:Module.Tag`), not the short name.
+
+
+## Runtime representation
+
+A tag value is the same object shape as a custom type value:
+`{ $: "author/project:Module.Tag", a = ..., b = ... }`. The `$` field is the
+fully qualified tag name (in both dev and `--optimize` builds), which is what
+lets same-named tags from different modules coexist in one union. Structural
+equality (`==`) works as usual.

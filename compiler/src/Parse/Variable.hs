@@ -311,7 +311,7 @@ data Keyword =
 keywords :: Keywords
 keywords =
   runST $ ST $ \s ->
-    case newSmallArray#       14# (Keyword "as"#       2#)  s  of { (# s1, sma #) ->
+    case newSmallArray#       15# (Keyword "as"#       2#)  s  of { (# s1, sma #) ->
     case writeSmallArray# sma  1# (Keyword "if"#       2#)  s1 of {    s2         ->
     case writeSmallArray# sma  2# (Keyword "in"#       2#)  s2 of {    s3         ->
     case writeSmallArray# sma  3# (Keyword "of"#       2#)  s3 of {    s4         ->
@@ -324,10 +324,11 @@ keywords =
     case writeSmallArray# sma 10# (Keyword "where"#    5#) s10 of {    s11        ->
     case writeSmallArray# sma 11# (Keyword "import"#   6#) s11 of {    s12        ->
     case writeSmallArray# sma 12# (Keyword "module"#   6#) s12 of {    s13        ->
-    case writeSmallArray# sma 13# (Keyword "exposing"# 8#) s13 of {    s14        ->
-    case unsafeFreezeSmallArray# sma s14                       of { (# s15, sa #) ->
-      (# s15, Keywords sa #)
-    }}}}}}}}}}}}}}}
+    case writeSmallArray# sma 13# (Keyword "variant"#  7#) s13 of {    s14        ->
+    case writeSmallArray# sma 14# (Keyword "exposing"# 8#) s14 of {    s15        ->
+    case unsafeFreezeSmallArray# sma s15                       of { (# s16, sa #) ->
+      (# s16, Keywords sa #)
+    }}}}}}}}}}}}}}}}
 
 
 keywordSet :: Set.Set [Char]
@@ -335,7 +336,7 @@ keywordSet =
   Set.fromList
     ["as","if","in","of"
     ,"let","case","else","port","then","type"
-    ,"where","import","module","exposing"
+    ,"where","import","module","variant","exposing"
     ]
 
 

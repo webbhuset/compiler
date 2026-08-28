@@ -62,7 +62,7 @@ data Info =
 
 
 compute :: Map.Map Module.Name I.Interface -> Can.Module -> Info
-compute ifaces (Can.Module home _ _ _ unions _ _ _) =
+compute ifaces (Can.Module home _ _ _ unions _ _ _ _) =
   let
     imported =
       Set.unions (map I._comparables (Map.elems ifaces))
@@ -156,6 +156,9 @@ isComparableType home imported unions seen tipe =
       False
 
     Can.TRecord _ _ ->
+      False
+
+    Can.TTagRow _ _ ->
       False
 
 

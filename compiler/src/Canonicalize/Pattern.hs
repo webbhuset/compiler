@@ -64,7 +64,18 @@ type DupsDict =
 
 
 canonicalize :: Env.Env -> Src.Pattern -> Result DupsDict w Can.Pattern
-canonicalize env (A.At region pattern) =
+canonicalize env pattern =
+  canonicalizeHelp env True pattern
+
+
+-- The Bool tracks whether a structural variant tag pattern is allowed at this
+-- position. Tags may appear at the top of a pattern or as arguments to other
+-- tag patterns. They may NOT appear inside tuples, lists, records, or custom
+-- type constructor patterns because the type checker cannot close the variant
+-- rows in those positions yet.
+--
+canonicalizeHelp :: Env.Env -> Bool -> Src.Pattern -> Result DupsDict w Can.Pattern
+canonicalizeHelp env tagAllowed (A.At region pattern) =
   A.At region <$>
   case pattern of
     Src.PAnything ->
@@ -81,26 +92,26 @@ canonicalize env (A.At region pattern) =
 
     Src.PTuple a b cs ->
       case cs of
-        []  -> Can.PPair   <$> canonicalize env a <*> canonicalize env b
-        [c] -> Can.PTriple <$> canonicalize env a <*> canonicalize env b <*> canonicalize env c
+        []  -> Can.PPair   <$> canonicalizeHelp env False a <*> canonicalizeHelp env False b
+        [c] -> Can.PTriple <$> canonicalizeHelp env False a <*> canonicalizeHelp env False b <*> canonicalizeHelp env False c
         _   -> Result.throw $ Error.TupleLargerThanThree region
 
     Src.PCtor nameRegion name patterns ->
-      canonicalizeCtor env region name patterns =<< Env.findCtor nameRegion env name
+      canonicalizeCtor env tagAllowed region name patterns =<< Env.findCtor nameRegion env name
 
     Src.PCtorQual nameRegion home name patterns ->
-      canonicalizeCtor env region name patterns =<< Env.findCtorQual nameRegion env home name
+      canonicalizeCtor env tagAllowed region name patterns =<< Env.findCtorQual nameRegion env home name
 
     Src.PList patterns ->
       Can.PList <$> canonicalizeList env patterns
 
     Src.PCons first rest ->
       Can.PCons
-        <$> canonicalize env first
-        <*> canonicalize env rest
+        <$> canonicalizeHelp env False first
+        <*> canonicalizeHelp env False rest
 
     Src.PAlias ptrn (A.At reg name) ->
-      do  cpattern <- canonicalize env ptrn
+      do  cpattern <- canonicalizeHelp env tagAllowed ptrn
           logVar name reg (Can.PAlias cpattern name)
 
     Src.PChr chr ->
@@ -113,13 +124,13 @@ canonicalize env (A.At region pattern) =
       Result.ok (Can.PInt (fromIntegral int)) -- TODO make overflow an error
 
 
-canonicalizeCtor :: Env.Env -> A.Region -> N.Name -> [Src.Pattern] -> Env.Ctor -> Result DupsDict w Can.Pattern_
-canonicalizeCtor env region name patterns ctor =
+canonicalizeCtor :: Env.Env -> Bool -> A.Region -> N.Name -> [Src.Pattern] -> Env.Ctor -> Result DupsDict w Can.Pattern_
+canonicalizeCtor env tagAllowed region name patterns ctor =
   case ctor of
     Env.Ctor home tipe union index args ->
       let
         toCanonicalArg argIndex argPattern argTipe =
-          Can.PatternCtorArg argIndex argTipe <$> canonicalize env argPattern
+          Can.PatternCtorArg argIndex argTipe <$> canonicalizeHelp env False argPattern
       in
       do  verifiedList <- Index.indexedZipWithA toCanonicalArg patterns args
           case verifiedList of
@@ -131,6 +142,15 @@ canonicalizeCtor env region name patterns ctor =
 
             Index.LengthMismatch actualLength expectedLength ->
               Result.throw (Error.BadArity_Pattern region name expectedLength actualLength)
+
+    Env.TagCtor home params ->
+      if not tagAllowed then
+        Result.throw (Error.TagPatternNesting region name)
+      else if length patterns /= length params then
+        Result.throw (Error.BadArity_Pattern region name (length params) (length patterns))
+      else
+        do  cargs <- traverse (canonicalizeHelp env True) patterns
+            Result.ok (Can.PTag home name params cargs)
 
     Env.RecordCtor _ _ _ ->
       Result.throw (Error.PatternHasRecordCtor region name)
@@ -144,7 +164,7 @@ canonicalizeList env list =
 
     pattern : otherPatterns ->
       (:)
-        <$> canonicalize env pattern
+        <$> canonicalizeHelp env False pattern
         <*> canonicalizeList env otherPatterns
 
 

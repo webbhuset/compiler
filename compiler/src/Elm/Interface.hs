@@ -52,6 +52,7 @@ data Interface =
     , _values  :: Map.Map N.Name Can.Annotation
     , _unions  :: Map.Map T.Name Union
     , _aliases :: Map.Map T.Name Alias
+    , _tags    :: Map.Map N.Name Can.TagDecl
     , _binops  :: Map.Map Op.Name Binop
     , _comparables :: Set.Set (ModuleName.Canonical, T.Name)
       -- all comparable newtypes visible from this module, including the
@@ -88,12 +89,13 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Set.Set (ModuleName.Canonical, T.Name) -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases binops _) annotations comparables =
+fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotations comparables =
   Interface
     { _home    = home
     , _values  = restrictValues  exports annotations
     , _unions  = restrictUnions  exports unions
     , _aliases = restrictAliases exports aliases
+    , _tags    = restrictTags    exports tags
     , _binops  = restrictBinops  exports (Map.map (toOp annotations) binops)
     , _comparables = comparables
     }
@@ -125,6 +127,7 @@ restrictUnions exports unions =
             Can.ExportUnionOpen   -> OpenUnion union
             Can.ExportUnionClosed -> ClosedUnion union
             Can.ExportAlias       -> $(Crash.crash 'restrictUnions) "impossible exports discovered"
+            Can.ExportTag         -> PrivateUnion union
 
 
 restrictAliases :: Can.Exports -> Map.Map T.Name Can.Alias -> Map.Map T.Name Alias
@@ -138,7 +141,25 @@ restrictAliases exports aliases =
       where
         onLeft = Map.dropMissing
         onRight = Map.mapMissing (\_ a -> PrivateAlias a)
-        onBoth = Map.zipWithMatched (\_ _ a -> PublicAlias a)
+        onBoth = Map.zipWithMatched $ \_ (_, export) alias ->
+          case export of
+            Can.ExportTag -> PrivateAlias alias
+            _             -> PublicAlias alias
+
+
+restrictTags :: Can.Exports -> Map.Map N.Name Can.TagDecl -> Map.Map N.Name Can.TagDecl
+restrictTags exports tags =
+  case exports of
+    Can.ExportEverything _ ->
+      tags
+
+    Can.Export types _ _ ->
+      Map.filterWithKey (\name _ -> isExportedTag (T.nameFromName name)) tags
+      where
+        isExportedTag name =
+          case Map.lookup name types of
+            Just (_, Can.ExportTag) -> True
+            _                       -> False
 
 
 restrictBinops :: Can.Exports -> Map.Map Op.Name Binop -> Map.Map Op.Name Binop
@@ -193,7 +214,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _ _) =
+private (Interface pkg _ unions aliases _ _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -224,11 +245,12 @@ privatize di =
 
 
 eInterface :: Interface -> E.Builder
-eInterface (Interface h vs us as bs cs) =
+eInterface (Interface h vs us as ts bs cs) =
   Pkg.eName h
   <> E.dict32 N.encode eAnnotation vs
   <> E.dict32 T.encode eUnion us
   <> E.dict32 T.encode eAlias as
+  <> E.dict32 N.encode eTagDecl ts
   <> E.dict32 Op.encode eBinop bs
   <> E.set32 (\(home, name) -> ModuleName.eCanonical home <> T.encode name) cs
 
@@ -240,6 +262,7 @@ dInterface =
     <*> D.dict32 N.decode dAnnotation
     <*> D.dict32 T.decode dUnion
     <*> D.dict32 T.decode dAlias
+    <*> D.dict32 N.decode dTagDecl
     <*> D.dict32 Op.decode dBinop
     <*> D.set32 (liftM2 (,) ModuleName.dCanonical T.decode)
 
@@ -387,6 +410,7 @@ eType tipe =
     Can.TTriple a b c   -> E.u8# 5#Word8 <> eType a <> eType b <> eType c
     Can.TAlias h n xs a -> E.u8# 6#Word8 <> ModuleName.eCanonical h <> T.encode n <> E.list8 (\(x,t) -> T.eVar x <> eType t) xs <> eAliasType a
     Can.TType  h n xs   -> E.u8# 7#Word8 <> ModuleName.eCanonical h <> T.encode n <> E.list8 eType xs
+    Can.TTagRow ts e    -> E.u8# 8#Word8 <> E.dict32 eTagKey (E.list8 eType) ts <> E.maybe T.eVar e
 
 
 dType :: D.Decoder Can.Type
@@ -401,6 +425,7 @@ dType =
         5 -> liftM3 Can.TTriple dType dType dType
         6 -> liftM4 Can.TAlias ModuleName.dCanonical T.decode (D.list8 (liftM2 (,) T.dVar dType)) dAliasType
         7 -> liftM3 Can.TType ModuleName.dCanonical T.decode (D.list8 dType)
+        8 -> liftM2 Can.TTagRow (D.dict32 dTagKey (D.list8 dType)) (D.maybe T.dVar)
         _ -> D.expecting "Type"
 
 
@@ -429,3 +454,23 @@ dFieldType :: D.Decoder Can.FieldType
 dFieldType =
   liftM2 Can.FieldType D.u16 dType
 
+
+
+eTagKey :: Can.TagKey -> E.Builder
+eTagKey (home, name) =
+  ModuleName.eCanonical home <> N.encode name
+
+
+dTagKey :: D.Decoder Can.TagKey
+dTagKey =
+  liftM2 (,) ModuleName.dCanonical N.decode
+
+
+eTagDecl :: Can.TagDecl -> E.Builder
+eTagDecl (Can.TagDecl vs) =
+  E.list8 T.eVar vs
+
+
+dTagDecl :: D.Decoder Can.TagDecl
+dTagDecl =
+  liftM Can.TagDecl (D.list8 T.dVar)

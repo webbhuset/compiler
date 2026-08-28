@@ -3,6 +3,7 @@
 module Generate.JavaScript.Expression
   ( generate
   , generateCtor
+  , generateTagCtor
   , generateField
   , generateTailDef
   , generateMain
@@ -14,6 +15,7 @@ module Generate.JavaScript.Expression
 
 
 import Prelude hiding (and, or, not, negate, truncate)
+import qualified Data.ByteString.Builder as B
 import Data.ByteString.Builder.Prim ((>$<), (>*<))
 import qualified Data.ByteString.Builder.Prim as P
 import qualified Data.Char as Char
@@ -290,6 +292,36 @@ ctorToInt home name index =
 
 {-# NOINLINE rbNode  #-}; rbNode  :: N.Name; rbNode  = [N.ascii|RBNode_elm_builtin|]
 {-# NOINLINE rbEmpty #-}; rbEmpty :: N.Name; rbEmpty = [N.ascii|RBEmpty_elm_builtin|]
+
+
+
+-- STRUCTURAL VARIANT TAGS
+
+
+-- Structural variant tags are identified at runtime by a fully qualified
+-- string, so that same-named tags declared in different modules can coexist
+-- in one union. The string is the same in dev and prod modes.
+--
+generateTagCtor :: Opt.Global -> Int -> Code
+generateTagCtor (Opt.Global home name) arity =
+  let
+    argNames =
+      Index.indexedMap (\i _ -> JsName.fromIndex i) [1 .. arity]
+
+    tag =
+      JS.String (tagNameToBuilder home name)
+  in
+  generateFunction argNames $ JsExpr $ JS.Object $
+    (JsName.dollar, tag) : map (\n -> (n, JS.Ref n)) argNames
+
+
+tagNameToBuilder :: ModuleName.Canonical -> N.Name -> B.Builder
+tagNameToBuilder (ModuleName.Canonical pkg home) name =
+  B.stringUtf8 (Pkg.toChars pkg)
+    <> B.char7 ':'
+    <> Module.toBuilder home
+    <> B.char7 '.'
+    <> N.toBuilder name
 
 
 
@@ -860,6 +892,11 @@ generateIfTest mode root (path, test) =
           Mode.Dev _ -> JS.String (N.toBuilder name)
           Mode.Prod _ -> JS.Int (ctorToInt home name index)
 
+    DT.IsTag home name ->
+      strictEq
+        (JS.Access value JsName.dollar)
+        (JS.String (tagNameToBuilder home name))
+
     DT.IsBool True  -> value
     DT.IsBool False -> JS.Prefix JS.PrefixNot value
     DT.IsInt i      -> strictEq value (JS.Int i)
@@ -900,6 +937,9 @@ generateCaseValue mode test =
         Mode.Dev  _ -> JS.String (N.toBuilder name)
         Mode.Prod _ -> JS.Int (ctorToInt home name index)
 
+    DT.IsTag home name ->
+      JS.String (tagNameToBuilder home name)
+
     DT.IsInt  i -> JS.Int i
     DT.IsChr  c -> JS.String (P.primBounded charUtf8 c)
     DT.IsStr  s -> JS.String (Utf8.toBuilder s)
@@ -923,6 +963,9 @@ generateCaseTest mode root path exampleTest =
             Can.Normal -> JS.Access value JsName.dollar
             Can.Enum   -> value
             Can.Unbox  -> value
+
+    DT.IsTag _ _ ->
+      JS.Access value JsName.dollar
 
     DT.IsInt _ -> value
     DT.IsStr _ -> value

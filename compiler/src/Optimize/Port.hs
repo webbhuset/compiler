@@ -43,6 +43,9 @@ toEncoder tipe =
     Can.TUnit ->
       Opt.Function [dollar] <$> encode [N.ascii|null|]
 
+    Can.TTagRow _ _ ->
+      $(Crash.crash 'toEncoder) "structural variants are not allowed through ports"
+
     Can.TPair a b ->
       encodePair a b
 
@@ -188,6 +191,9 @@ toDecoder tipe =
 
     Can.TUnit ->
       decodeUnit
+
+    Can.TTagRow _ _ ->
+      $(Crash.crash 'toDecoder) "structural variants are not allowed through ports"
 
     Can.TPair a b ->
       decodePair a b

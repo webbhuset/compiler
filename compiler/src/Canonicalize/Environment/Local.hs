@@ -37,11 +37,24 @@ type Result i w a =
 
 type Unions = Map.Map T.Name Can.Union
 type Aliases = Map.Map T.Name Can.Alias
+type Tags = Map.Map N.Name Can.TagDecl
 
 
-add :: Src.Module -> Env.Env -> Result i w (Env.Env, Unions, Aliases)
+add :: Src.Module -> Env.Env -> Result i w (Env.Env, Unions, Aliases, Tags)
 add module_ env =
-  addCtors module_ =<< addVars module_ =<< addTypes module_ env
+  do  -- tag declarations reference no other types, so they are added first;
+      -- this way type aliases and union payloads can mention local tags
+      -- regardless of declaration order
+      (env1, tagInfo) <- addTagCtors module_ env
+      addCtors module_ tagInfo =<< addVars module_ =<< addTypes module_ env1
+
+
+addTagCtors :: Src.Module -> Env.Env -> Result i w (Env.Env, [((N.Name, Can.TagDecl), CtorDups)])
+addTagCtors (Src.Module _ _ _ _ _ _ _ tagDecls _ _) (Env.Env home vs ts cs bs qvs qts qcs) =
+  do  tagInfo <- traverse (canonicalizeTagDecl home) tagDecls
+      tags <- Dups.detect Error.DuplicateCtor (Dups.unions (map snd tagInfo))
+      let cs2 = Map.union tags cs
+      Result.ok (Env.Env home vs ts cs2 bs qvs qts qcs, tagInfo)
 
 
 
@@ -57,7 +70,7 @@ addVars module_ (Env.Env home vs ts cs bs qvs qts qcs) =
 
 
 collectVars :: Src.Module -> Result i w (Map.Map N.Name Env.Var)
-collectVars (Src.Module _ _ _ _ values _ _ _ effects) =
+collectVars (Src.Module _ _ _ _ values _ _ _ _ effects) =
   let
     addDecl dict (A.At _ (Src.Value (A.At region name) _ _ _)) =
       Dups.insert name region (Env.TopLevel region) dict
@@ -98,7 +111,7 @@ toEffectDups effects =
 
 
 addTypes :: Src.Module -> Env.Env -> Result i w Env.Env
-addTypes (Src.Module _ _ _ _ _ unions aliases _ _) (Env.Env home vs ts cs bs qvs qts qcs) =
+addTypes (Src.Module _ _ _ _ _ unions aliases _ _ _) (Env.Env home vs ts cs bs qvs qts qcs) =
   let
     addAliasDups dups (A.At _ (Src.Alias (A.At region name) _ _)) = Dups.insert name region () dups
     addUnionDups dups (A.At _ (Src.Union (A.At region name) _ _)) = Dups.insert name region () dups
@@ -167,6 +180,7 @@ getEdges edges (A.At _ tipe) =
     Src.TRecord fs _       -> List.foldl' (\es (_,t) -> getEdges es t) edges fs
     Src.TUnit              -> edges
     Src.TTuple a b cs      -> List.foldl' getEdges (getEdges (getEdges edges a) b) cs
+    Src.TTagRow es _       -> List.foldl' (\acc (Src.TagEntry _ _ _ xs) -> List.foldl' getEdges acc xs) edges es
 
 
 
@@ -222,6 +236,7 @@ addFreeVars freeVars (A.At region tipe) =
     Src.TRecord fs e       -> List.foldl' (\fvs (_,t) -> addFreeVars fvs t) (addExt e freeVars) fs
     Src.TUnit              -> freeVars
     Src.TTuple a b cs      -> List.foldl' addFreeVars (addFreeVars (addFreeVars freeVars a) b) cs
+    Src.TTagRow es e       -> List.foldl' (\fvs (Src.TagEntry _ _ _ xs) -> List.foldl' addFreeVars fvs xs) (addExt e freeVars) es
   where
     addExt ext fvs =
       case ext of
@@ -233,16 +248,19 @@ addFreeVars freeVars (A.At region tipe) =
 -- ADD CTORS
 
 
-addCtors :: Src.Module -> Env.Env -> Result i w (Env.Env, Unions, Aliases)
-addCtors (Src.Module _ _ _ _ _ unions aliases _ _) env@(Env.Env home vs ts cs bs qvs qts qcs) =
+addCtors :: Src.Module -> [((N.Name, Can.TagDecl), CtorDups)] -> Env.Env -> Result i w (Env.Env, Unions, Aliases, Tags)
+addCtors (Src.Module _ _ _ _ _ unions aliases _ _ _) tagInfo env@(Env.Env home vs ts cs bs qvs qts qcs) =
   do  unionInfo <- traverse (canonicalizeUnion env) unions
       aliasInfo <- traverse (canonicalizeAlias env) aliases
 
+      -- tagInfo is included again so that a `variant` clashing with a local
+      -- constructor is still reported as a duplicate
       ctors <-
         Dups.detect Error.DuplicateCtor $
-          Dups.union
-            (Dups.unions (map snd unionInfo))
-            (Dups.unions (map snd aliasInfo))
+          Dups.union (Dups.unions (map snd tagInfo)) $
+            Dups.union
+              (Dups.unions (map snd unionInfo))
+              (Dups.unions (map snd aliasInfo))
 
       let cs2 = Map.union ctors cs
 
@@ -250,10 +268,26 @@ addCtors (Src.Module _ _ _ _ _ unions aliases _ _) env@(Env.Env home vs ts cs bs
         ( Env.Env home vs ts cs2 bs qvs qts qcs
         , Map.fromList (map fst unionInfo)
         , Map.fromList (map fst aliasInfo)
+        , Map.fromList (map fst tagInfo)
         )
 
 
 type CtorDups = Dups.Dict N.Name (Env.Info Env.Ctor)
+
+
+
+-- CANONICALIZE TAG DECLARATIONS
+
+
+canonicalizeTagDecl :: ModuleName.Canonical -> A.Located Src.TagDecl -> Result i w ( (N.Name, Can.TagDecl), CtorDups )
+canonicalizeTagDecl home (A.At _ (Src.TagDecl (A.At region name) args)) =
+  do  let addArg dups (A.At argRegion argName) = Dups.insert argName argRegion argRegion dups
+      _ <- Dups.detect (Error.DuplicateTagArg name) (List.foldl' addArg Dups.none args)
+      let params = map A.toValue args
+      Result.ok
+        ( (name, Can.TagDecl params)
+        , Dups.one name region (Env.Specific home (Env.TagCtor home params))
+        )
 
 
 

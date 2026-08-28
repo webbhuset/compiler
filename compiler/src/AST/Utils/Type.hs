@@ -54,6 +54,7 @@ dealiasHelp typeTable =
         TUnit           -> TUnit
         TPair   a b     -> TPair (go a) (go b)
         TTriple a b c   -> TTriple (go a) (go b) (go c)
+        TTagRow ts e    -> TTagRow (Map.map (map go) ts) e
 
 
 dealiasField :: Map.Map T.Var Type -> FieldType -> FieldType
@@ -76,6 +77,9 @@ deepDealias tipe =
     TUnit           -> TUnit
     TPair   a b     -> TPair (deepDealias a) (deepDealias b)
     TTriple a b c   -> TTriple (deepDealias a) (deepDealias b) (deepDealias c)
+
+    TTagRow tags ext ->
+      TTagRow (Map.map (map deepDealias) tags) ext
 
 
 deepDealiasField :: FieldType -> FieldType

@@ -118,6 +118,7 @@ data Type
 
 data Ctor
   = RecordCtor ModuleName.Canonical [T.Var] Can.Type
+  | TagCtor ModuleName.Canonical [T.Var] -- structural variant tag: home + type params
   | Ctor
       { _c_home :: ModuleName.Canonical
       , _c_type :: T.Name

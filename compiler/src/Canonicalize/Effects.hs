@@ -215,6 +215,7 @@ checkPayload tipe =
     Can.TTriple a b c          -> checkPayload a *> checkPayload b *> checkPayload c
     Can.TVar x                 -> Left (tipe, Error.TypeVariable x)
     Can.TLambda _ _            -> Left (tipe, Error.Function)
+    Can.TTagRow _ _            -> Left (tipe, Error.StructuralVariant)
     Can.TRecord _ (Just _)     -> Left (tipe, Error.ExtendedRecord)
     Can.TRecord fields Nothing -> F.traverse_ checkFieldPayload fields
 

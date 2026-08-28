@@ -35,7 +35,7 @@ data Error
 
 
 check :: Can.Module -> Either (NE.List Error) ()
-check (Can.Module _ _ _ decls _ _ _ _) =
+check (Can.Module _ _ _ decls _ _ _ _ _) =
   case checkDecls decls [] of
     [] ->
       Right ()
@@ -97,6 +97,7 @@ checkExpr (A.At region expression) errors =
     Can.VarKernel _ _ -> errors
     Can.VarForeign _ _ _ -> errors
     Can.VarCtor _ _ _ _ _ -> errors
+    Can.VarTag _ _ _ -> errors
     Can.VarDebug _ _ _ -> errors
     Can.VarOperator _ _ _ _ -> errors
     Can.Chr _ -> errors

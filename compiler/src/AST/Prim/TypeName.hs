@@ -10,6 +10,7 @@ module AST.Prim.TypeName
   --
   , nameFromAddr
   , nameFromString
+  , nameFromName
   , nameFromByteArray
   --
   , bool, char, int, float, string
@@ -65,6 +66,11 @@ nameToBuilder (Name s) =
 nameToName :: Name -> N.Name
 nameToName s =
   N.fromString (coerce s)
+
+
+nameFromName :: N.Name -> Name
+nameFromName n =
+  coerce (N.toString n)
 
 
 nameToString :: Name -> S.String

@@ -81,6 +81,14 @@ fromSrcType freeVars sourceType =
             Nothing  -> return EmptyRecordN
             Just ext -> return $ $(Map.require 'fromSrcType) ext freeVars T.varToChars
 
+    Can.TTagRow tags maybeExt ->
+      TagRowN
+        <$> traverse (traverse (fromSrcType freeVars)) tags
+        <*>
+          case maybeExt of
+            Nothing  -> return EmptyTagRowN
+            Just ext -> return $ $(Map.require 'fromSrcType) ext freeVars T.varToChars
+
 
 fromSrcFieldType :: Map.Map T.Var Type -> Can.FieldType -> IO Type
 fromSrcFieldType freeVars (Can.FieldType _ tipe) =

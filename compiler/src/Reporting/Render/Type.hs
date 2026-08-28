@@ -7,15 +7,19 @@ module Reporting.Render.Type
   , record
   , vrecordSnippet
   , vrecord
+  , tagRow
   , srcToDoc
   , canToDoc
   )
   where
 
 
+import qualified Data.Map as Map
+
 import qualified AST.Source as Src
 import qualified AST.Canonical as Can
 import qualified AST.Prim.Name as N
+import qualified AST.Prim.TypeName as T
 import qualified Reporting.Annotation as A
 import qualified Reporting.Doc as D
 import Reporting.Doc (Doc, (<+>))
@@ -97,6 +101,31 @@ entryToDoc (fieldName, fieldType) =
   D.hang 4 (D.sep [ fieldName <+> ":", fieldType ])
 
 
+tagRow :: [Doc] -> Maybe Doc -> Doc
+tagRow entries maybeExt =
+  case (entries, maybeExt) of
+    ([], Nothing) ->
+        "[]"
+
+    (tags, Nothing) ->
+        D.align $ D.sep $
+          [ D.cat (zipWith (<+>) ("[" : repeat ",") tags)
+          , "]"
+          ]
+
+    ([], Just ext) ->
+        D.align $ D.sep [ "[" <+> ext <+> "|", "]" ]
+
+    (tags, Just ext) ->
+        D.align $ D.sep $
+          [ D.hang 4 $ D.sep $
+              [ "[" <+> ext
+              , D.cat (zipWith (<+>) ("|" : repeat ",") tags)
+              ]
+          , "]"
+          ]
+
+
 vrecordSnippet :: (Doc, Doc) -> [(Doc, Doc)] -> Doc
 vrecordSnippet entry entries =
   let
@@ -169,6 +198,22 @@ srcToDoc context (A.At _ tipe) =
         (srcToDoc None b)
         (map (srcToDoc None) cs)
 
+    Src.TTagRow entries ext ->
+      tagRow
+        (map srcTagToDoc entries)
+        (fmap (D.fromVar . A.toValue) ext)
+
+
+srcTagToDoc :: Src.TagEntry -> Doc
+srcTagToDoc (Src.TagEntry _ maybeHome name args) =
+  let
+    nameDoc =
+      case maybeHome of
+        Nothing -> D.fromName name
+        Just home -> D.fromPrefix home <> "." <> D.fromName name
+  in
+  apply None nameDoc (map (srcToDoc App) args)
+
 
 srcFieldToDocs :: (A.Located N.Name, Src.Type) -> (Doc, Doc)
 srcFieldToDocs (A.At _ fieldName, fieldType) =
@@ -238,6 +283,18 @@ canToDoc localizer context tipe =
       apply context
         (L.toDoc localizer home name)
         (map (canToDoc localizer App . snd) args)
+
+    Can.TTagRow tags ext ->
+      tagRow
+        (map (canTagToDoc localizer) (Map.toList tags))
+        (fmap D.fromVar ext)
+
+
+canTagToDoc :: L.Localizer -> (Can.TagKey, [Can.Type]) -> Doc
+canTagToDoc localizer ((home, name), args) =
+  apply None
+    (L.toDoc localizer home (T.nameFromName name))
+    (map (canToDoc localizer App) args)
 
 
 canFieldToDoc :: L.Localizer -> (N.Name, Can.Type) -> (Doc, Doc)

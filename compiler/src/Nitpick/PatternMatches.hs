@@ -42,6 +42,7 @@ data Pattern
   = Anything
   | Literal Literal
   | Ctor Can.Union N.Name [Pattern]
+  | Tag Can.TagKey [Pattern]
 
 
 data Literal
@@ -72,6 +73,7 @@ simplify (A.At _ pattern) =
     Can.PCtor _ _ u n _ ps -> Ctor u n $ map (\(Can.PatternCtorArg _ _ arg) -> simplify arg) ps
     Can.PPair   a b        -> Ctor pair   N.pair   [ simplify a, simplify b ]
     Can.PTriple a b c      -> Ctor triple N.triple [ simplify a, simplify b, simplify c ]
+    Can.PTag h n _ ps      -> Tag (h, n) (map simplify ps)
 
 
 cons :: Can.Pattern -> Pattern -> Pattern
@@ -151,7 +153,7 @@ data Context
 
 
 check :: Can.Module -> Either (NE.List Error) ()
-check (Can.Module _ _ _ decls _ _ _ _) =
+check (Can.Module _ _ _ decls _ _ _ _ _) =
   case checkDecls decls [] of
     []   -> Right ()
     e:es -> Left (NE.List e es)
@@ -207,6 +209,7 @@ checkExpr (A.At region expression) errors =
     Can.VarKernel _ _       -> errors
     Can.VarForeign _ _ _    -> errors
     Can.VarCtor _ _ _ _ _   -> errors
+    Can.VarTag _ _ _        -> errors
     Can.VarDebug _ _ _      -> errors
     Can.VarOperator _ _ _ _ -> errors
     Can.Chr _               -> errors
@@ -318,8 +321,22 @@ isExhaustive matrix n =
         numSeen = Map.size ctors
       in
       if numSeen == 0 then
-        (:) Anything
-          <$> isExhaustive (Maybe.mapMaybe specializeRowByAnything matrix) (n - 1)
+        let tags = collectTags matrix in
+        if Map.null tags then
+          (:) Anything
+            <$> isExhaustive (Maybe.mapMaybe specializeRowByAnything matrix) (n - 1)
+        else
+          -- Structural variant tags: the type checker closes the row to
+          -- exactly the matched tags (or a wildcard row exists), so only
+          -- the tags we have seen can occur. Check each one recursively.
+          let
+            isTagExhaustive (key, arity) =
+              recoverTag key arity <$>
+              isExhaustive
+                (Maybe.mapMaybe (specializeRowByTag key arity) matrix)
+                (arity + n - 1)
+          in
+          concatMap isTagExhaustive (Map.toList tags)
 
       else
         let alts@(Can.Union _ altList numAlts _) = snd (Map.findMin ctors) in
@@ -354,6 +371,15 @@ recoverCtor union name arity patterns =
       splitAt arity patterns
   in
   Ctor union name args : rest
+
+
+recoverTag :: Can.TagKey -> Int -> [Pattern] -> [Pattern]
+recoverTag key arity patterns =
+  let
+    (args, rest) =
+      splitAt arity patterns
+  in
+  Tag key args : rest
 
 
 
@@ -404,6 +430,12 @@ isUseful matrix vector =
                 (Maybe.mapMaybe (specializeRowByCtor name (length args)) matrix)
                 (args ++ patterns)
 
+            Tag key args ->
+              -- keep checking rows that start with this Tag or Anything
+              isUseful
+                (Maybe.mapMaybe (specializeRowByTag key (length args)) matrix)
+                (args ++ patterns)
+
             Anything ->
               -- check if all alts appear in matrix
               case isComplete matrix of
@@ -445,6 +477,11 @@ specializeRowByCtor ctorName arity row =
     Anything : patterns ->
       Just (replicate arity Anything ++ patterns)
 
+    Tag _ _ : _ ->
+      $(Crash.crash 'specializeRowByCtor) $
+        "Compiler bug! After type checking, constructors and structural variant\
+        \ tags should never align in pattern match exhaustiveness checks."
+
     Literal _ : _ ->
       $(Crash.crash 'specializeRowByCtor) $
         "Compiler bug! After type checking, constructors and literals\
@@ -452,6 +489,33 @@ specializeRowByCtor ctorName arity row =
 
     [] ->
       $(Crash.crash 'specializeRowByCtor) "Compiler error! Empty matrices should not get specialized."
+
+
+-- INVARIANT: (length row == N) ==> (length result == arity + N - 1)
+specializeRowByTag :: Can.TagKey -> Int -> [Pattern] -> Maybe [Pattern]
+specializeRowByTag key arity row =
+  case row of
+    Tag rowKey args : patterns ->
+      if rowKey == key then
+        Just (args ++ patterns)
+      else
+        Nothing
+
+    Anything : patterns ->
+      Just (replicate arity Anything ++ patterns)
+
+    Ctor _ _ _ : _ ->
+      $(Crash.crash 'specializeRowByTag) $
+        "Compiler bug! After type checking, constructors and structural variant\
+        \ tags should never align in pattern match exhaustiveness checks."
+
+    Literal _ : _ ->
+      $(Crash.crash 'specializeRowByTag) $
+        "Compiler bug! After type checking, structural variant tags and literals\
+        \ should never align in pattern match exhaustiveness checks."
+
+    [] ->
+      $(Crash.crash 'specializeRowByTag) "Compiler error! Empty matrices should not get specialized."
 
 
 -- INVARIANT: (length row == N) ==> (length result == N-1)
@@ -472,6 +536,11 @@ specializeRowByLiteral literal row =
         "Compiler bug! After type checking, constructors and literals\
         \ should never align in pattern match exhaustiveness checks."
 
+    Tag _ _ : _ ->
+      $(Crash.crash 'specializeRowByLiteral) $
+        "Compiler bug! After type checking, structural variant tags and literals\
+        \ should never align in pattern match exhaustiveness checks."
+
     [] ->
       $(Crash.crash 'specializeRowByLiteral) "Compiler error! Empty matrices should not get specialized."
 
@@ -482,6 +551,7 @@ specializeRowByAnything row =
   case row of
     []                  -> Nothing
     Ctor _ _ _ : _      -> Nothing
+    Tag _ _ : _         -> Nothing
     Anything : patterns -> Just patterns
     Literal _ : _       -> Nothing
 
@@ -522,3 +592,23 @@ collectCtorsHelp ctors row =
   case row of
     Ctor union name _ : _ -> Map.insert name union ctors
     _                     -> ctors
+
+
+
+
+-- COLLECT TAGS
+
+
+collectTags :: [[Pattern]] -> Map.Map Can.TagKey Int
+collectTags matrix =
+  List.foldl' collectTagsHelp Map.empty matrix
+
+
+collectTagsHelp :: Map.Map Can.TagKey Int -> [Pattern] -> Map.Map Can.TagKey Int
+collectTagsHelp tags row =
+  case row of
+    Tag key args : _ ->
+      Map.insert key (length args) tags
+
+    _ ->
+      tags
