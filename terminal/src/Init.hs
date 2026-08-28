@@ -141,7 +141,7 @@ forkDefaults =
       )
     , ( Pkg.virtualDom
       , ( V.toVersion 1 0 6
-        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-virtual-dom.git"
+        , "git@github.com:webbhuset/virtual-dom.git"
         )
       )
     ]
