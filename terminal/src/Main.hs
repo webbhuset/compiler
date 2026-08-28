@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 module Main
   ( main
   )
@@ -7,7 +6,7 @@ module Main
 
 
 import Prelude hiding (init)
-import qualified BuildStamp
+import qualified BuildCount
 import qualified Data.List as List
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 import Text.Read (readMaybe)
@@ -52,7 +51,7 @@ intro =
         ,P.green "Webbhuset"
         ,P.green "Elm"
         ,P.green (P.text (V.toChars V.compiler))
-        ,P.text ("(build " ++ $(BuildStamp.commitCount) ++ ")")
+        ,P.text ("(build " ++ BuildCount.count ++ ")")
         ]
     , ""
     , P.black "-------------------------------------------------------------------------------"

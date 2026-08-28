@@ -56,12 +56,13 @@ executable elm
         src/utils
         terminal/impl
         terminal/src
+        gen
 
     main-is:
         Main.hs
 
     other-modules:
-        BuildStamp
+        BuildCount
         Bump
         Develop
         Diff
