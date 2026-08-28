@@ -1,8 +1,9 @@
 # Web Workers — Design Notes
 
 **Status: implemented. Compiler side on the `css-blocks` branch; the
-`webbhuset/worker` companion package (kernel + effect manager) lives in a
-separate repository. Requires `--output=something.mjs`.**
+runtime is the `Browser.Worker` module in a patched `elm/browser`
+(`patches/elm-browser-worker.patch`), consumed as a git-dependency.
+Requires `--output=something.mjs`.**
 
 Elm has no way to use web workers without leaving the language: you compile
 a second program with a second `elm make`, wire `postMessage` by hand, and
@@ -135,10 +136,12 @@ Follows the CSS-blocks rails, with multi-bundle output as the new part:
    too, so `[css| ... |]` used inside a worker lands in the single sidecar.
 
 
-## Runtime (webbhuset/worker)
+## Runtime (Browser.Worker, in a patched elm/browser)
 
-An `effect module` with kernel code, consumed as a git-dependency (kernel
-and effect managers are trusted there):
+An `effect module` with kernel code. It first shipped as a standalone
+`webbhuset/worker` package, but it belongs in the `Browser` namespace and
+elm/browser already carries kernel code, so it lives in the elm/browser
+fork, consumed as a git-dependency:
 
 - Commands compile to opaque ops; `onEffects` executes them with the
   router. `spawn` creates the `Worker`, wires `onmessage`/`onerror` to

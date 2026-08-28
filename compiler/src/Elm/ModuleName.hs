@@ -266,7 +266,7 @@ cssStyles = Canonical Pkg.css "Css"
 
 {-# NOINLINE workers #-}
 workers :: Canonical
-workers = Canonical Pkg.worker "Worker"
+workers = Canonical Pkg.browser "Browser.Worker"
 
 
 {-# NOINLINE webgl #-}
