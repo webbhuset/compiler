@@ -1,0 +1,148 @@
+name: Release binaries
+
+# Build native binaries for all target platforms and publish them as a draft
+# GitHub Release. Triggered by pushing a version tag, e.g. v0.19.2-webbhuset.1
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Needed for the release job to create a Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  # --- Linux: fully static musl binaries via the existing Alpine Dockerfile ---
+  build-linux:
+    name: Build ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: elm-linux-x64
+            runner: ubuntu-latest
+          - asset: elm-linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static binary with Docker
+        run: |
+          docker build -t elm-build -f installers/linux/Dockerfile .
+          cid=$(docker create elm-build)
+          docker cp "$cid:/usr/local/bin/elm" ./elm
+          docker rm "$cid"
+
+      - name: Smoke test
+        run: ./elm --version
+
+      - name: Package
+        run: gzip -9 -c ./elm > ${{ matrix.asset }}.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.gz
+          if-no-files-found: error
+
+  # --- macOS: native cabal build. No static linking (OS limitation); GHC 9.8
+  # uses ghc-bignum so there is no libgmp dependency. ---
+  build-macos:
+    name: Build ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: elm-darwin-x64
+            runner: macos-13      # Intel
+          - asset: elm-darwin-arm64
+            runner: macos-14      # Apple Silicon
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GHC and cabal
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.8.4'
+          cabal-version: '3.12.1.0'
+
+      - name: Build
+        run: |
+          cabal update
+          cabal build elm
+          cp "$(cabal list-bin elm)" ./elm
+          strip ./elm
+
+      - name: Smoke test
+        run: ./elm --version
+
+      - name: Package
+        run: gzip -9 -c ./elm > ${{ matrix.asset }}.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.gz
+          if-no-files-found: error
+
+  # --- Windows: native cabal build producing elm.exe. ---
+  build-windows:
+    name: Build elm-win32-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GHC and cabal
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.8.4'
+          cabal-version: '3.12.1.0'
+
+      - name: Build
+        shell: bash
+        run: |
+          cabal update
+          cabal build elm
+          cp "$(cabal list-bin elm)" ./elm.exe
+
+      - name: Smoke test
+        shell: bash
+        run: ./elm.exe --version
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path elm.exe -DestinationPath elm-win32-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: elm-win32-x64
+          path: elm-win32-x64.zip
+          if-no-files-found: error
+
+  # --- Gather all five artifacts and publish them as a DRAFT release. The team
+  # reviews the draft and clicks publish before customers see it. ---
+  release:
+    name: Publish draft release
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -R artifacts
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          files: artifacts/*
