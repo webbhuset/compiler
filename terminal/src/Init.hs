@@ -8,8 +8,10 @@ module Init
 import Prelude hiding (init)
 import qualified Data.Map as Map
 import qualified Data.NonEmptyList as NE
+import qualified Data.Set as Set
 import qualified System.Directory as Dir
 
+import qualified Deps.Registry as Registry
 import qualified Deps.Solver as Solver
 import qualified Elm.Constraint as Con
 import qualified Elm.Outline as Outline
@@ -71,7 +73,9 @@ init =
           return (Left (Exit.InitRegistryProblem problem))
 
         Right (Solver.Env cache _ connection registry gitUrls) ->
-          do  result <- Solver.verify cache connection registry gitUrls defaults
+          do  let registry' = foldr addForkVersion registry (Map.toList forkDefaults)
+              let gitUrls' = Map.union (Map.map snd forkDefaults) gitUrls
+              result <- Solver.verify cache connection registry' gitUrls' defaults
               case result of
                 Solver.Err exit ->
                   return (Left (Exit.InitSolverProblem exit))
@@ -85,20 +89,59 @@ init =
                 Solver.Ok details ->
                   let
                     solution = Map.map (\(Solver.Details vsn _) -> vsn) details
-                    directs = Map.intersection solution defaults
-                    indirects = Map.difference solution defaults
+                    directs = Map.restrictKeys solution directDefaults
+                    indirects = Map.withoutKeys solution directDefaults
+                    usedGitUrls = Map.map snd (Map.intersection forkDefaults solution)
                   in
                   do  Dir.createDirectoryIfMissing True "src"
                       Outline.write "." $ Outline.App $
-                        Outline.AppOutline V.compiler (NE.List (Outline.RelativeSrcDir "src") []) directs indirects Map.empty Map.empty Map.empty
+                        Outline.AppOutline V.compiler (NE.List (Outline.RelativeSrcDir "src") []) directs indirects Map.empty Map.empty usedGitUrls
                       putStrLn "Okay, I created it. Now read that link!"
                       return (Right ())
 
 
+-- The packages every new project starts with. The patched forks (see
+-- CHANGELOG.md) are pinned to their fork versions and fetched as git
+-- dependencies; everything else comes from the registry as usual.
+
+
+directDefaults :: Set.Set Pkg.Name
+directDefaults =
+  Set.fromList [ Pkg.core, Pkg.browser, Pkg.html ]
+
+
 defaults :: Map.Map Pkg.Name Con.Constraint
 defaults =
+  Map.union
+    (Map.map (Con.exactly . fst) forkDefaults)
+    (Map.fromList
+      [ (Pkg.core, Con.anything)
+      , (Pkg.browser, Con.anything)
+      , (Pkg.html, Con.anything)
+      ])
+
+
+forkDefaults :: Map.Map Pkg.Name (V.Version, String)
+forkDefaults =
   Map.fromList
-    [ (Pkg.core, Con.anything)
-    , (Pkg.browser, Con.anything)
-    , (Pkg.html, Con.anything)
+    [ ( Pkg.core
+      , ( V.Version 1 0 6
+        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-core.git"
+        )
+      )
+    , ( Pkg.browser
+      , ( V.Version 1 0 3
+        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-browser.git"
+        )
+      )
+    , ( Pkg.virtualDom
+      , ( V.Version 1 0 6
+        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-virtual-dom.git"
+        )
+      )
     ]
+
+
+addForkVersion :: (Pkg.Name, (V.Version, String)) -> Registry.Registry -> Registry.Registry
+addForkVersion (pkg, (vsn, _)) (Registry.Registry count versions) =
+  Registry.Registry count (Map.insert pkg (Registry.KnownVersions vsn []) versions)
