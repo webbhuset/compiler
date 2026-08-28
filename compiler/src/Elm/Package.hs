@@ -14,7 +14,7 @@ module Elm.Package
   , browser, virtualDom, html
   , json, http, url
   , webgl, linearAlgebra
-  , css, worker
+  , css
   --
   , suggestions
   , nearbyNames
@@ -173,8 +173,6 @@ elm              :: Author; elm              = Author [S.ascii|elm|]
 elm_explorations :: Author; elm_explorations = Author [S.ascii|elm-explorations|]
 
 css :: Name; css = toName webbhuset [S.ascii|css|]
-
-worker :: Name; worker = toName webbhuset [S.ascii|worker|]
 
 webbhuset :: Author; webbhuset = Author [S.ascii|webbhuset|]
 

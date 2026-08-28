@@ -22,9 +22,9 @@ import qualified Reporting.Report as Report
 
 -- CHECK
 --
--- Worker.spawn compiles the referenced worker program into a separate
--- bundle, so the compiler must see, at every use, which top-level value is
--- being spawned. This pass rejects any use of Worker.spawn that is not a
+-- Browser.Worker.spawn compiles the referenced worker program into a
+-- separate bundle, so the compiler must see, at every use, which top-level
+-- value is being spawned. This pass rejects any use of spawn that is not a
 -- direct, fully applied call whose first argument is a direct reference to
 -- a top-level value, e.g. `Worker.spawn Counter.main args handlers`.
 
@@ -139,7 +139,7 @@ toReport source err =
         Code.toSnippet source region Nothing
           (
             D.reflow $
-              "Worker.spawn must be called directly, with all three arguments:"
+              "Browser.Worker.spawn must be called directly, with all three arguments:"
           ,
             D.stack
               [ D.reflow $
@@ -149,7 +149,7 @@ toReport source err =
               , D.indent 4 $ D.dullyellow $
                   "Worker.spawn Counter.main args handlers"
               , D.reflow $
-                  "Passing Worker.spawn around as a function or applying it partially\
+                  "Passing spawn around as a function or applying it partially\
                   \ hides the worker program from the compiler."
               ]
           )
@@ -159,7 +159,7 @@ toReport source err =
         Code.toSnippet source region Nothing
           (
             D.reflow $
-              "The first argument of Worker.spawn must be a direct reference to a\
+              "The first argument of Browser.Worker.spawn must be a direct reference to a\
               \ top-level worker program:"
           ,
             D.stack

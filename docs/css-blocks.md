@@ -177,7 +177,7 @@ contains kernel code and is therefore consumed as a
     "direct": { "webbhuset/css": "1.0.0", ... }
 },
 "git-dependencies": {
-    "webbhuset/css": "git@github.com:webbhuset/css.git"
+    "webbhuset/css": "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-css.git"
 }
 ```
 

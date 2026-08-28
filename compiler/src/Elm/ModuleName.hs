@@ -121,6 +121,6 @@ dCanonical =
 {-# NOINLINE matrix4 #-}; matrix4 :: Canonical; matrix4 = Canonical Pkg.linearAlgebra Module.math_matrix4
 
 
-{-# NOINLINE workers #-}; workers :: Canonical; workers = Canonical Pkg.worker Module.worker
+{-# NOINLINE workers #-}; workers :: Canonical; workers = Canonical Pkg.browser Module.browser_worker
 
 

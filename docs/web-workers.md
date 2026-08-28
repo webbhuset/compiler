@@ -13,7 +13,7 @@ A worker is a module whose `main` is a `Worker.Program`:
 ```elm
 module Counter exposing (Args, Msg(..), ToParent(..), main)
 
-import Worker
+import Browser.Worker as Worker
 
 
 type alias Args =
@@ -49,8 +49,8 @@ commands, tasks, HTTP — anything that does not need the DOM.
 Spawn it by referencing its `main` directly:
 
 ```elm
+import Browser.Worker as Worker
 import Counter
-import Worker
 
 
 type Msg
@@ -126,22 +126,25 @@ error. Workers can spawn workers; a spawn *cycle* is a compile error.
   type. It is not an app `main`: `elm make src/Counter.elm` alone is not a
   valid program root.
 
-## Runtime: the webbhuset/worker package
+## Runtime: patched elm/browser
 
-`Worker` lives in the `webbhuset/worker` package, which contains kernel
-code and an effect manager and is therefore consumed as a
-[git dependency](git-dependencies.md):
+`Browser.Worker` lives in a fork of `elm/browser` (kernel code plus an
+effect manager), consumed as a [git dependency](git-dependencies.md) under
+an unpublished version number, like the elm/core patches for task ports:
 
 ```json
 "dependencies": {
-    "direct": { "webbhuset/worker": "1.0.0", ... }
+    "direct": { "elm/browser": "1.0.3", ... }
 },
 "git-dependencies": {
-    "webbhuset/worker": "git@github.com:webbhuset/worker.git"
+    "elm/browser": "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-browser.git"
 }
 ```
 
-No elm/core or elm/virtual-dom patches are needed for this feature.
+The addition is in
+[patches/elm-browser-worker.patch](patches/elm-browser-worker.patch); it is
+purely additive, so programs not using workers behave identically. No
+elm/core or elm/virtual-dom patches are needed.
 
 Design rationale — why `spawn` is a `Cmd` rather than a `Task`, the
 `Worker`/`Channel` capability split, and the compile pipeline — is in

@@ -203,7 +203,8 @@ view model =
 
 ## Native web workers
 
-*[docs](docs/web-workers.md) · runtime in the `webbhuset/worker` package ·
+*[docs](docs/web-workers.md) · runtime: `Browser.Worker` in a
+[patched elm/browser](docs/patches/elm-browser-worker.patch) ·
 requires `--output=something.mjs`*
 
 A worker is an Elm module whose `main` is a `Worker.Program`, compiled into
@@ -240,18 +241,19 @@ Worker.spawn Counter.main
 - Messages must be function-free (structured clone); violations fail at
   runtime via `onCrash`. CSS blocks inside worker code land in the same
   `.css` sidecar as the rest of the program.
-- The `Worker` module ships in the `webbhuset/worker` package (kernel code
-  plus an effect manager), consumed as a git dependency. No elm/core or
-  virtual-dom patches needed.
+- The `Browser.Worker` module ships in a patched `elm/browser` (kernel
+  code plus an effect manager), consumed as a git dependency. No elm/core
+  or virtual-dom patches needed.
 
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
   field, which official parsers ignore.
 - **elm/core**: task ports and comparable newtypes need a patched
-  elm/core, and `Css.vars` needs a patched elm/virtual-dom (all patches
-  are in [docs/patches/](docs/patches/)), consumed through git
-  dependencies under unpublished version numbers. The elm/core patches
+  elm/core, `Css.vars` needs a patched elm/virtual-dom, and web workers
+  need a patched elm/browser (all patches are in
+  [docs/patches/](docs/patches/)), consumed through git dependencies
+  under unpublished version numbers. The elm/core patches
   are additive; programs not using the features behave identically. The
   virtual-dom patch applies styles with `setProperty`, which only accepts
   hyphenated CSS names — camelCase keys like `style "backgroundColor"`
