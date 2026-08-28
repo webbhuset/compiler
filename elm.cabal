@@ -161,8 +161,10 @@ executable elm
         Generate.JavaScript.Functions
         Generate.JavaScript.Name
         Generate.Mode
+        Generate.Workers
         Nitpick.Debug
         Nitpick.PatternMatches
+        Nitpick.Workers
         Optimize.Case
         Optimize.DecisionTree
         Optimize.Expression

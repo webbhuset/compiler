@@ -11,6 +11,7 @@ module Make
   where
 
 
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as B
 import qualified Data.Maybe as Maybe
 import qualified Data.NonEmptyList as NE
@@ -94,11 +95,13 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                       return ()
 
                     [name] ->
-                      do  (builder, css) <- toBuilder Generate.Iife root details desiredMode artifacts
+                      do  bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
+                          let (Generate.Bundles builder css _) = bundles
                           generate style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
-                      do  (builder, css) <- toBuilder Generate.Iife root details desiredMode artifacts
+                      do  bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
+                          let (Generate.Bundles builder css _) = bundles
                           writeCss "elm.js" css
                           generate style "elm.js" builder (NE.List name names)
 
@@ -108,7 +111,8 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (JS target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  (builder, css) <- toBuilder Generate.Iife root details desiredMode artifacts
+                      do  bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
+                          let (Generate.Bundles builder css _) = bundles
                           writeCss target css
                           generate style target builder (Build.getRootNames artifacts)
 
@@ -118,16 +122,16 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (Esm target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  (builder, css) <- toBuilder Generate.Esm root details desiredMode artifacts
-                          writeCss target css
-                          generate style target builder (Build.getRootNames artifacts)
+                      do  bundles <- toBuilder Generate.Esm root details desiredMode artifacts
+                          writeBundles style target bundles (Build.getRootNames artifacts)
 
                     name:names ->
                       Task.throw (Exit.MakeNonMainFilesIntoJavaScript name names)
 
                 Just (Html target) ->
                   do  name <- hasOneMain artifacts
-                      (builder, css) <- toBuilder Generate.Iife root details desiredMode artifacts
+                      bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
+                      let (Generate.Bundles builder css _) = bundles
                       generate style target (Html.sandwich name css builder) (NE.List name [])
 
 
@@ -261,6 +265,29 @@ generate style target builder names =
         Reporting.reportGenerate style names target
 
 
+-- Non-ESM outputs cannot host web workers (no import.meta to resolve the
+-- worker files relative to the bundle).
+noWorkers :: Generate.Bundles -> Task Generate.Bundles
+noWorkers bundles@(Generate.Bundles _ _ workers) =
+  case workers of
+    [] -> return bundles
+    _ -> Task.throw (Exit.MakeBadGenerate Exit.GenerateWorkersRequireEsm)
+
+
+-- ESM output: the main bundle, its .css sidecar, and one .mjs file per
+-- spawned worker program, named by content hash.
+writeBundles :: Reporting.Style -> FilePath -> Generate.Bundles -> NE.List ModuleName.Raw -> Task ()
+writeBundles style target bundles names =
+  Task.io $
+    do  let dir = FP.takeDirectory target
+        Dir.createDirectoryIfMissing True dir
+        let (workerFiles, mainBytes, cssBytes) = Generate.finalize (FP.takeBaseName target) bundles
+        mapM_ (\(name, bytes) -> BS.writeFile (dir FP.</> name) bytes) workerFiles
+        maybe (return ()) (BS.writeFile (target ++ ".css")) cssBytes
+        BS.writeFile target mainBytes
+        Reporting.reportGenerate style names target
+
+
 -- Write the sidecar stylesheet next to the JS output, e.g. `elm.mjs.css`
 -- for `--output=elm.mjs`. Only written when the program has CSS blocks.
 writeCss :: FilePath -> Maybe B.Builder -> Task ()
@@ -282,7 +309,7 @@ writeCss target maybeCss =
 data DesiredMode = Debug | Dev | Prod
 
 
-toBuilder :: Generate.Format -> FilePath -> Details.Details -> DesiredMode -> Build.Artifacts -> Task (B.Builder, Maybe B.Builder)
+toBuilder :: Generate.Format -> FilePath -> Details.Details -> DesiredMode -> Build.Artifacts -> Task Generate.Bundles
 toBuilder format root details desiredMode artifacts =
   Task.mapError Exit.MakeBadGenerate $
     case desiredMode of

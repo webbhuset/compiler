@@ -2036,6 +2036,8 @@ toModuleNameConventionTable srcDir names =
 data Generate
   = GenerateCannotLoadArtifacts
   | GenerateCannotOptimizeDebugValues ModuleName.Raw [ModuleName.Raw]
+  | GenerateWorkersRequireEsm
+  | GenerateWorkerCycle [String]
 
 
 toGenerateReport :: Generate -> Help.Report
@@ -2043,6 +2045,26 @@ toGenerateReport problem =
   case problem of
     GenerateCannotLoadArtifacts ->
       corruptCacheReport
+
+    GenerateWorkersRequireEsm ->
+      Help.report "WORKERS NEED ES MODULES" Nothing
+        "This program spawns web workers, so it must be compiled to an ES module:"
+        [ D.indent 4 $ D.dullyellow "elm make src/Main.elm --output=main.mjs"
+        , D.reflow $
+            "Worker files are loaded relative to the compiled bundle, and only ES\
+            \ modules can know their own URL (via import.meta). The classic .js and\
+            \ .html outputs and elm reactor cannot host workers."
+        ]
+
+    GenerateWorkerCycle names ->
+      Help.report "WORKER SPAWN CYCLE" Nothing
+        "These worker programs spawn each other in a cycle:"
+        [ D.indent 4 $ D.red $ D.vcat $ map D.fromChars names
+        , D.reflow $
+            "Each worker compiles to a file named by the hash of its content, and a\
+            \ spawn cycle makes those hashes depend on each other. Break the cycle,\
+            \ for example by routing messages through the parent instead."
+        ]
 
     GenerateCannotOptimizeDebugValues m ms ->
       Help.report "DEBUG REMNANTS" Nothing

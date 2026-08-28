@@ -275,6 +275,11 @@ addDefHelp region annotations home name args body graph@(Opt.LocalGraph _ nodes 
             Left (subType, invalidPayload) ->
               Result.throw (E.BadFlags region subType invalidPayload)
 
+      -- a worker program's main is an ordinary definition, not a program
+      -- root; it is compiled into a bundle of its own when spawned
+      Can.TType hm nm [_, _, _, _] | hm == ModuleName.workers && nm == Name.fromChars "Program" ->
+          Result.ok (addDefNode home name args body Set.empty graph)
+
       _ ->
           Result.throw (E.BadType region tipe)
 

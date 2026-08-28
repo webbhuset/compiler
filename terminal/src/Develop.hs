@@ -159,9 +159,14 @@ compile path =
           BW.withScope $ \scope -> Stuff.withRootLock root $ Task.run $
             do  details <- Task.eio Exit.ReactorBadDetails $ Details.load Reporting.silent scope root
                 artifacts <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths Reporting.silent root details (NE.List path [])
-                (javascript, css) <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife root details artifacts
-                let (NE.List name _) = Build.getRootNames artifacts
-                return $ Html.sandwich name css javascript
+                bundles <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife root details artifacts
+                case bundles of
+                  Generate.Bundles _ _ (_:_) ->
+                    Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
+
+                  Generate.Bundles javascript css [] ->
+                    do  let (NE.List name _) = Build.getRootNames artifacts
+                        return $ Html.sandwich name css javascript
 
 
 
