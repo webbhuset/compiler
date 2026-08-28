@@ -174,6 +174,89 @@ branch — is not expressible; it would need an explicit `widen` coercion
 construction is always open.
 
 
+## A worked example
+
+Row subtraction composes into pipelines where each step handles one tag and
+passes the rest along, and the final step's closed row proves every tag was
+handled somewhere. An alias can name the recurring shape — aliases may take
+row parameters like any type variable:
+
+```elm
+type tag Done ok
+type tag Error err
+type tag Loading
+type tag Empty
+type tag Display message
+
+
+type alias Displayable r =
+    [ r | Display String ]
+
+
+displayError : Displayable [ r | Error String ] -> Displayable r
+displayError state =
+    case state of
+        Error err ->
+            Display ("Error: " ++ err)
+
+        r ->
+            r
+
+
+displayLoading : Displayable [ r | Loading ] -> Displayable r
+displayLoading state =
+    case state of
+        Loading ->
+            Display "Loading..."
+
+        r ->
+            r
+
+
+display : [ Display String ] -> String
+display (Display message) =
+    message
+
+
+test : List String
+test =
+    [ Loading
+    , Error "Something went wrong"
+    , Display "All good"
+    ]
+        |> List.map (displayError >> displayLoading >> display)
+```
+
+Each step subtracts the tag it converts: `displayError` turns `Error` into
+`Display` and passes everything else through, so its result row no longer
+contains `Error`. By the time values reach `display`, the pipeline has
+discharged every tag except `Display String` — which is why `display` can
+take a closed single-tag row and destructure it irrefutably in its argument
+pattern.
+
+The proof is in what happens when a tag slips in that no step handles. Add
+`Empty` to the list and the pipe fails to type check:
+
+```
+This function cannot handle the argument sent through the (|>) pipe:
+
+The argument is:
+
+    List [ a | Display String, Empty, Error String, Loading ]
+
+But (|>) is piping it to a function that expects:
+
+    List (Displayable [ Error String, Loading ])
+
+Hint: The Empty tag can still occur at this point, but it is not handled
+here. Handle it before this point, or add it to the variant row that is
+expected!
+```
+
+Adding a `displayEmpty` step to the pipeline fixes it — no central type
+declaration to touch, no other function affected.
+
+
 ## Restrictions
 
 - **Tag patterns cannot appear inside tuples, lists, records, or custom type
