@@ -117,6 +117,62 @@ This applies recursively to tags nested in other tag patterns
 patterns, which close the row to a single tag (they must be irrefutable).
 
 
+## Row subtraction
+
+When a `case` ends with a catch-all *variable*, that variable is bound at the
+scrutinee's row **minus** the tags matched by the earlier branches — at
+runtime it can never hold one of those tags, so the type says so:
+
+```elm
+removeLoading : r -> [ r | Loading ] -> r
+removeLoading whenLoading status =
+    case status of
+        Loading ->
+            whenLoading
+
+        other ->
+            other          -- other : r, the row WITHOUT Loading
+```
+
+This type is also what inference produces without the annotation. Reusing the
+tail variable `r` bare as the result type is the idiom for subtraction, and
+it composes: instantiating `r` derives row-changing functions that cannot be
+written directly:
+
+```elm
+failLoading : [ f | Failure String, Loading ] -> [ f | Failure String ]
+failLoading =
+    removeLoading (Failure "Loading")
+```
+
+Closed rows subtract the same way, without rebuilding the other branches:
+
+```elm
+compact : [ Success Int, Failure String, Loading ] -> [ Success Int, Failure String ]
+compact s =
+    case s of
+        Loading ->
+            Failure "was loading"
+
+        other ->
+            other
+```
+
+Two rules govern what gets subtracted:
+
+- Only tags matched **irrefutably** are removed. `Wrap (Ok n) -> ...` does
+  not consume the whole `Wrap` tag — a `Wrap (Err e)` value still reaches the
+  catch-all — so `Wrap` stays in the catch-all's type.
+- The catch-all must be the **final** branch, with only tag patterns before
+  it. A `_` wildcard binds nothing, so nothing is narrowed there.
+
+The reverse direction — *adding* tags to an abstract remainder, as in
+`[ r | Success Int ] -> [ r | Success Int, Loading ]` with a pass-through
+branch — is not expressible; it would need an explicit `widen` coercion
+(not implemented). Adding tags to freshly constructed values needs nothing:
+construction is always open.
+
+
 ## Restrictions
 
 - **Tag patterns cannot appear inside tuples, lists, records, or custom type

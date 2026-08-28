@@ -279,6 +279,11 @@ describe s =
   is open (at least these tags), mirroring record extension syntax.
 - Exhaustiveness is part of type checking: a `case` without a `_` branch
   closes the row, so an unhandled tag is a type error naming the tag.
+- Row subtraction: a final catch-all variable is bound at the scrutinee row
+  minus the (irrefutably) matched tags, so
+  `removeLoading : r -> [ r | Loading ] -> r` works — and instantiating `r`
+  derives row-changing functions like
+  `[ f | Failure String, Loading ] -> [ f | Failure String ]`.
 - Tags are canonical (module + name): same-spelled tags from different
   modules are distinct and can coexist in one union. Export and import
   them like constructors.
