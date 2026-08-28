@@ -238,6 +238,17 @@ chompTagArgs revArgs end =
           newEnd <- getPosition
           Space.chomp E.DT_TagSpace
           chompTagArgs (arg:revArgs) newEnd
+    , -- an uppercase name or a paren here means someone wrote a payload
+      -- TYPE; commit to a dedicated error instead of ending the
+      -- declaration and letting the top level trip on the leftovers
+      do  Space.checkIndent end E.DT_TagIndentArg
+          A.Position cur <- getPosition
+          oneOf E.DT_TagArg
+            [ do  _ <- Var.upper E.DT_TagArg
+                  return ()
+            , word1 0x28#Word8 {-(-} E.DT_TagArg
+            ]
+          P.Parser $ \_ _ _ _ cerr _ -> cerr cur E.DT_TagArgType
     ]
     (reverse revArgs, end)
 

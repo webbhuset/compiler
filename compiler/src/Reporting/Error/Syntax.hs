@@ -148,6 +148,7 @@ data DeclTag
   = DT_TagSpace Space Cursor
   | DT_TagName Cursor
   | DT_TagArg Cursor
+  | DT_TagArgType Cursor
   --
   | DT_TagIndentName Cursor
   | DT_TagIndentArg Cursor
@@ -1879,6 +1880,30 @@ toDeclTagReport source tag startCur =
           ,
             D.reflow $
               "I was expecting a lowercase type variable, like the `a` in `variant Success a`."
+          )
+
+    DT_TagArgType cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "TYPE IN VARIANT DECLARATION" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I am partway through parsing a variant declaration, but I got stuck on\
+              \ what looks like a type:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "A variant declaration only takes lowercase type variables, like the\
+                  \ `a` in:"
+              , D.indent 4 $ D.dullyellow "variant Display a"
+              , D.reflow $
+                  "The concrete payload type is written where the variant is used, for\
+                  \ example:"
+              , D.indent 4 $ D.dullyellow "view : [ Loading, Display String ] -> Html msg"
+              ]
           )
 
     DT_TagIndentName cur ->
