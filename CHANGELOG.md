@@ -160,3 +160,12 @@ users : Dict Id User
   invalidate each other's caches.
 - **Object files**: task ports add a node kind to the `.elmo` format;
   stale `elm-stuff` from other compilers is detected and rebuilt.
+
+## Cross-platform release binaries
+
+Pushing a `v*` tag builds native binaries for `linux-x64`, `linux-arm64`,
+`darwin-x64`, `darwin-arm64`, and `win32-x64` via
+`.github/workflows/release.yml` and attaches them (gzip / zip) to a **draft**
+GitHub Release for review before publishing. Linux binaries are fully static
+(built on Alpine/musl); each binary is smoke-tested with `elm --version` in CI
+before it is uploaded.
