@@ -48,12 +48,13 @@ Package projects work the same way, with the usual constraint in
 `elm install webbhuset/elm-promise` also works once the package is listed
 in `"git-dependencies"`.
 
-`elm init` generates a project already set up this way: the patched
-elm/core, elm/browser, and elm/virtual-dom forks are pinned to their fork
-versions with `"git-dependencies"` entries pointing at
-`gitlab.webbhuset.com:webbhuset/internal/frontend/elm-{core,browser,virtual-dom}.git`,
-so task ports, comparable newtypes, `Css.vars`, and `Browser.Worker` work
-out of the box in new projects.
+`elm init` generates a project already set up this way: the patched forks
+are pinned to their fork versions with `"git-dependencies"` entries —
+elm/core and elm/browser from
+`gitlab.webbhuset.com:webbhuset/internal/frontend/elm-{core,browser}.git`
+and elm/virtual-dom from `github.com:webbhuset/virtual-dom.git` — so task
+ports, comparable newtypes, `Css.vars`, and `Browser.Worker` work out of
+the box in new projects.
 
 ## How versions work
 

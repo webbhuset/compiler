@@ -43,8 +43,8 @@ like Elm versions (`1.2.0`):
   origins.
 - `elm init` writes a project that starts on the patched forks: elm/core,
   elm/browser, and elm/virtual-dom are pinned to the fork versions and
-  listed in `"git-dependencies"` pointing at the GitLab repositories;
-  everything else resolves from the registry as usual.
+  listed in `"git-dependencies"` (core and browser on GitLab, virtual-dom
+  on GitHub); everything else resolves from the registry as usual.
 
 ## Kernel code in git dependencies
 
