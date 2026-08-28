@@ -47,7 +47,6 @@ declaration =
       oneOf E.DeclStart
         [ typeDecl maybeDocs start
         , portDecl maybeDocs
-        , tagDecl maybeDocs start
         , valueDecl maybeDocs start
         ]
 
@@ -146,6 +145,15 @@ typeDecl maybeDocs start =
                   let alias = A.at start end (Src.Alias name args tipe)
                   return (Alias maybeDocs alias, end)
           ,
+            inContext E.DT_Tag (Keyword.tag_ E.DT_Name) $
+              do  Space.chompAndCheckIndent E.DT_TagSpace E.DT_TagIndentName
+                  name <- addLocation (Var.upper E.DT_TagName)
+                  nameEnd <- getPosition
+                  Space.chomp E.DT_TagSpace
+                  (args, end) <- chompTagArgs [] nameEnd
+                  let tag = A.at start end (Src.TagDecl name args)
+                  return (TagDecl maybeDocs tag, end)
+          ,
             specialize E.DT_Union $
               do  (name, args) <- chompCustomNameToEquals
                   (firstVariant, firstEnd) <- Type.variant
@@ -215,19 +223,6 @@ chompVariants variants end =
 
 
 -- STRUCTURAL VARIANT TAGS
-
-
-{-# INLINE tagDecl #-}
-tagDecl :: Maybe Src.Comment -> A.Position -> Space.Parser E.Decl Decl
-tagDecl maybeDocs start =
-  inContext E.DeclTag (Keyword.variant_ E.DeclStart) $
-    do  Space.chompAndCheckIndent E.DT_TagSpace E.DT_TagIndentName
-        name <- addLocation (Var.upper E.DT_TagName)
-        nameEnd <- getPosition
-        Space.chomp E.DT_TagSpace
-        (args, end) <- chompTagArgs [] nameEnd
-        let tag = A.at start end (Src.TagDecl name args)
-        return (TagDecl maybeDocs tag, end)
 
 
 chompTagArgs :: [A.Located Name.Name] -> A.Position -> Space.Parser E.DeclTag [A.Located Name.Name]
