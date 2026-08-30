@@ -357,8 +357,9 @@ hello world
   `exit`; `System.File` has the usual file and directory operations.
 - Failures are structural variant tags, so each operation says what it can
   actually fail with, chaining unions the rows, and handling one tag with
-  a catch-all removes it from what the caller sees. Unmapped errno codes
-  become `Unknown`, carrying the system's own code and message.
+  a catch-all removes it from what the caller sees. An error code with no
+  tag crashes, naming the code and asking for a report, so gaps in the
+  vocabulary get found rather than hidden behind a catch-all.
 - A script must be the only program compiled, `--output` must be `.js` or
   `.mjs`, and the DEV mode console warning is suppressed since a program's
   stderr is part of its contract.

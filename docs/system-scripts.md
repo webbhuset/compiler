@@ -105,7 +105,7 @@ operation says what it can actually fail with — `read` cannot claim
 `DirectoryNotEmpty` — and chaining unions the rows on its own:
 
 ```elm
-read : String -> Task [ r | NotFound String, PermissionDenied String, IsADirectory String, Unknown Details ] String
+read : String -> Task [ r | NotFound String, PermissionDenied String, IsADirectory String, TooManyOpenFiles String, NameTooLong String, SymlinkLoop String ] String
 ```
 
 Because the rows stay open, you can handle one tag and pass the rest
@@ -113,7 +113,7 @@ along. The catch-all is typed at the row *minus* what was matched, so the
 caller only sees what is genuinely left:
 
 ```elm
-readOrEmpty : String -> Task [ r | PermissionDenied String, IsADirectory String, Unknown Details ] String
+readOrEmpty : String -> Task [ r | PermissionDenied String, IsADirectory String, TooManyOpenFiles String, NameTooLong String, SymlinkLoop String ] String
 readOrEmpty path =
     System.File.read path
         |> Task.onError
@@ -127,8 +127,19 @@ readOrEmpty path =
             )
 ```
 
-An errno this package does not have a tag for becomes `Unknown`, carrying
-the system's own code and message, so nothing is lost.
+An error code the package has no tag for **crashes**, naming the code, the
+system's message and the path, and asking for it to be reported:
+
+```
+Error: webbhuset/system has no tag for the system error code EIO: EIO: i/o error, read
+    path: /proc/self/mem
+This is a gap in the package. Please report the code above so it can be given a tag.
+```
+
+While the vocabulary is still being filled in, a loud failure is what gets
+the gap fixed; a silent catch-all tag would hide it and would also show up
+in every signature. `System.Error.unknown` is the same crash, for wrapping
+system calls of your own.
 
 Note that `Task.attempt` produces a `Result`, and a tag pattern cannot
 currently sit inside a constructor pattern, so `Err NotFound ->` does not
