@@ -260,9 +260,23 @@ declaration to touch, no other function affected.
 
 ## Restrictions
 
-- **Tag patterns cannot appear inside tuples, lists, records, or custom type
-  constructor patterns.** Match the outer structure first, then the tag in a
-  second `case`. (Tags nested in *other tag patterns* are fine.)
+- **Tag patterns can only appear where the variant row can be closed:** at
+  the top of a `case` branch, inside another tag pattern, and inside a
+  constructor argument whose declared type is a type *variable* — which
+  covers the common wrappers:
+
+  ```elm
+  case result of
+      Ok value -> ...
+      Err (NotFound path) -> ...      -- the `e` of Result e a
+      Err (Denied path) -> ...
+  ```
+
+  Exhaustiveness still holds through the nesting: leaving out `Denied` is a
+  type error naming it. Tuples, lists, and constructor arguments of a fixed
+  type are still rejected, because there is no row to close there and an
+  unhandled tag would reach no branch at run time. Match the outer structure
+  first and the tag in a second `case`.
 - **Recursion needs a named type.** `type alias Json = [ Num Float, Arr (List Json) ]`
   is still a recursive alias error; tie the knot with a custom type instead:
 
