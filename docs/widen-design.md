@@ -324,6 +324,19 @@ questions.
 
 - **Reserved keyword `widen e`** — costs a word, breaks any code using the
   name, and buys nothing over the Basics function. Rejected.
+- **Unary operator `~e`** — mechanically clean: `~` is outside Elm's binop
+  character set (`+-/*=.<>:&|^?%!`, see `Parse.Symbol.binopCharSet`), so a
+  fresh prefix symbol has no binary reading and avoids the whitespace
+  ambiguity that makes prefix `-` special-cased in three places. One term
+  parser case, and — the one substantive advantage — **no forked-core
+  release**: the feature becomes compiler-only. Rejected as the primary
+  design anyway: an operator cannot be piped (`x |> widen |> f` is how the
+  boundary sites actually read), has no first-class form (`List.map widen`),
+  is not greppable or searchable, and a novel unary operator cuts against
+  Elm 0.19's removal of user operators. Recorded as the fallback if
+  shipping a core release proves to be the blocker; other symbols surveyed
+  (`...` spread-alike, `!`, `?`, `@`, `#`, `$`) all drag in misleading
+  connotations.
 - **Per-tag embed functions** (`embedLoading : ...`) — not typeable at
   all; see "Why it must be a primitive".
 - **Implicit subsumption** — MLsub/MLstruct-style subtyping inference.
