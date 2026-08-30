@@ -326,6 +326,46 @@ userDecoder =
 - The patched elm/core adds `Task.await` (`andThen` with the task first) so
   task chains do not each need their own flipped helper.
 
+## Command line scripts
+
+*[docs](docs/system-scripts.md) · runtime in the `webbhuset/system` package*
+
+A module whose `main` has this type is a program that runs on the command
+line, and the compiled file runs itself — it gets a `#!/usr/bin/env node`
+line and the executable bit:
+
+```elm
+main : System.Process -> Task String Int
+main process =
+    System.stdout ("hello " ++ String.join " " process.argv ++ "\n")
+        |> Task.map (\_ -> 0)
+```
+
+```
+$ elm make src/Hello.elm --output=hello.js
+$ ./hello.js world
+hello world
+```
+
+- The type is the contract: succeeding with an `Int` exits with that
+  status, failing with a `String` prints it to stderr and exits 1. No
+  separate exit API is needed for the normal path.
+- `Process` carries `argv` (without the node binary and script path), an
+  `env` dict, and `platform`. Things that change while the program runs,
+  like the working directory, are tasks instead of fields.
+- `System` has stdout/stderr/stdin, `isTerminal`, `cwd`/`chdir` and
+  `exit`; `System.File` has the usual file and directory operations.
+- Failures are structural variant tags, so each operation says what it can
+  actually fail with, chaining unions the rows, and handling one tag with
+  a catch-all removes it from what the caller sees. Unmapped errno codes
+  become `Unknown`, carrying the system's own code and message.
+- A script must be the only program compiled, `--output` must be `.js` or
+  `.mjs`, and the DEV mode console warning is suppressed since a program's
+  stderr is part of its contract.
+- Long running programs that must react to events (watchers, servers,
+  signals) want a message loop instead: write those as a `Platform.worker`
+  with ports. The `System.*` tasks work there unchanged.
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
@@ -344,6 +384,7 @@ userDecoder =
   package artifacts automatically. Do not alternate this fork and the
   official compiler on the same `ELM_HOME` — they will repeatedly
   invalidate each other's caches.
-- **Object files**: task ports add a node kind, and CSS blocks and web
-  workers each add an expression kind to the `.elmo` format; stale
-  `elm-stuff` from other compilers is detected and rebuilt.
+- **Object files**: task ports add a node kind, CSS blocks and web workers
+  each add an expression kind, and command line scripts add a main kind to
+  the `.elmo` format; stale `elm-stuff` from other compilers is detected
+  and rebuilt.
