@@ -115,8 +115,41 @@ copyOne source target name =
 work that follows the rules of the system the script runs on, so joining
 paths is right on every platform.
 
+**`System.Child`** — `run`/`runWith` to run another program and collect
+what it printed, `attach`/`attachWith` to let it write straight to your
+own output. Arguments are a list, so nothing is split on spaces; a
+program that exits nonzero succeeds as a task, because a status is how
+programs answer questions.
+
 **`System.Error`** — the failure vocabulary, and `format` to turn any of
 it into a line worth printing.
+
+## Running other programs
+
+```elm
+\out <- Task.await (System.Child.run "git" [ "rev-parse", "HEAD" ])
+
+System.stdout ("at commit " ++ String.trim out.stdout ++ "\n")
+```
+
+`out` carries `status`, `stdout` and `stderr`. A failing status is not a
+failed task — `git diff --quiet` uses its status to answer a question — so
+check `out.status` yourself. The task fails only when the program could
+not be started at all.
+
+For something long or chatty, `attach` runs it with the output going
+straight to your own, and gives back the status:
+
+```elm
+\status <- Task.await (System.Child.attach "npm" [ "test" ])
+```
+
+There is no shell mode. When you want a pipe, say so, and the shell is
+visible at the call site:
+
+```elm
+System.Child.run "sh" [ "-c", "git ls-files | wc -l" ]
+```
 
 ## Errors
 
