@@ -1,0 +1,50 @@
+--- a/src/Task.elm
++++ b/src/Task.elm
+@@ -3,7 +3,7 @@ effect module Task where { command = MyCmd } exposing
+   , succeed, fail
+   , map, map2, map3, map4, map5
+   , sequence
+-  , andThen
++  , andThen, await
+   , onError, mapError
+   , perform, attempt
+   )
+@@ -15,7 +15,7 @@ HTTP requests or writing to a database.
+ @docs Task, perform, attempt
+ 
+ # Chains
+-@docs andThen, succeed, fail, sequence
++@docs andThen, await, succeed, fail, sequence
+ 
+ # Maps
+ @docs map, map2, map3, map4, map5
+@@ -209,6 +209,29 @@ andThen =
+   Elm.Kernel.Scheduler.andThen
+ 
+ 
++{-| Chain tasks with the task first and the callback last, which is what a
++back-lambda needs:
++
++    \time <- await Time.now
++    \name <- await (fetchName time)
++
++    succeed (name ++ " at " ++ String.fromInt (Time.posixToMillis time))
++
++That is the same as writing it with `andThen`, nested:
++
++    Time.now
++      |> andThen (\time -> fetchName time
++      |> andThen (\name -> succeed (...)))
++
++Use whichever reads better. `andThen` suits a pipeline of one or two steps;
++`await` keeps a longer chain flat, with each name next to the task that
++produces it.
++-}
++await : Task x a -> (a -> Task x b) -> Task x b
++await task callback =
++  Elm.Kernel.Scheduler.andThen callback task
++
++
+ 
+ -- ERRORS
+ 

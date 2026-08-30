@@ -323,13 +323,15 @@ userDecoder =
   works, including destructuring.
 - `\x <- ...` was previously a syntax error, so no existing program changes
   meaning — but elm-format cannot format files that use it.
+- The patched elm/core adds `Task.await` (`andThen` with the task first) so
+  task chains do not each need their own flipped helper.
 
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
   field, which official parsers ignore.
-- **elm/core**: task ports and comparable newtypes need a patched
-  elm/core, `Css.vars` needs a patched elm/virtual-dom, and web workers
+- **elm/core**: task ports, comparable newtypes, and `Task.await` need a
+  patched elm/core, `Css.vars` needs a patched elm/virtual-dom, and web workers
   need a patched elm/browser (all patches are in
   [docs/patches/](docs/patches/)), consumed through git dependencies
   under unpublished version numbers. The elm/core patches
