@@ -296,9 +296,14 @@ toReport source err =
           ,
             D.stack
               [ D.reflow $
-                  "Structural variant tags can only be matched at the top of a `case` branch\
-                  \ or inside another tag pattern. They cannot appear inside tuples, lists,\
-                  \ records, or custom type constructor patterns."
+                  "Structural variant tags can be matched at the top of a `case` branch,\
+                  \ inside another tag pattern, and inside a constructor argument whose\
+                  \ type is a type variable, like the `e` of `Err : e -> Result e a`."
+              , D.reflow $
+                  "This position is none of those. Matching a tag is only exhaustive\
+                  \ because the type checker closes the variant row to the tags you\
+                  \ matched, and here there is no row to close: an unhandled tag would\
+                  \ reach no branch and crash at run time."
               , D.toSimpleHint $
                   "Match the outer structure first, and then use a second `case` expression\
                   \ to match the tag."

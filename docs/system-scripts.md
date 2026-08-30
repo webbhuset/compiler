@@ -141,10 +141,20 @@ the gap fixed; a silent catch-all tag would hide it and would also show up
 in every signature. `System.Error.unknown` is the same crash, for wrapping
 system calls of your own.
 
-Note that `Task.attempt` produces a `Result`, and a tag pattern cannot
-currently sit inside a constructor pattern, so `Err NotFound ->` does not
-compile. Match the `Result` first and the tag in a second `case`, or stay
-with `onError`/`mapError`, which are unaffected.
+Matching a tag straight out of a `Result` works, so turning a task into a
+`Result` and matching on it reads normally:
+
+```elm
+case result of
+    Ok text ->
+        ...
+
+    Err (NotFound path) ->
+        ...
+
+    Err (PermissionDenied path) ->
+        ...
+```
 
 ## Rules
 
