@@ -68,10 +68,14 @@ canonicalize env pattern =
 
 
 -- The Bool tracks whether a structural variant tag pattern is allowed at this
--- position. Tags may appear at the top of a pattern or as arguments to other
--- tag patterns. They may NOT appear inside tuples, lists, records, or custom
--- type constructor patterns because the type checker cannot close the variant
--- rows in those positions yet.
+-- position. Tags may appear at the top of a pattern, as arguments to other
+-- tag patterns, and as a constructor argument whose declared type is a type
+-- VARIABLE, like the `e` of `Err : e -> Result e a`.
+--
+-- Everywhere else they are rejected, because closing the variant row is what
+-- makes a tag match exhaustive and the closing can only be computed for
+-- those positions. In a constructor argument of some fixed type, or inside a
+-- tuple or a list, an unhandled tag would slip through and crash at runtime.
 --
 canonicalizeHelp :: Env.Env -> Bool -> Src.Pattern -> Result DupsDict w Can.Pattern
 canonicalizeHelp env tagAllowed (A.At region pattern) =
@@ -129,7 +133,8 @@ canonicalizeCtor env tagAllowed region name patterns ctor =
     Env.Ctor home tipe union index args ->
       let
         toCanonicalArg argIndex argPattern argTipe =
-          Can.PatternCtorArg argIndex argTipe <$> canonicalizeHelp env False argPattern
+          Can.PatternCtorArg argIndex argTipe
+            <$> canonicalizeHelp env (isTypeVar argTipe) argPattern
       in
       do  verifiedList <- Index.indexedZipWithA toCanonicalArg patterns args
           case verifiedList of
@@ -153,6 +158,15 @@ canonicalizeCtor env tagAllowed region name patterns ctor =
 
     Env.RecordCtor _ _ _ ->
       Result.throw (Error.PatternHasRecordCtor region name)
+
+
+-- A constructor argument declared as a bare type variable can hold a variant
+-- row, so a tag pattern there can be closed like any other column.
+isTypeVar :: Can.Type -> Bool
+isTypeVar tipe =
+  case tipe of
+    Can.TVar _ -> True
+    _ -> False
 
 
 canonicalizeTuple :: A.Region -> Env.Env -> [Src.Pattern] -> Result DupsDict w (Maybe Can.Pattern)

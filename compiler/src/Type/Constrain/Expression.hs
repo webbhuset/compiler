@@ -224,14 +224,75 @@ closeTagColumn column =
         Can.PTag home name _ args -> Map.insertWith (++) (home, name) [args] groups
         _ -> groups
   in
-  if null heads || not (all isTag heads) then
+  if null heads then
     return Nothing
-  else
+  else if all isTag heads then
     do  let groups = foldr addGroup Map.empty heads
         results <- traverse closeTagGroup groups
         let vars = Map.foldr (\(vs, _) acc -> vs ++ acc) [] results
         let tags = Map.map snd results
         return $ Just (vars, TagRowN tags EmptyTagRowN)
+  else
+    closeCtorColumn heads
+
+
+-- A column of constructor patterns over one type, e.g. `Ok v` and
+-- `Err NotFound` from a `Result`. Tags nested in a constructor argument
+-- still have to be closed, or an unhandled tag would slip through, so the
+-- expected type is rebuilt as `Result <closed row> a`: each of the type's
+-- variables gets the closing of the sub-column of patterns bound to it.
+--
+-- Only arguments whose declared type IS a type variable take part;
+-- Canonicalize.Pattern rejects tag patterns in any other position, so
+-- there is nothing to close there.
+closeCtorColumn :: [Can.Pattern_] -> IO (Maybe ([Variable], Type))
+closeCtorColumn heads =
+  case heads of
+    Can.PCtor home typeName (Can.Union typeVars _ _ _) _ _ _ : _
+      | all (isCtorOf home typeName) heads ->
+          do  let argsOf p =
+                    case p of
+                      Can.PCtor _ _ _ _ _ args -> args
+                      _ -> []
+
+              let columnFor v =
+                    [ arg
+                    | p <- heads
+                    , Can.PatternCtorArg _ srcType arg <- argsOf p
+                    , srcType == Can.TVar v
+                    ]
+
+              results <- traverse (closeTagColumn . columnFor) typeVars
+
+              if all Maybe.isNothing results
+                then return Nothing
+                else
+                  do  filled <- traverse fillTypeVar results
+                      return $ Just
+                        ( concatMap fst filled
+                        , AppN home typeName (map snd filled)
+                        )
+
+    _ ->
+      return Nothing
+
+
+isCtorOf :: ModuleName.Canonical -> Name.Name -> Can.Pattern_ -> Bool
+isCtorOf home typeName pattern =
+  case pattern of
+    Can.PCtor h t _ _ _ _ -> h == home && t == typeName
+    _ -> False
+
+
+fillTypeVar :: Maybe ([Variable], Type) -> IO ([Variable], Type)
+fillTypeVar maybeClosing =
+  case maybeClosing of
+    Just closing ->
+      return closing
+
+    Nothing ->
+      do  var <- mkFlexVar
+          return ([var], VarN var)
 
 
 dropAliases :: Can.Pattern_ -> Can.Pattern_

@@ -290,6 +290,11 @@ describe s =
 - Restrictions: tag patterns cannot sit inside tuple/list/constructor
   patterns; recursion needs a nominal wrapper type; no ports; not
   comparable; not shown in docs.json.
+- Tag patterns work inside a constructor argument whose type is a type
+  variable, so `Err (NotFound path)` matches straight out of a `Result`, and
+  exhaustiveness still holds through the nesting. Tuples, lists, and
+  constructor arguments of a fixed type stay rejected: there is no row to
+  close there, so an unhandled tag would reach no branch at run time.
 - Runtime: `{ $: "pkg:Module.Tag", a = ... }` in dev and prod; `==` works.
 
 ## Back-lambdas
