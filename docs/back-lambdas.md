@@ -72,7 +72,19 @@ Debug.log name age
 The continuation is passed as the last argument, so `source` must be a
 function that takes its callback last. Most of `elm/core` takes the callback
 *first* (`Decode.andThen : (a -> Decoder b) -> Decoder a -> Decoder b`), so
-define a flipped helper once and use it everywhere:
+it needs flipping.
+
+For tasks this fork ships it: **`Task.await : Task x a -> (a -> Task x b) -> Task x b`**
+is `andThen` with the arguments the other way round.
+
+```elm
+\user <- Task.await (fetchUser id)
+\posts <- Task.await (fetchPosts user)
+
+Task.succeed (summarize user posts)
+```
+
+For anything else, define the flip once:
 
 ```elm
 await : Decoder a -> (a -> Decoder b) -> Decoder b
@@ -81,8 +93,7 @@ await decoder callback =
 ```
 
 Any name works — `await`, `with`, `do`, `try`. The same shape covers
-`Task.andThen`, `Maybe.andThen`, `Result.andThen`, and your own callback
-APIs.
+`Maybe.andThen`, `Result.andThen`, and your own callback APIs.
 
 ## Layout rule
 

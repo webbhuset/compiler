@@ -125,7 +125,7 @@ forkDefaults :: Map.Map Pkg.Name (V.Version, String)
 forkDefaults =
   Map.fromList
     [ ( Pkg.core
-      , ( V.Version 1 0 6
+      , ( V.Version 1 0 7
         , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-core.git"
         )
       )
