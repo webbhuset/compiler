@@ -75,6 +75,7 @@ data Bundles =
     { _mainJs :: B.Builder
     , _css :: Maybe B.Builder
     , _workerBundles :: [WorkerBundle]
+    , _isScript :: Bool
     }
 
 
@@ -102,8 +103,11 @@ toBundles format mode graph mains =
       let
         (js, css) = generateWith format mode graph mains workerRoots
         workers = map (\g -> WorkerBundle g (JS.generateWorkerBundle mode graph g)) workerRoots
+        isScript = JS.hasScriptMain mains
       in
-      return (Bundles js css workers)
+      if isScript && Map.size mains > 1
+        then Task.throw Exit.GenerateScriptNeedsOneMain
+        else return (Bundles js css workers isScript)
 
 
 debug :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
@@ -145,7 +149,7 @@ prod format stuff details (Build.Artifacts pkg _ roots modules) =
 
 
 finalize :: String -> Bundles -> ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
-finalize base (Bundles js css workers) =
+finalize base (Bundles js css workers _) =
   let
     step (table, files) (WorkerBundle global builder) =
       let

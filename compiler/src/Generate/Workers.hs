@@ -119,6 +119,7 @@ mainDecoderRefs mains =
     addMain main refs =
       case main of
         Opt.Static -> refs
+        Opt.Script -> refs
         Opt.Dynamic _ decoder -> addExpr decoder refs
 
 

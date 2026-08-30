@@ -12,6 +12,7 @@ module Elm.ModuleName
   , eCanonical, dCanonical
   , cssStyles
   , workers
+  , system
   )
   where
 
@@ -122,5 +123,6 @@ dCanonical =
 
 
 {-# NOINLINE workers #-}; workers :: Canonical; workers = Canonical Pkg.browser Module.browser_worker
+{-# NOINLINE system  #-}; system  :: Canonical; system  = Canonical Pkg.system Module.system
 
 

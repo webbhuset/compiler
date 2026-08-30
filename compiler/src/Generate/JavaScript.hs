@@ -1,6 +1,7 @@
 {-# LANGUAGE ExtendedLiterals, OverloadedStrings, QuasiQuotes, TemplateHaskell #-}
 module Generate.JavaScript
   ( generate
+  , hasScriptMain
   , generateEsm
   , generateWorkerBundle
   , generateForRepl
@@ -52,14 +53,63 @@ generate mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
 
     javascript =
-      "(function(scope){\n'use strict';"
-      <> Functions.functions
-      <> perfNote mode
-      <> stateToBuilder state
-      <> toMainExports mode mains
-      <> "}(this));"
+      case scriptHome mains of
+        Just home ->
+          shebang
+          <> "(function(scope){\n'use strict';"
+          <> Functions.functions
+          <> stateToBuilder state
+          <> toScriptRunner home
+          <> "}(this));"
+
+        Nothing ->
+          "(function(scope){\n'use strict';"
+          <> Functions.functions
+          <> perfNote mode
+          <> stateToBuilder state
+          <> toMainExports mode mains
+          <> "}(this));"
   in
   ( javascript, GenCss.generate mode globalGraph mains workerRoots )
+
+
+-- SCRIPTS
+--
+-- A `main : System.Process -> Task String Int` is not exported for a host
+-- page to start: the bundle starts itself, so `node script.js` runs it.
+-- _System_run (webbhuset/system kernel) builds the Process record from
+-- argv/env, runs the task, and sets the exit code.
+
+
+hasScriptMain :: Mains -> Bool
+hasScriptMain mains =
+  any isScript (Map.elems mains)
+
+
+scriptHome :: Mains -> Maybe ModuleName.Canonical
+scriptHome mains =
+  case Map.toList (Map.filter isScript mains) of
+    [(home, _)] -> Just home
+    _           -> Nothing
+
+
+isScript :: Opt.Main -> Bool
+isScript main =
+  case main of
+    Opt.Script    -> True
+    Opt.Static    -> False
+    Opt.Dynamic{} -> False
+
+
+shebang :: B.Builder
+shebang =
+  "#!/usr/bin/env node\n"
+
+
+toScriptRunner :: ModuleName.Canonical -> B.Builder
+toScriptRunner home =
+  JsName.toBuilder (JsName.fromKernel Module.kernel_system [N.ascii|run|])
+  <> "(" <> JsName.toBuilder (JsName.fromGlobal home N.main) <> ");"
 
 
 -- Everything lives in module scope, which is already strict and does not
@@ -71,11 +121,14 @@ generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
     state = Map.foldrWithKey (addMain mode graph) emptyState mains
 
     javascript =
-      metaUrlLine
-      <> Functions.functions
-      <> perfNote mode
-      <> stateToBuilder state
-      <> toMainExportsEsm mode mains
+      case scriptHome mains of
+        Just home ->
+          shebang <> metaUrlLine <> Functions.functions
+            <> stateToBuilder state <> toScriptRunner home
+
+        Nothing ->
+          metaUrlLine <> Functions.functions <> perfNote mode
+            <> stateToBuilder state <> toMainExportsEsm mode mains
   in
   ( javascript, GenCss.generate mode globalGraph mains workerRoots )
 

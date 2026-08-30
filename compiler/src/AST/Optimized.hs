@@ -156,6 +156,7 @@ data Main
       { _message :: Can.Type
       , _decoder :: Expr
       }
+  | Script
 
 
 data Node
@@ -454,6 +455,7 @@ eMain main =
   case main of
     Static      -> E.u8# 0#Word8
     Dynamic t e -> E.u8# 1#Word8 <> I.eType t <> eExpr e
+    Script      -> E.u8# 2#Word8
 
 
 dMain :: D.Decoder Main
@@ -462,6 +464,7 @@ dMain =
         case tag of
           0 -> return Static
           1 -> liftM2 Dynamic I.dType dExpr
+          2 -> return Script
           _ -> D.expecting "Main"
 
 

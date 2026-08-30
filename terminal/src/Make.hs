@@ -94,12 +94,12 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
 
                     [name] ->
                       do  bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
-                          let (Generate.Bundles builder css _) = bundles
+                          let (Generate.Bundles builder css _ _) = bundles
                           generate writer style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
                       do  bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
-                          let (Generate.Bundles builder css _) = bundles
+                          let (Generate.Bundles builder css _ _) = bundles
                           writeCss writer "elm.js" css
                           generate writer style "elm.js" builder (NE.List name names)
 
@@ -109,10 +109,14 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (JS target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
-                          let (Generate.Bundles builder css _) = bundles
-                          writeCss writer target css
-                          generate writer style target builder (Build.getRootNames artifacts)
+                      do  bundles <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                          if Generate._isScript bundles
+                            then writeBundles writer style target bundles (Build.getRootNames artifacts)
+                            else
+                              do  checked <- noWorkers bundles
+                                  let (Generate.Bundles builder css _ _) = checked
+                                  writeCss writer target css
+                                  generate writer style target builder (Build.getRootNames artifacts)
 
                     name:names ->
                       Task.throw (Exit.MakeNonMainFilesIntoJavaScript name names)
@@ -129,7 +133,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (Html target) ->
                   do  name <- hasOneMain artifacts
                       bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
-                      let (Generate.Bundles builder css _) = bundles
+                      let (Generate.Bundles builder css _ _) = bundles
                       generate writer style target (Html.sandwich name css builder) (NE.List name [])
 
 
@@ -266,10 +270,13 @@ generate writer style target builder names =
 -- Non-ESM outputs cannot host web workers (no import.meta to resolve the
 -- worker files relative to the bundle).
 noWorkers :: Generate.Bundles -> Task Generate.Bundles
-noWorkers bundles@(Generate.Bundles _ _ workers) =
-  case workers of
-    [] -> return bundles
-    _ -> Task.throw (Exit.MakeBadGenerate Exit.GenerateWorkersRequireEsm)
+noWorkers bundles@(Generate.Bundles _ _ workers isScript) =
+  if isScript then
+    Task.throw (Exit.MakeBadGenerate Exit.GenerateScriptBadOutput)
+  else
+    case workers of
+      [] -> return bundles
+      _ -> Task.throw (Exit.MakeBadGenerate Exit.GenerateWorkersRequireEsm)
 
 
 -- ESM output: the main bundle, its .css sidecar, and one .mjs file per
@@ -283,7 +290,19 @@ writeBundles writer style target bundles names =
         mapM_ (\(name, bytes) -> File.writeBuilder writer (dir FP.</> name) (B.byteString bytes)) workerFiles
         maybe (return ()) (File.writeBuilder writer (target ++ ".css") . B.byteString) cssBytes
         File.writeBuilder writer target (B.byteString mainBytes)
+        makeExecutableIf (Generate._isScript bundles) target
         Reporting.reportGenerate style names target
+
+
+-- A script has a shebang, so making it executable means `./script.js`
+-- works, not just `node script.js`.
+makeExecutableIf :: Bool -> FilePath -> IO ()
+makeExecutableIf isScript target =
+  if not isScript then
+    return ()
+  else
+    do  perms <- Dir.getPermissions target
+        Dir.setPermissions target (Dir.setOwnerExecutable True perms)
 
 
 -- Write the sidecar stylesheet next to the JS output, e.g. `elm.mjs.css`
