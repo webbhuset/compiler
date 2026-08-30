@@ -38,7 +38,7 @@ buildReactorFrontEnd =
         do  details    <- Task.eio Exit.ReactorBadDetails $ Details.load Reporting.silent scope root
             artifacts  <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths Reporting.silent root details paths
             bundles <- Task.mapError Exit.ReactorBadGenerate $ Generate.prod Generate.Iife root details artifacts
-            let (Generate.Bundles javascript _ _) = bundles
+            let (Generate.Bundles javascript _ _ _) = bundles
             return (LBS.toStrict (B.toLazyByteString javascript))
 
 

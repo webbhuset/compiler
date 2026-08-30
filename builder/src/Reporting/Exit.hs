@@ -2038,6 +2038,8 @@ data Generate
   | GenerateCannotOptimizeDebugValues ModuleName.Raw [ModuleName.Raw]
   | GenerateWorkersRequireEsm
   | GenerateWorkerCycle [String]
+  | GenerateScriptNeedsOneMain
+  | GenerateScriptBadOutput
 
 
 toGenerateReport :: Generate -> Help.Report
@@ -2045,6 +2047,24 @@ toGenerateReport problem =
   case problem of
     GenerateCannotLoadArtifacts ->
       corruptCacheReport
+
+    GenerateScriptNeedsOneMain ->
+      Help.report "TOO MANY MAINS" Nothing
+        "This is a command line script, so it must be the only program compiled:"
+        [ D.reflow $
+            "A script bundle runs itself when node loads it, so it cannot also\
+            \ export other programs for a page to start. Compile the script on\
+            \ its own."
+        ]
+
+    GenerateScriptBadOutput ->
+      Help.report "SCRIPTS ARE NOT WEB PAGES" Nothing
+        "This is a command line script, so it cannot be compiled to a web page:"
+        [ D.reflow $
+            "A `main : System.Process -> Task String Int` runs on the command\
+            \ line. Compile it to a .js or .mjs file and run it with node:"
+        , D.indent 4 $ D.dullyellow "elm make src/Main.elm --output=script.js"
+        ]
 
     GenerateWorkersRequireEsm ->
       Help.report "WORKERS NEED ES MODULES" Nothing

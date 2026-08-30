@@ -272,6 +272,24 @@ addDefHelp region annotations home name args body graph@(Opt.LocalGraph _ nodes 
         addDefNode home name args body deps $
           Opt.LocalGraph (Just main) nodes (Map.unionWith (+) fields fieldCounts)
     in
+    case scriptMainType tipe of
+      Just True ->
+        Result.ok $ addMain $ Names.run $
+          Names.registerKernel (Name.fromChars "System") Opt.Script
+
+      Just False ->
+        Result.throw (E.BadType region tipe)
+
+      Nothing ->
+        addProgramMain region tipe addMain home name args body graph
+
+
+addProgramMain
+  :: A.Region -> Can.Type
+  -> ((Set.Set Opt.Global, Map.Map Name.Name Int, Opt.Main) -> Opt.LocalGraph)
+  -> ModuleName.Canonical -> Name.Name -> [Can.Pattern] -> Can.Expr -> Opt.LocalGraph
+  -> Result i w Opt.LocalGraph
+addProgramMain region tipe addMain home name args body graph =
     case Type.deepDealias tipe of
       Can.TType hm nm [_] | hm == ModuleName.virtualDom && nm == Name.node ->
           Result.ok $ addMain $ Names.run $
@@ -290,6 +308,7 @@ addDefHelp region annotations home name args body graph@(Opt.LocalGraph _ nodes 
       -- root; it is compiled into a bundle of its own when spawned
       Can.TType hm nm [_, _, _, _] | hm == ModuleName.workers && nm == Name.fromChars "Program" ->
           Result.ok (addDefNode home name args body Set.empty graph)
+
 
       _ ->
           Result.throw (E.BadType region tipe)
@@ -390,3 +409,61 @@ addRecDefHelp cycle (State values funcs) name args body =
     _:_ ->
       do  odef <- Expr.optimizePotentialTailCall cycle name args body
           pure $ State values (odef : funcs)
+
+
+-- SCRIPT MAIN
+--
+-- `main : System.Process -> Task String Int` is a command line script. The
+-- Process argument is a record alias, which deepDealias would erase, so
+-- the raw annotation is inspected instead. Returns Nothing when this is
+-- not a script main at all, and Just False when it takes a Process but
+-- returns the wrong thing.
+
+
+scriptMainType :: Can.Type -> Maybe Bool
+scriptMainType tipe =
+  case tipe of
+    Can.TLambda arg result | isSystemProcess arg ->
+      Just $
+        case Type.deepDealias result of
+          Can.TType thome tname [err, ok] ->
+            thome == ModuleName.platform && tname == Name.task
+              && isString err && isInt ok
+
+          _ ->
+            False
+
+    _ ->
+      Nothing
+
+
+isSystemProcess :: Can.Type -> Bool
+isSystemProcess tipe =
+  case tipe of
+    Can.TAlias home name _ aliasType ->
+      (home == ModuleName.system && name == Name.fromChars "Process")
+        || isSystemProcess (dealiasOne aliasType)
+
+    _ ->
+      False
+
+
+dealiasOne :: Can.AliasType -> Can.Type
+dealiasOne aliasType =
+  case aliasType of
+    Can.Holey t -> t
+    Can.Filled t -> t
+
+
+isString :: Can.Type -> Bool
+isString tipe =
+  case tipe of
+    Can.TType home name [] -> home == ModuleName.string && name == Name.string
+    _ -> False
+
+
+isInt :: Can.Type -> Bool
+isInt tipe =
+  case tipe of
+    Can.TType home name [] -> home == ModuleName.basics && name == Name.int
+    _ -> False

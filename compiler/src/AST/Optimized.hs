@@ -148,6 +148,7 @@ data Main
       { _message :: Can.Type
       , _decoder :: Expr
       }
+  | Script
 
 
 data Node
@@ -402,12 +403,14 @@ instance Binary Main where
     case main of
       Static      -> putWord8 0
       Dynamic a b -> putWord8 1 >> put a >> put b
+      Script      -> putWord8 2
 
   get =
     do  word <- getWord8
         case word of
           0 -> return Static
           1 -> liftM2 Dynamic get get
+          2 -> return Script
           _ -> fail "problem getting Opt.Main binary"
 
 

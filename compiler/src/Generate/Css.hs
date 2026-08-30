@@ -179,6 +179,7 @@ mainBlocks :: Opt.Main -> [(ModuleName.Canonical, Css.Content)] -> [(ModuleName.
 mainBlocks main blocks =
   case main of
     Opt.Static -> blocks
+    Opt.Script -> blocks
     Opt.Dynamic _ decoder -> addExpr decoder blocks
 
 

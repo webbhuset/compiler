@@ -19,6 +19,7 @@ module Elm.ModuleName
   , webgl, texture, vector2, vector3, vector4, matrix4
   , cssStyles
   , workers
+  , system
   )
   where
 
@@ -262,6 +263,11 @@ jsonEncode = Canonical Pkg.json "Json.Encode"
 {-# NOINLINE cssStyles #-}
 cssStyles :: Canonical
 cssStyles = Canonical Pkg.css "Css"
+
+
+{-# NOINLINE system #-}
+system :: Canonical
+system = Canonical Pkg.system "System"
 
 
 {-# NOINLINE workers #-}

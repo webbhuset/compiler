@@ -1013,6 +1013,10 @@ generateMain mode home main =
         # generateJsExpr mode decoder
         # toDebugMetadata mode msgType
 
+    -- scripts are started by _System_run, not through an exported init
+    Opt.Script ->
+      JS.Ref (JsName.fromGlobal home "main")
+
 
 (#) :: JS.Expr -> JS.Expr -> JS.Expr
 (#) func arg =

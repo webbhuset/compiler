@@ -161,10 +161,13 @@ compile path =
                 artifacts <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths Reporting.silent root details (NE.List path [])
                 bundles <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife root details artifacts
                 case bundles of
-                  Generate.Bundles _ _ (_:_) ->
+                  Generate.Bundles _ _ _ True ->
+                    Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+
+                  Generate.Bundles _ _ (_:_) _ ->
                     Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-                  Generate.Bundles javascript css [] ->
+                  Generate.Bundles javascript css [] _ ->
                     do  let (NE.List name _) = Build.getRootNames artifacts
                         return $ Html.sandwich name css javascript
 
