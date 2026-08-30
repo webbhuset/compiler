@@ -85,6 +85,21 @@ main process =
 The same code written with `andThen` and nested lambdas does exactly the
 same thing; pick whichever reads better.
 
+Paths come from `System.Path` rather than string concatenation, so a
+trailing separator or a different platform cannot bite:
+
+```elm
+copyOne source target name =
+    let
+        from = Path.join [ source, name ]
+        to = Path.join [ target, Path.stem name ++ ".txt" ]
+    in
+    \text <- Task.await (System.File.read from)
+    \_ <- Task.await (System.File.write to text)
+
+    Task.succeed (String.length text)
+```
+
 ## What is available
 
 **`System`** — `stdout`, `stderr`, `stdin` (reads until end of input),
@@ -94,6 +109,11 @@ same thing; pick whichever reads better.
 **`System.File`** — `read`, `write`, `append`, `exists`, `isDirectory`,
 `size`, `remove`, `rename`, `copy`, `makeDirectory` (creates parents),
 `removeDirectory`, `list`.
+
+**`System.Path`** — `join`, `dirname`, `basename`, `stem`, `extension`,
+`isAbsolute`, `normalize`, `relative`, `absolute`, `separator`. String
+work that follows the rules of the system the script runs on, so joining
+paths is right on every platform.
 
 **`System.Error`** — the failure vocabulary, and `format` to turn any of
 it into a line worth printing.

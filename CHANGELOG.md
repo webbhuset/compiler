@@ -359,7 +359,8 @@ hello world
   `env` dict, and `platform`. Things that change while the program runs,
   like the working directory, are tasks instead of fields.
 - `System` has stdout/stderr/stdin, `isTerminal`, `cwd`/`chdir` and
-  `exit`; `System.File` has the usual file and directory operations.
+  `exit`; `System.File` has the usual file and directory operations; and
+  `System.Path` joins and takes apart paths the way the platform expects.
 - Failures are structural variant tags, so each operation says what it can
   actually fail with, chaining unions the rows, and handling one tag with
   a catch-all removes it from what the caller sees. An error code with no
