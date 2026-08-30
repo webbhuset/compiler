@@ -399,22 +399,63 @@ function start =
     do  Space.chompAndCheckIndent E.FuncSpace E.FuncIndentArg
         arg <- specialize E.FuncArg Pattern.term
         Space.chompAndCheckIndent E.FuncSpace E.FuncIndentArrow
-        revArgs <- chompArgs [arg]
-        Space.chompAndCheckIndent E.FuncSpace E.FuncIndentBody
-        (body, end) <- specialize E.FuncBody expression
-        let funcExpr = Src.Lambda (reverse revArgs) body
-        return (A.at start end funcExpr, end)
+        (revArgs, arrow) <- chompArgs [arg]
+        case arrow of
+          Forward ->
+            do  Space.chompAndCheckIndent E.FuncSpace E.FuncIndentBody
+                (body, end) <- specialize E.FuncBody expression
+                let funcExpr = Src.Lambda (reverse revArgs) body
+                return (A.at start end funcExpr, end)
+
+          Backward ->
+            backLambda start (reverse revArgs)
 
 
-chompArgs :: [Src.Pattern] -> Parser E.Func [Src.Pattern]
+data Arrow = Forward | Backward
+
+
+chompArgs :: [Src.Pattern] -> Parser E.Func ([Src.Pattern], Arrow)
 chompArgs revArgs =
   oneOf E.FuncArrow
     [ do  arg <- specialize E.FuncArg Pattern.term
           Space.chompAndCheckIndent E.FuncSpace E.FuncIndentArrow
           chompArgs (arg:revArgs)
     , do  word2 0x2D#Word8 0x3E#Word8 {-->-} E.FuncArrow
-          return revArgs
+          return (revArgs, Forward)
+    , do  word2 0x3C#Word8 0x2D#Word8 {-<--} E.FuncArrow
+          return (revArgs, Backward)
     ]
+
+
+
+-- BACK LAMBDA
+--
+-- `\pat <- source` binds `pat` to what `source` passes to its callback, and
+-- the REST of the enclosing expression becomes that callback:
+--
+--     \id <- Decode.await (Decode.field "id" Decode.string)
+--     rest
+--
+-- desugars to
+--
+--     Decode.await (Decode.field "id" Decode.string) (\id -> rest)
+--
+-- The source expression is read with the indentation of the `\`, so it ends
+-- at the end of the line unless later lines are indented past the `\`. That
+-- is what lets the continuation start on the next line: without it the
+-- expression parser would swallow the continuation as another argument.
+
+
+backLambda :: A.Position -> [Src.Pattern] -> Space.Parser E.Func Src.Expr
+backLambda start args =
+  do  (source, _) <-
+        withIndentFrom start $
+          do  Space.chompAndCheckIndent E.FuncSpace E.FuncBackIndentSource
+              specialize E.FuncBackSource expression
+      Space.checkIndent start E.FuncBackIndentBody
+      (rest, end) <- specialize E.FuncBody expression
+      let callback = A.at start end (Src.Lambda args rest)
+      return (A.at start end (Src.Call source [callback]), end)
 
 
 

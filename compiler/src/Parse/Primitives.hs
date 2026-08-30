@@ -18,7 +18,7 @@ module Parse.Primitives
   , oneOf, oneOfWithFallback
   , inContext, specialize
   , getPosition, getRegion, addLocation, addEnd
-  , withIndent, withBacksetIndent
+  , withIndent, withBacksetIndent, withIndentFrom
   , word1, word2
   , Snippet(..)
   , fromSnippet
@@ -355,6 +355,19 @@ withBacksetIndent (W32# backset) (Parser parser) =
       eok' a (State p e _ c) = eok a (State p e oldIndent c)
     in
     parser fpc (State pos end (subWord32# (toIndent cur) backset) cur) cok' eok' cerr eerr
+
+
+-- Run a parser with the indentation set from an EARLIER position instead of
+-- the current one, so a construct can bound how far it reads by the column
+-- where it began: following lines must be indented past that column.
+withIndentFrom :: A.Position -> Parser x a -> Parser x a
+withIndentFrom (A.Position cur0) (Parser parser) =
+  Parser $ \fpc (State pos end oldIndent cur) cok eok cerr eerr ->
+    let
+      cok' a (State p e _ c) = cok a (State p e oldIndent c)
+      eok' a (State p e _ c) = eok a (State p e oldIndent c)
+    in
+    parser fpc (State pos end (toIndent cur0) cur) cok' eok' cerr eerr
 
 
 toIndent :: Cursor -> Indent

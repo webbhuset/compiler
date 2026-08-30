@@ -290,10 +290,13 @@ data Func
   | FuncArg Pattern Cursor
   | FuncBody Expr Cursor
   | FuncArrow Cursor
+  | FuncBackSource Expr Cursor
   --
   | FuncIndentArg Cursor
   | FuncIndentArrow Cursor
   | FuncIndentBody Cursor
+  | FuncBackIndentSource Cursor
+  | FuncBackIndentBody Cursor
 
 
 data Case
@@ -4844,6 +4847,55 @@ toFuncReport source context func startCur =
     FuncBody expr cur ->
       toExprReport source (InNode NFunc startCur context) expr cur
 
+    FuncBackSource expr cur ->
+      toExprReport source (InNode NFunc startCur context) expr cur
+
+    FuncBackIndentSource cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "MISSING EXPRESSION" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "I just saw a `<-` so I was expecting an expression next:"
+          ,
+            D.stack
+              [ D.fillSep
+                  ["The","expression","after",D.dullyellow "<-","is","the","one","that"
+                  ,"calls","the","rest","of","this","block","as","a","function,","like"
+                  ,D.dullyellow "Decode.await someDecoder" <> "."
+                  ]
+              , D.reflow $
+                  "It has to start on this line. If it needs more lines, indent them\
+                  \ past the `\\` that starts this line."
+              ]
+          )
+
+    FuncBackIndentBody cur ->
+      let
+        surroundings = A.Region startCur cur
+        region = toRegion cur
+      in
+      Report.Report "MISSING BODY" region [] $
+        Code.toSnippet source surroundings (Just region)
+          (
+            D.reflow $
+              "This `<-` line has nothing after it:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "A `<-` line binds a name for the lines that FOLLOW it, so it cannot\
+                  \ be the last thing in a definition. Add the rest of the block\
+                  \ underneath, at the same indentation:"
+              , D.indent 4 $ D.vcat
+                  [ D.dullyellow "\\user <- Decode.await userDecoder"
+                  , D.dullyellow "Decode.succeed user.name"
+                  ]
+              ]
+          )
+
     FuncArrow cur ->
       case Code.whatIsNext source cur of
         Code.Keyword keyword ->
@@ -4873,10 +4925,17 @@ toFuncReport source context func startCur =
                 D.reflow $
                   "I just saw the beginning of an anonymous function, so I was expecting to see an arrow next:"
               ,
-                D.fillSep $
-                  ["The","syntax","for","anonymous","functions","is"
-                  ,D.dullyellow "(\\x -> x + 1)"
-                  ,"so","I","am","missing","the","arrow","and","the","body","of","the","function."
+                D.stack
+                  [ D.fillSep
+                      ["The","syntax","for","anonymous","functions","is"
+                      ,D.dullyellow "(\\x -> x + 1)"
+                      ,"so","I","am","missing","the","arrow","and","the","body","of","the","function."
+                      ]
+                  , D.fillSep
+                      ["A",D.dullyellow "<-","arrow","works","here","too:"
+                      ,D.dullyellow "\\x <- onSomething","binds",D.dullyellow "x"
+                      ,"for","the","lines","that","follow","it."
+                      ]
                   ]
               )
 
