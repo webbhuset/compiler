@@ -170,8 +170,9 @@ Two rules govern what gets subtracted:
 The reverse direction — *adding* tags to an abstract remainder, as in
 `[ r | Success Int ] -> [ r | Success Int, Loading ]` with a pass-through
 branch — is not expressible; it would need an explicit `widen` coercion
-(not implemented). Adding tags to freshly constructed values needs nothing:
-construction is always open.
+(proposed in [widen-design.md](widen-design.md), not implemented). Adding
+tags to freshly constructed values needs nothing: construction is always
+open.
 
 
 ## A worked example
