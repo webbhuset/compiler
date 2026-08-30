@@ -292,6 +292,38 @@ describe s =
   comparable; not shown in docs.json.
 - Runtime: `{ $: "pkg:Module.Tag", a = ... }` in dev and prod; `==` works.
 
+## Back-lambdas
+
+*[docs](docs/back-lambdas.md)*
+
+A lambda written with the arrow reversed, `\x <- ...`, binds its argument
+for the lines that *follow* it, giving callback-heavy code a flat,
+do-notation-like shape:
+
+```elm
+userDecoder : Decoder User
+userDecoder =
+    \id <- await (D.field "id" D.string)
+    \firstname <- await (D.field "firstname" D.string)
+    \lastname <- await (D.field "lastname" D.string)
+
+    D.succeed { id = id, firstname = firstname, lastname = lastname }
+```
+
+- Pure syntax sugar: `\pat <- source` followed by `rest` is exactly
+  `source (\pat -> rest)`. The compiler sees ordinary lambdas, so types,
+  generated code, and performance are identical to writing them out.
+- The continuation is the **last** argument, so `source` must take its
+  callback last — define a flipped `await`/`with` helper for callback-first
+  APIs like `Decode.andThen`.
+- The source expression ends at the end of the line unless later lines are
+  indented past the `\`; that layout rule is what keeps the continuation
+  from being read as another argument.
+- Several patterns bind a multi-argument callback, and any lambda pattern
+  works, including destructuring.
+- `\x <- ...` was previously a syntax error, so no existing program changes
+  meaning — but elm-format cannot format files that use it.
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
