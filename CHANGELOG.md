@@ -411,11 +411,22 @@ Ord.compare (Card a) (Card b) =
   the solver settled on. There is no dictionary and no runtime dispatch:
   each use site becomes a direct call, and unused definitions are dead
   code like any other.
-- Where the dispatch type is still a variable, the use site is an error.
-  Writing the constraint down (`where Ord.compare : a -> a -> Ordering`)
-  is how that will be expressed and is not implemented yet, so an
-  overloaded name is only usable where the dispatch type is concrete.
-  `comparable` and friends are untouched.
+- A signature says which overloads it needs on its own type variables, so
+  that a name can be used where the dispatch type is not yet known:
+
+  ```elm
+  smallest : a -> a -> Ordering
+      where Ord.compare : a -> a -> Ordering
+  ```
+
+  Each clause becomes a hidden leading parameter, and nothing about it
+  shows in the type. Definitions can be constrained too, so
+  `Ord.compare : List a -> List a -> Ordering where Ord.compare : a -> a
+  -> Ordering` works and a use at `List (List Card)` builds what it needs
+  recursively.
+- An overload used on a type variable with no clause for it reports the
+  exact line to add. Clauses are not inferred, only suggested, and a `let`
+  definition cannot have them yet. `comparable` and friends are untouched.
 
 ## Compatibility notes
 
