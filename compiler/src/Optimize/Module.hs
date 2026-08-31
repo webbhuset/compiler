@@ -223,7 +223,7 @@ addDecls home constrained annotations decls graph =
       let defs = d:ds in
       case findMain defs of
         Nothing ->
-          addDecls home constrained annotations subDecls (addRecDefs home defs graph)
+          addDecls home constrained annotations subDecls (addRecDefs home constrained defs graph)
 
         Just region ->
           Result.throw $ E.BadCycle region $
@@ -365,17 +365,17 @@ data State =
     }
 
 
-addRecDefs :: ModuleName.Canonical -> [Can.Def] -> Opt.LocalGraph -> Opt.LocalGraph
-addRecDefs home defs (Opt.LocalGraph main nodes fieldCounts) =
+addRecDefs :: ModuleName.Canonical -> Constrained -> [Can.Def] -> Opt.LocalGraph -> Opt.LocalGraph
+addRecDefs home constrained defs (Opt.LocalGraph main nodes fieldCounts) =
   let
     names = reverse (map toName defs)
     cycleName = Opt.Global home (Expr.fromManyNames names)
-    cycle = foldr addValueName Set.empty defs
+    cycle = foldr (addValueName home constrained) Set.empty defs
     links = foldr (addLink home (Opt.Link cycleName)) Map.empty defs
 
     (deps, fields, State values funcs) =
       Names.run $
-        foldM (addRecDef cycle) (State [] []) defs
+        foldM (addRecDef home constrained cycle) (State [] []) defs
   in
   Opt.LocalGraph
     main
@@ -390,11 +390,13 @@ toName def =
     Can.TypedDef (A.At _ name) _ _ _ _ -> name
 
 
-addValueName :: Can.Def -> Set.Set N.Name -> Set.Set N.Name
-addValueName def names =
+-- A definition that asks for overloads is a function even when it is written
+-- without arguments, since the overloads become parameters.
+addValueName :: ModuleName.Canonical -> Constrained -> Can.Def -> Set.Set N.Name -> Set.Set N.Name
+addValueName home constrained def names =
   case def of
-    Can.Def      (A.At _ name)   args _   -> if null args then Set.insert name names else names
-    Can.TypedDef (A.At _ name) _ args _ _ -> if null args then Set.insert name names else names
+    Can.Def      (A.At _ name)   args _   -> if null args && null (dicts home constrained name) then Set.insert name names else names
+    Can.TypedDef (A.At _ name) _ args _ _ -> if null args && null (dicts home constrained name) then Set.insert name names else names
 
 
 addLink :: ModuleName.Canonical -> Opt.Node -> Can.Def -> Map.Map Opt.Global Opt.Node -> Map.Map Opt.Global Opt.Node
@@ -411,14 +413,14 @@ addLink home link def links =
 -- ADD RECURSIVE DEFS
 
 
-addRecDef :: Set.Set N.Name -> State -> Can.Def -> Names.Tracker State
-addRecDef cycle state def =
+addRecDef :: ModuleName.Canonical -> Constrained -> Set.Set N.Name -> State -> Can.Def -> Names.Tracker State
+addRecDef home constrained cycle state def =
   case def of
     Can.Def (A.At _ name) args body ->
-      addRecDefHelp cycle state name args body
+      addRecDefHelp cycle state name (dicts home constrained name ++ args) body
 
     Can.TypedDef (A.At _ name) _ args body _ ->
-      addRecDefHelp cycle state name (map fst args) body
+      addRecDefHelp cycle state name (dicts home constrained name ++ map fst args) body
 
 
 addRecDefHelp :: Set.Set N.Name -> State -> N.Name -> [Can.Pattern] -> Can.Expr -> Names.Tracker State
