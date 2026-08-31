@@ -81,10 +81,10 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Set.Set (ModuleName.Canonical, Name.Name) -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases tags overloads binops _) annotations comparables =
+fromModule pkg (Can.Module home exports _ _ unions aliases tags overloads binops _) annotations comparables =
   Interface
-    { _home = home
-    , _values = restrict exports annotations
+    { _home = pkg
+    , _values = Map.withoutKeys (restrict exports annotations) (definitions home overloads)
     , _unions = restrictUnions exports unions
     , _aliases = restrictAliases exports aliases
     , _tags = restrict exports tags
@@ -92,6 +92,19 @@ fromModule home (Can.Module _ exports _ _ unions aliases tags overloads binops _
     , _comparables = comparables
     , _overloads = overloads
     }
+
+
+-- An overload definition is an ordinary top level value under a name no Elm
+-- program can write, so `exposing (..)` would publish it. Nothing can refer to
+-- it, but it would turn up in documentation and in "did you mean" suggestions.
+definitions :: ModuleName.Canonical -> Can.Overloads -> Set.Set Name.Name
+definitions home overloads =
+  Set.fromList
+    [ name
+    | byKey <- Map.elems (Can._instances overloads)
+    , Can.Instance (defHome, name) _ <- Map.elems byKey
+    , defHome == home
+    ]
 
 
 restrict :: Can.Exports -> Map.Map Name.Name a -> Map.Map Name.Name a
