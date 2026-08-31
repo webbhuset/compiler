@@ -90,8 +90,8 @@ Ord.compare (Card a) (Card b) =
     ...
 ```
 
-Its first argument names the type it is for. That has to be a named type; a
-type variable, a record or a tuple has no name to dispatch on.
+Its first argument names the type it is for. That has to be a named type or a
+tuple; a type variable or a record has no name to dispatch on.
 
 Definitions can use the overload themselves, including on their own type:
 
@@ -161,7 +161,37 @@ get a *different* ordering than its owner chose.
 
 Only nominal types can own a definition. `[ Red, Green ]` and `{ x : Float }`
 have no home module, so there is nothing for the rule to bite on and they
-cannot have definitions.
+cannot have definitions. Tuples are the one structural exception: they are
+treated as belonging to `Tuple`, so only the module that declares the name can
+define for them, which is the same answer the rule would give.
+
+
+## Operators
+
+An operator dispatches when the function behind it does. Declare it in the
+usual way, pointing at a function with a `where` clause:
+
+```elm
+infix non 4 (|<|) = lt
+
+
+lt : a -> a -> Bool
+    where Ordering.compare : a -> a -> Order
+lt x y =
+    Ordering.compare x y == LT
+```
+
+Then `Card 1 |<| Card 2` picks the `Card` definition, `[ Card 2 ] |>| [ Card 1 ]`
+builds the `List` one, and an operator used on a type variable asks for the same
+clause a call would.
+
+Two things limit this, and neither comes from overloading. `infix` declarations
+are only allowed in kernel packages, which for this compiler means elm/* and
+anything reached through `git-dependencies`; and `<`, `>`, `<=` and `>=` belong
+to `Basics`, which every module imports openly, so only elm/core can give those
+a new meaning. Making `<` itself dispatch means changing `Basics` to declare
+`compare` abstract and derive the comparisons from it — at which point
+`comparable` has nothing left to do.
 
 
 ## `where` clauses
@@ -313,6 +343,20 @@ build have to be removed.
 now become ordinary abstract names with ordinary definitions, replacing a
 hard-coded lattice with something extensible, but that is a change to elm/core
 rather than to the compiler and has not been made.
+
+`comparable` cannot be written as a definition, and deliberately so:
+
+```elm
+Ordering.compare : comparable -> comparable -> Order    -- rejected
+```
+
+A definition is chosen by the head constructor of its first argument, and
+`comparable` is a type variable, not a type. Letting it stand for "every type
+the checker happens to call comparable" would make it a default that overlaps
+every real definition, and then which one wins at `Int` would need an
+overlap rule. Write the definitions out instead — `Int`, `Float`, `Char`,
+`String`, `List a` and tuples cover exactly what `comparable` covers, and
+unlike `comparable` the list is open.
 
 
 ## Current limits

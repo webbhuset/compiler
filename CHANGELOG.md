@@ -424,6 +424,13 @@ Ord.compare (Card a) (Card b) =
   `Ord.compare : List a -> List a -> Ordering where Ord.compare : a -> a
   -> Ordering` works and a use at `List (List Card)` builds what it needs
   recursively.
+- An operator dispatches when the function behind it does, so
+  `infix non 4 (|<|) = lt` on a constrained `lt` gives an overloaded
+  operator. `<` and friends still belong to `Basics`, which every module
+  imports openly, so only elm/core can give those a new meaning.
+- A definition can be for a tuple, which is what `comparable` covers that
+  a named type does not. `comparable` itself cannot be a definition: it is
+  a type variable, so it would be a default overlapping every real one.
 - An overload used on a type variable with no clause for it reports the
   exact line to add. Clauses are not inferred, only suggested, and a `let`
   definition cannot have them yet. `comparable` and friends are untouched.

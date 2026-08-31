@@ -222,7 +222,7 @@ canonicalizeBinops overallRegion env ops final =
         <$> canonicalize env expr
         <*> Env.findBinop region env op
   in
-  runBinopStepper overallRegion =<< (
+  runBinopStepper env overallRegion =<< (
     More
       <$> traverse canonicalizeHelp ops
       <*> canonicalize env final
@@ -235,8 +235,8 @@ data Step
   | Error Env.Binop Env.Binop
 
 
-runBinopStepper :: A.Region -> Step -> Result FreeLocals w Can.Expr
-runBinopStepper overallRegion step =
+runBinopStepper :: Env.Env -> A.Region -> Step -> Result FreeLocals w Can.Expr
+runBinopStepper env overallRegion step =
   case step of
     Done expr ->
       Result.ok expr
@@ -245,15 +245,15 @@ runBinopStepper overallRegion step =
       Result.ok expr
 
     More ( (expr, op) : rest ) final ->
-      runBinopStepper overallRegion $
-        toBinopStep (toBinop op expr) op rest final
+      runBinopStepper env overallRegion $
+        toBinopStep env (toBinop env op expr) op rest final
 
     Error (Env.Binop op1 _ _ _ _ _) (Env.Binop op2 _ _ _ _ _) ->
       Result.throw (Error.Binop overallRegion op1 op2)
 
 
-toBinopStep :: (Can.Expr -> Can.Expr) -> Env.Binop -> [(Can.Expr, Env.Binop)] -> Can.Expr -> Step
-toBinopStep makeBinop rootOp@(Env.Binop _ _ _ _ rootAssociativity rootPrecedence) middle final =
+toBinopStep :: Env.Env -> (Can.Expr -> Can.Expr) -> Env.Binop -> [(Can.Expr, Env.Binop)] -> Can.Expr -> Step
+toBinopStep env makeBinop rootOp@(Env.Binop _ _ _ _ rootAssociativity rootPrecedence) middle final =
   case middle of
     [] ->
       Done (makeBinop final)
@@ -265,12 +265,12 @@ toBinopStep makeBinop rootOp@(Env.Binop _ _ _ _ rootAssociativity rootPrecedence
 
       else if precedence > rootPrecedence then
 
-        case toBinopStep (toBinop op expr) op rest final of
+        case toBinopStep env (toBinop env op expr) op rest final of
           Done newLast ->
             Done (makeBinop newLast)
 
           More newMiddle newLast ->
-            toBinopStep makeBinop rootOp newMiddle newLast
+            toBinopStep env makeBinop rootOp newMiddle newLast
 
           Error a b ->
             Error a b
@@ -279,18 +279,32 @@ toBinopStep makeBinop rootOp@(Env.Binop _ _ _ _ rootAssociativity rootPrecedence
 
         case (rootAssociativity, associativity) of
           (Binop.Left, Binop.Left) ->
-            toBinopStep (\right -> toBinop op (makeBinop expr) right) op rest final
+            toBinopStep env (\right -> toBinop env op (makeBinop expr) right) op rest final
 
           (Binop.Right, Binop.Right) ->
-            toBinopStep (\right -> makeBinop (toBinop op expr right)) op rest final
+            toBinopStep env (\right -> makeBinop (toBinop env op expr right)) op rest final
 
           (_, _) ->
             Error rootOp op
 
 
-toBinop :: Env.Binop -> Can.Expr -> Can.Expr -> Can.Expr
-toBinop (Env.Binop op home name annotation _ _) left right =
-  A.merge left right (Can.Binop op home name annotation left right)
+-- An operator whose function asks for overloads has to go through the same
+-- resolution an ordinary call would, so it becomes one.
+toBinop :: Env.Env -> Env.Binop -> Can.Expr -> Can.Expr -> Can.Expr
+toBinop env (Env.Binop op home name annotation _ _) left right =
+  let region = A.mergeRegions (A.toRegion left) (A.toRegion right) in
+  case Map.lookup (home, name) (Env._constrained env) of
+    Just (_, constraints) ->
+      A.At region $
+        Can.Call
+          (A.At region $
+            Can.VarConstrained
+              (Can.Dispatch (Env._home env) region (Env._clauses env))
+              home name annotation constraints)
+          [left, right]
+
+    Nothing ->
+      A.At region (Can.Binop op home name annotation left right)
 
 
 

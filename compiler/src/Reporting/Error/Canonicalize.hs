@@ -440,8 +440,9 @@ toReport source err =
               ++ Name.toChars name ++ "` is for:"
           ,
             D.reflow $
-              "The first argument decides that, so it has to be a named type like `Card` or\
-              \ `List a`. A type variable, a record or a tuple has no name to look up."
+              "The first argument decides that, so it has to be a named type like `Card`\
+              \ or `List a`, or a tuple. A type variable or a record has no name to look\
+              \ up."
           )
 
     OverloadNotOwned region qual name nameHome typeHome ->

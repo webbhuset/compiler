@@ -232,14 +232,10 @@ match declared actual subst =
 
 
 -- A definition is chosen by the head constructor of the dispatch type, so a
--- record or a tuple has nothing to dispatch on.
+-- record has nothing to dispatch on.
 dispatchKey :: Can.Type -> Maybe Can.OverloadKey
-dispatchKey tipe =
-  case tipe of
-    Can.TType home name _    -> Just (home, name)
-    Can.TAlias home name _ _ -> Just (home, name)
-    _                        -> Nothing
-
+dispatchKey =
+  Overload.dispatchKey
 
 
 -- LOOK UP
