@@ -119,10 +119,15 @@ overloadDecl maybeDocs start =
             Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentType
             (tipe, typeEnd) <- specialize E.OverloadType Type.expression
             oneOfWithFallback
-              [ do  Space.checkFreshLine E.OverloadIndentBody
-                    defName <- addLocation (Var.foreignAlpha E.OverloadBodyName)
-                    (_, bodyName) <- toOverloadBodyName defName
-                    Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+              [ do  bodyName <-
+                      backtrack $
+                        do  Space.checkFreshLine E.OverloadIndentBody
+                            defName <- addLocation (Var.foreignAlpha E.OverloadBodyName)
+                            n <- matchOverloadName qual name defName
+                            Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+                            notColon
+                            return n
+
                     ((args, body), end) <- chompOverloadBody []
                     let ov = Src.Overload qual bodyName tipe (Just (args, body))
                     return (Overload maybeDocs (A.at start end ov), end)
@@ -144,11 +149,36 @@ toOverloadName (A.At region expr) =
       P.Parser $ \_ (P.State _ _ _ cur) _ _ _ eerr -> eerr cur E.DeclStart
 
 
-toOverloadBodyName :: A.Located Src.Expr_ -> Parser E.Overload (A.Located Name.Name, A.Located Name.Name)
-toOverloadBodyName (A.At region expr) =
+-- The line after a signature only belongs to it if it repeats the same
+-- qualified name. Anything else is the next declaration, and failing here
+-- without committing is what lets the signature stand on its own as an
+-- abstract declaration.
+-- Deciding whether a signature has a body means reading past the end of the
+-- signature, so the lookahead has to be undoable: without this a failure part
+-- way through would be a syntax error instead of "there is no body here".
+backtrack :: Parser x a -> Parser x a
+backtrack (Parser parser) =
+  P.Parser $ \fpc state@(P.State _ _ _ start) cok eok _ eerr ->
+    parser fpc state cok eok (\_ toError -> eerr start toError) eerr
+
+
+-- The same name again followed by a colon is the next declaration, not this
+-- one's body: an abstract declaration and a definition of it can sit next to
+-- each other in the module that owns the name.
+notColon :: Parser E.Overload ()
+notColon =
+  P.Parser $ \_ state@(P.State pos end _ cur) _ eok _ eerr ->
+    if ltAddr pos end && eqIndex pos 0# 0x3A#Word8 {-:-} then
+      eerr cur E.OverloadBodyName
+    else
+      eok () state
+
+
+matchOverloadName :: A.Located Name.Name -> A.Located Name.Name -> A.Located Src.Expr_ -> Parser E.Overload (A.Located Name.Name)
+matchOverloadName (A.At _ qual) (A.At _ name) (A.At region expr) =
   case expr of
-    Src.VarQual Src.LowVar home name ->
-      return (A.At region home, A.At region name)
+    Src.VarQual Src.LowVar bodyQual bodyName | bodyQual == qual && bodyName == name ->
+      return (A.At region bodyName)
 
     _ ->
       P.Parser $ \_ (P.State _ _ _ cur) _ _ _ eerr -> eerr cur E.OverloadBodyName

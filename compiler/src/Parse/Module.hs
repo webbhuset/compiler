@@ -180,7 +180,10 @@ getComments decls comments =
         Decl.Union c (A.At _ (Src.Union n _ _  ))  -> getComments otherDecls (addComment c n comments)
         Decl.Alias c (A.At _ (Src.Alias n _ _  ))  -> getComments otherDecls (addComment c n comments)
         Decl.TagDecl c (A.At _ (Src.TagDecl n _))  -> getComments otherDecls (addComment c n comments)
-        Decl.Overload c (A.At _ (Src.Overload _ n _ _)) -> getComments otherDecls (addComment c n comments)
+        -- Overloads are not documented yet, and their bare name can collide
+        -- with an ordinary value's, so their comments are dropped rather than
+        -- attached to the wrong entry.
+        Decl.Overload _ _                          -> getComments otherDecls comments
         Decl.Port  c         (Src.Port  n _    )   -> getComments otherDecls (addComment c n comments)
 
 
