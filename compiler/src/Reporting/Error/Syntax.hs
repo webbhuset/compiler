@@ -8,6 +8,7 @@ module Reporting.Error.Syntax
   --
   , Decl(..)
   , DeclType(..)
+  , Overload(..)
   , TypeAlias(..)
   , CustomType(..)
   , DeclDef(..)
@@ -139,6 +140,7 @@ data Decl
   --
   | Port Port Cursor
   | DeclType DeclType Cursor
+  | DeclOverload N.Name Overload Cursor
   | DeclDef N.Name DeclDef Cursor
   --
   | DeclFreshLineAfterDocComment Cursor
@@ -180,6 +182,20 @@ data Port
 
 
 -- TYPE DECLARATIONS
+
+
+data Overload
+  = OverloadSpace Space Cursor
+  | OverloadType Type Cursor
+  | OverloadBody Expr Cursor
+  | OverloadArg Pattern Cursor
+  | OverloadColon Cursor
+  | OverloadEquals Cursor
+  | OverloadBodyName Cursor
+  --
+  | OverloadIndentColon Cursor
+  | OverloadIndentType Cursor
+  | OverloadIndentBody Cursor
 
 
 data DeclType
@@ -1504,6 +1520,9 @@ toDeclarationsReport source decl =
     DeclType declType cur ->
       toDeclTypeReport source declType cur
 
+    DeclOverload name overload cur ->
+      toOverloadReport source name overload cur
+
     DeclDef name declDef cur ->
       toDeclDefReport source name declDef cur
 
@@ -1937,6 +1956,72 @@ toDeclTagReport source tag startCur =
             D.reflow $
               "I was expecting a lowercase type variable or the end of the declaration."
           )
+
+
+toOverloadReport :: Code.Source -> N.Name -> Overload -> Cursor -> Report.Report
+toOverloadReport source name overload startCur =
+  case overload of
+    OverloadSpace space cur ->
+      toSpaceReport source space cur
+
+    OverloadType tipe cur ->
+      toTypeReport source (TC_Annotation name) tipe cur
+
+    OverloadBody expr cur ->
+      toExprReport source (InDef name startCur) expr cur
+
+    OverloadArg pattern cur ->
+      toPatternReport source PArg pattern cur
+
+    OverloadColon cur ->
+      toOverloadStuck source cur
+        "I was expecting a colon and then the type this overload has."
+
+    OverloadEquals cur ->
+      toOverloadStuck source cur
+        "I was expecting an equals sign and then the body of this overload."
+
+    OverloadBodyName cur ->
+      toOverloadStuck source cur $
+        "The body of an overload repeats the qualified name, so I was expecting to see\
+        \ the same `" ++ N.toChars name ++ "` again here."
+
+    OverloadIndentColon cur ->
+      toOverloadStuck source cur
+        "I was expecting a colon and then the type this overload has."
+
+    OverloadIndentType cur ->
+      toOverloadStuck source cur
+        "I was expecting the type this overload has."
+
+    OverloadIndentBody cur ->
+      toOverloadStuck source cur
+        "I was expecting the body of this overload."
+
+
+toOverloadStuck :: Code.Source -> Cursor -> [Char.Char] -> Report.Report
+toOverloadStuck source cur message =
+  let region = toRegion cur in
+  Report.Report "UNFINISHED OVERLOAD" region [] $
+    Code.toSnippet source region Nothing
+      (
+        D.reflow "I am partway through an overload, but I got stuck here:"
+      ,
+        D.stack
+          [ D.reflow message
+          , D.reflow $
+              "An overload is a definition whose name is qualified. With a body it says\
+              \ what a name means for one type; with no body at all it declares a name\
+              \ for other modules to define:"
+          , D.indent 4 $ D.vcat
+              [ D.dullyellow "Order.compare : a -> a -> Order"
+              , ""
+              , D.dullyellow "Order.compare : Card -> Card -> Order"
+              , D.dullyellow "Order.compare a b ="
+              , D.dullyellow "    ..."
+              ]
+          ]
+      )
 
 
 toDeclTypeReport :: Code.Source -> DeclType -> Cursor -> Report.Report
