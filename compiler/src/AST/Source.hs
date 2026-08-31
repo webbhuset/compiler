@@ -9,6 +9,8 @@ module AST.Source
   , Import(..)
   , Value(..)
   , Overload(..)
+  , Signature(..)
+  , Constraint(..)
   , Union(..)
   , TagDecl(..)
   , TagEntry(..)
@@ -80,7 +82,7 @@ data VarType = LowVar | CapVar
 
 
 data Def
-  = Define (A.Located N.Name) [Pattern] Expr (Maybe Type)
+  = Define (A.Located N.Name) [Pattern] Expr (Maybe Signature)
   | Destruct Pattern Expr
 
 
@@ -170,7 +172,22 @@ data Import =
     }
 
 
-data Value = Value (A.Located N.Name) [Pattern] Expr (Maybe Type)
+data Value = Value (A.Located N.Name) [Pattern] Expr (Maybe Signature)
+
+
+-- A type annotation together with the overloads it needs, written under it:
+--
+--     sort : List a -> List a
+--         where Ord.compare : a -> a -> Ordering
+--
+data Signature =
+  Signature Type [A.Located Constraint]
+
+
+-- One `where` line: an overloaded name and the type this signature needs it
+-- at. The type variable it dispatches on is one of the enclosing signature's.
+data Constraint =
+  Constraint (A.Located Module.Prefix) (A.Located N.Name) Type
 
 
 -- An overload: a value written with a QUALIFIED name, which is what marks
@@ -185,7 +202,7 @@ data Overload =
   Overload
     { _ov_qual :: A.Located Module.Prefix -- the module part, as written
     , _ov_name :: A.Located N.Name        -- the value part
-    , _ov_type :: Type
+    , _ov_type :: Signature
     , _ov_body :: Maybe ([Pattern], Expr)
     }
 data Union = Union (A.Located T.Name) [A.Located T.Var] [(A.Located N.Name, [Type])]

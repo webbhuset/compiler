@@ -62,6 +62,7 @@ data Error
   | TagRowDuplicate A.Region N.Name
   | TagPatternNesting A.Region N.Name
   | OverloadNotDeclared A.Region Module.Prefix N.Name
+  | WhereNotImplemented A.Region Module.Prefix N.Name
   | OverloadForeignAbstract A.Region Module.Prefix N.Name Module.Name
   | OverloadAbstractNotDispatching A.Region Module.Prefix N.Name
   | OverloadInstanceNotDispatching A.Region Module.Prefix N.Name
@@ -234,6 +235,19 @@ toReport source err =
           ,
             D.reflow $
               "Remove one of them, each tag can only appear once in a variant type."
+          )
+
+    WhereNotImplemented region qual name ->
+      Report.Report "WHERE CLAUSES ARE NOT READY" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This signature says it needs `" ++ Module.prefixToChars qual ++ "."
+              ++ N.toChars name ++ "`, which this compiler parses but cannot compile yet:"
+          ,
+            D.reflow $
+              "An overloaded name can only be used where the type it dispatches on is a\
+              \ specific type, so for now it cannot be used on a type variable at all."
           )
 
     OverloadNotDeclared region qual name ->

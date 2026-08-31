@@ -85,7 +85,7 @@ addAbstract rawHome env (A.At region (Src.Overload (A.At _ qual) (A.At _ name) s
   if qual /= Module.toPrefix rawHome then
     Result.throw (Error.OverloadForeignAbstract region qual name rawHome)
   else
-    do  annotation@(Can.Forall _ tipe) <- Type.toAnnotation env srcType
+    do  annotation@(Can.Forall _ tipe) <- Type.toAnnotation env =<< Type.signatureType srcType
         case dispatchArgument tipe of
           Just (Can.TVar _) ->
             Result.ok ((Env._home env, name), annotation)
@@ -179,7 +179,7 @@ canonicalizeInstance env (A.At region (Src.Overload (A.At qualRegion qual) (A.At
       Result.throw (Error.OverloadNotDeclared qualRegion qual name)
 
     Just (Env.Overload ovHome _) ->
-      do  Can.Forall freeVars tipe <- Type.toAnnotation env srcType
+      do  Can.Forall freeVars tipe <- Type.toAnnotation env =<< Type.signatureType srcType
           case dispatchKey =<< dispatchArgument tipe of
             Nothing ->
               Result.throw (Error.OverloadInstanceNotDispatching region qual name)

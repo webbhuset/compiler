@@ -176,8 +176,8 @@ toNodeOne env (A.At _ (Src.Value aname@(A.At _ name) srcArgs body maybeType)) =
           let def = Can.Def aname args cbody
           return $ Graph.Node name (toNodeTwo name srcArgs def freeLocals) (Map.keys freeLocals)
 
-    Just srcType ->
-      do  (Can.Forall freeVars tipe) <- Type.toAnnotation env srcType
+    Just signature ->
+      do  (Can.Forall freeVars tipe) <- Type.toAnnotation env =<< Type.signatureType signature
 
           ((args,resultType), argBindings) <-
             Pattern.verify (Error.DPFuncArgs name) $
