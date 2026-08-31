@@ -34,6 +34,7 @@ import qualified Reporting.Error.Syntax as E
 
 data Decl
   = Value (Maybe Src.Comment) (A.Located Src.Value)
+  | Overload (Maybe Src.Comment) (A.Located Src.Overload)
   | Union (Maybe Src.Comment) (A.Located Src.Union)
   | Alias (Maybe Src.Comment) (A.Located Src.Alias)
   | TagDecl (Maybe Src.Comment) (A.Located Src.TagDecl)
@@ -48,6 +49,7 @@ declaration =
         [ typeDecl maybeDocs start
         , portDecl maybeDocs
         , valueDecl maybeDocs start
+        , overloadDecl maybeDocs start
         ]
 
 
@@ -58,17 +60,16 @@ declaration =
 chompDocComment :: Parser E.Decl (Maybe Src.Comment)
 chompDocComment =
   oneOfWithFallback
-    [
-      do  docComment <- Space.docComment E.DeclStart E.DeclSpace
+    [ do  comment <- Space.docComment E.DeclStart E.DeclSpace
           Space.chomp E.DeclSpace
           Space.checkFreshLine E.DeclFreshLineAfterDocComment
-          return (Just docComment)
+          return (Just comment)
     ]
     Nothing
 
 
 
--- DEFINITION and ANNOTATION
+-- DEFINITION
 
 
 {-# INLINE valueDecl #-}
@@ -90,6 +91,81 @@ valueDecl maybeDocs start =
               ,
                 chompDefArgsAndBody maybeDocs start (A.at start end name) Nothing []
               ]
+
+
+
+-- OVERLOADS
+--
+-- A declaration whose name is QUALIFIED is an overload:
+--
+--     Order.compare : a -> a -> Order              -- abstract, no body
+--
+--     Order.compare : Card -> Card -> Order        -- a definition
+--     Order.compare a b = ...
+--
+-- A qualified name has never been legal at the start of a declaration, and
+-- valueDecl gives up without consuming when it sees an upper case letter,
+-- so nothing that used to compile changes meaning.
+
+
+{-# INLINE overloadDecl #-}
+overloadDecl :: Maybe Src.Comment -> A.Position -> Space.Parser E.Decl Decl
+overloadDecl maybeDocs start =
+  do  qualified <- addLocation (Var.foreignAlpha E.DeclStart)
+      (qual, name) <- toOverloadName qualified
+      specialize (E.DeclOverload (A.toValue name)) $
+        do  Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentColon
+            word1 0x3A#Word8 {-:-} E.OverloadColon
+            Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentType
+            (tipe, typeEnd) <- specialize E.OverloadType Type.expression
+            oneOfWithFallback
+              [ do  Space.checkFreshLine E.OverloadIndentBody
+                    defName <- addLocation (Var.foreignAlpha E.OverloadBodyName)
+                    (_, bodyName) <- toOverloadBodyName defName
+                    Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+                    ((args, body), end) <- chompOverloadBody []
+                    let ov = Src.Overload qual bodyName tipe (Just (args, body))
+                    return (Overload maybeDocs (A.at start end ov), end)
+              ]
+              ( Overload maybeDocs (A.at start typeEnd (Src.Overload qual name tipe Nothing))
+              , typeEnd
+              )
+
+
+-- Only `Module.name` counts; a bare name is an ordinary definition and an
+-- upper case one is something else entirely.
+toOverloadName :: A.Located Src.Expr_ -> Parser E.Decl (A.Located Name.Name, A.Located Name.Name)
+toOverloadName (A.At region expr) =
+  case expr of
+    Src.VarQual Src.LowVar home name ->
+      return (A.At region home, A.At region name)
+
+    _ ->
+      P.Parser $ \_ (P.State _ _ _ cur) _ _ _ eerr -> eerr cur E.DeclStart
+
+
+toOverloadBodyName :: A.Located Src.Expr_ -> Parser E.Overload (A.Located Name.Name, A.Located Name.Name)
+toOverloadBodyName (A.At region expr) =
+  case expr of
+    Src.VarQual Src.LowVar home name ->
+      return (A.At region home, A.At region name)
+
+    _ ->
+      P.Parser $ \_ (P.State _ _ _ cur) _ _ _ eerr -> eerr cur E.OverloadBodyName
+
+
+chompOverloadBody :: [Src.Pattern] -> Space.Parser E.Overload ([Src.Pattern], Src.Expr)
+chompOverloadBody revArgs =
+  oneOf E.OverloadEquals
+    [ do  arg <- specialize E.OverloadArg Pattern.term
+          Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+          chompOverloadBody (arg:revArgs)
+    , do  word1 0x3D#Word8 {-=-} E.OverloadEquals
+          Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+          (body, end) <- specialize E.OverloadBody Expr.expression
+          return ((reverse revArgs, body), end)
+    ]
+
 
 
 chompDefArgsAndBody :: Maybe Src.Comment -> A.Position -> A.Located Name.Name -> Maybe Src.Type -> [Src.Pattern] -> Space.Parser E.DeclDef Decl

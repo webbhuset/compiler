@@ -337,6 +337,7 @@ attemptDeclOrExpr lines =
             PD.Union _ (A.At _ (Src.Union (A.At _ name) _ _  ))    -> ifDone lines (Type name src)
             PD.Alias _ (A.At _ (Src.Alias (A.At _ name) _ _  ))    -> ifDone lines (Type name src)
             PD.TagDecl _ (A.At _ (Src.TagDecl (A.At _ name) _))    -> ifDone lines (Type name src)
+            PD.Overload _ (A.At _ (Src.Overload _ (A.At _ name) _ _)) -> ifDone lines (Decl name src)
             PD.Port  _ _                                           -> pure $ Done Port
 
         Left declPosition

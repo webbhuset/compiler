@@ -55,6 +55,7 @@ data Error
   | TagRowNotATag A.Region Name.Name
   | TagRowDuplicate A.Region Name.Name
   | TagPatternNesting A.Region Name.Name
+  | OverloadNotImplemented A.Region Name.Name Name.Name
   | ImportOpenTag A.Region Name.Name
   | ExportOpenTag A.Region Name.Name
   | DuplicatePattern DuplicatePatternContext Name.Name A.Region A.Region
@@ -285,6 +286,20 @@ toReport source err =
           ,
             D.reflow $
               "Remove one of them, each tag can only appear once in a variant type."
+          )
+
+    OverloadNotImplemented region qual name ->
+      Report.Report "OVERLOADS ARE NOT READY" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This declares `" ++ Name.toChars qual ++ "." ++ Name.toChars name
+              ++ "` as an overload, which this compiler parses but cannot compile yet:"
+          ,
+            D.reflow $
+              "Overloading by signature is only half built. The syntax is accepted so it\
+              \ can be written and read, but nothing resolves a use site to a definition\
+              \ yet, so the declaration cannot mean anything."
           )
 
     TagPatternNesting region name ->

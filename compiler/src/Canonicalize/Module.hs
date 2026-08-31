@@ -41,7 +41,17 @@ type Result i w a =
 
 
 canonicalize :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Result i [W.Warning] Can.Module
-canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ binops effects) =
+canonicalize pkg ifaces modul@(Src.Module _ _ _ _ _ _ _ _ overloads _ _) =
+  case overloads of
+    A.At region (Src.Overload (A.At _ qual) (A.At _ name) _ _) : _ ->
+      Result.throw (Error.OverloadNotImplemented region qual name)
+
+    [] ->
+      canonicalizeHelp pkg ifaces modul
+
+
+canonicalizeHelp :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Result i [W.Warning] Can.Module
+canonicalizeHelp pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ _ binops effects) =
   do  let home = ModuleName.Canonical pkg (Src.getName modul)
       let cbinops = Map.fromList (map canonicalizeBinop binops)
 

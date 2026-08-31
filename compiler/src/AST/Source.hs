@@ -8,6 +8,7 @@ module AST.Source
   , getImportName
   , Import(..)
   , Value(..)
+  , Overload(..)
   , Union(..)
   , TagDecl(..)
   , TagEntry(..)
@@ -142,13 +143,14 @@ data Module =
     , _unions  :: [A.Located Union]
     , _aliases :: [A.Located Alias]
     , _tagDecls :: [A.Located TagDecl]
+    , _overloads :: [A.Located Overload]
     , _binops  :: [A.Located Infix]
     , _effects :: Effects
     }
 
 
 getName :: Module -> Name
-getName (Module maybeName _ _ _ _ _ _ _ _ _) =
+getName (Module maybeName _ _ _ _ _ _ _ _ _ _) =
   case maybeName of
     Just (A.At _ name) ->
       name
@@ -171,6 +173,23 @@ data Import =
 
 
 data Value = Value (A.Located Name) [Pattern] Expr (Maybe Type)
+
+
+-- An overload: a value written with a QUALIFIED name, which is what marks
+-- it as one. With no body it declares an abstract name that other modules
+-- define; with a body it defines that name for one type.
+--
+--     Order.compare : a -> a -> Order              -- in module Order
+--     Order.compare : Card -> Card -> Order        -- in module Card
+--     Order.compare a b = ...
+--
+data Overload =
+  Overload
+    { _ov_qual :: A.Located Name      -- the module part, as written
+    , _ov_name :: A.Located Name      -- the value part
+    , _ov_type :: Type
+    , _ov_body :: Maybe ([Pattern], Expr)
+    }
 data Union = Union (A.Located Name) [A.Located Name] [(A.Located Name, [Type])]
 data TagDecl = TagDecl (A.Located Name) [A.Located Name]
 data Alias = Alias (A.Located Name) [A.Located Name] Type
