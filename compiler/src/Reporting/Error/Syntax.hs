@@ -9,6 +9,7 @@ module Reporting.Error.Syntax
   , Decl(..)
   , DeclType(..)
   , Overload(..)
+  , Abstract(..)
   , Where(..)
   , TypeAlias(..)
   , CustomType(..)
@@ -136,7 +137,13 @@ data Exposing
 
 
 data Decl
-  = DeclStart Cursor
+  = DeclAbstract N.Name Abstract Cursor
+  | DeclAbstractSpace Space Cursor
+  | DeclAbstractName Cursor
+  | DeclAbstractColon Cursor
+  | DeclAbstractIndentName Cursor
+  | DeclAbstractIndentColon Cursor
+  | DeclStart Cursor
   | DeclSpace Space Cursor
   --
   | Port Port Cursor
@@ -206,6 +213,16 @@ data Overload
 --     sort : List a -> List a
 --         where Ord.compare : a -> a -> Ordering
 --
+-- ABSTRACT DECLARATIONS
+--
+--     abstract compare : a -> a -> Order
+--
+data Abstract
+  = AbstractSpace Space Cursor
+  | AbstractType Type Cursor
+  | AbstractIndentType Cursor
+
+
 data Where
   = WhereSpace Space Cursor
   | WhereName Cursor
@@ -1544,6 +1561,28 @@ toDeclarationsReport source decl =
     DeclOverload name overload cur ->
       toOverloadReport source name overload cur
 
+    DeclAbstract name abstract cur ->
+      toAbstractReport source name abstract cur
+
+    DeclAbstractSpace space cur ->
+      toSpaceReport source space cur
+
+    DeclAbstractName cur ->
+      toAbstractStuck source cur
+        "I was expecting the name being declared, which has to be lower case."
+
+    DeclAbstractColon cur ->
+      toAbstractStuck source cur
+        "I was expecting a colon and then the type this name has."
+
+    DeclAbstractIndentName cur ->
+      toAbstractStuck source cur
+        "I was expecting the name being declared next."
+
+    DeclAbstractIndentColon cur ->
+      toAbstractStuck source cur
+        "I was expecting a colon next."
+
     DeclDef name declDef cur ->
       toDeclDefReport source name declDef cur
 
@@ -2007,8 +2046,10 @@ toOverloadReport source name overload startCur =
 
     OverloadBodyName cur ->
       toOverloadStuck source cur $
-        "The body of an overload repeats the qualified name, so I was expecting to see\
-        \ the same `" ++ N.toChars name ++ "` again here."
+        "A definition repeats the qualified name and then gives a body, so I was\
+        \ expecting to see the same `" ++ N.toChars name ++ "` again here. If you\
+        \ meant to declare a new overloaded name rather than define an existing one,\
+        \ that is `abstract " ++ N.toChars name ++ " : ...` instead."
 
     OverloadIndentColon cur ->
       toOverloadStuck source cur
@@ -2021,6 +2062,40 @@ toOverloadReport source name overload startCur =
     OverloadIndentBody cur ->
       toOverloadStuck source cur
         "I was expecting the body of this overload."
+
+
+toAbstractReport :: Code.Source -> N.Name -> Abstract -> Cursor -> Report.Report
+toAbstractReport source name abstract startCur =
+  case abstract of
+    AbstractSpace space cur ->
+      toSpaceReport source space cur
+
+    AbstractType tipe cur ->
+      toTypeReport source (TC_Annotation name) tipe cur
+
+    AbstractIndentType cur ->
+      toAbstractStuck source cur $
+        "I was expecting the type `" ++ N.toChars name ++ "` has next."
+  where
+    _unused = startCur
+
+
+toAbstractStuck :: Code.Source -> Cursor -> [Char.Char] -> Report.Report
+toAbstractStuck source cur message =
+  let region = toRegion cur in
+  Report.Report "UNFINISHED DECLARATION" region [] $
+    Code.toSnippet source region Nothing
+      (
+        D.reflow "I am partway through an `abstract` declaration, but I got stuck here:"
+      ,
+        D.stack
+          [ D.reflow message
+          , D.reflow $
+              "An `abstract` declaration gives this module a name that other modules\
+              \ define, one definition per type:"
+          , D.indent 4 $ D.dullyellow "abstract compare : a -> a -> Order"
+          ]
+      )
 
 
 toWhereReport :: Code.Source -> Where -> Report.Report
@@ -2089,11 +2164,11 @@ toOverloadStuck source cur message =
         D.stack
           [ D.reflow message
           , D.reflow $
-              "An overload is a definition whose name is qualified. With a body it says\
-              \ what a name means for one type; with no body at all it declares a name\
-              \ for other modules to define:"
+              "An overload is a definition whose name is qualified, saying what that name\
+              \ means for one type. The name itself is declared with `abstract` in the\
+              \ module that owns it:"
           , D.indent 4 $ D.vcat
-              [ D.dullyellow "Order.compare : a -> a -> Order"
+              [ D.dullyellow "abstract compare : a -> a -> Order"
               , ""
               , D.dullyellow "Order.compare : Card -> Card -> Order"
               , D.dullyellow "Order.compare a b ="

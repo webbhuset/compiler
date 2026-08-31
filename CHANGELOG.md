@@ -380,14 +380,14 @@ hello world
 *[docs](docs/overloading.md)*
 
 One name can have many definitions, and the compiler picks the one whose
-signature matches the type it is used at. A module declares a name abstract
-by writing a signature with no body; other modules define it by writing the
-same qualified name with a concrete signature and a body:
+signature matches the type it is used at. A module declares a name with
+`abstract`; other modules define it by writing that name qualified, with a
+concrete signature and a body:
 
 ```elm
 module Ord exposing (Ordering(..))
 
-Ord.compare : a -> a -> Ordering            -- abstract
+abstract compare : a -> a -> Ordering
 ```
 
 ```elm
@@ -398,9 +398,10 @@ Ord.compare (Card a) (Card b) =
     ...
 ```
 
-- No `class` and no `instance`: the qualified name in definition position
-  is the whole ceremony, and the use site reads like any other qualified
-  call.
+- No `class` and no `instance`: one keyword and a qualified name in
+  definition position is the whole ceremony, and the use site reads like
+  any other qualified call. `abstract` is contextual, like `port`, so a
+  value of that name still works.
 - The first argument decides which definition a use site means, so an
   abstract signature has to start with a type variable and a definition
   has to start with a named type.

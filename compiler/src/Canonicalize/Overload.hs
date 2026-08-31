@@ -65,10 +65,10 @@ type Result i w a =
 
 
 isAbstract :: A.Located Src.Overload -> Bool
-isAbstract (A.At _ (Src.Overload _ _ _ body)) =
-  case body of
-    Nothing -> True
-    Just _  -> False
+isAbstract (A.At _ overload) =
+  case overload of
+    Src.Abstract _ _        -> True
+    Src.DefineFor _ _ _ _ _ -> False
 
 
 
@@ -79,39 +79,32 @@ isAbstract (A.At _ (Src.Overload _ _ _ body)) =
 -- the definitions below to find them.
 
 
-addAbstracts :: Module.Name -> [A.Located Src.Overload] -> Env.Env -> Result i w (Env.Env, Can.Overloads)
-addAbstracts rawHome overloads env =
-  do  abstracts <- traverse (addAbstract rawHome env) (filter isAbstract overloads)
+addAbstracts :: [A.Located Src.Overload] -> Env.Env -> Result i w (Env.Env, Can.Overloads)
+addAbstracts overloads env =
+  do  abstracts <- traverse (addAbstract env) (filter isAbstract overloads)
       let table = Map.fromList abstracts
       Result.ok
-        ( addToEnv rawHome table env
+        ( addToEnv (ModuleName._module (Env._home env)) table env
         , Can.Overloads table Map.empty Map.empty
         )
 
 
-addAbstract :: Module.Name -> Env.Env -> A.Located Src.Overload -> Result i w (Can.OverloadName, Can.Annotation)
-addAbstract rawHome env (A.At region (Src.Overload (A.At _ qual) (A.At _ name) srcType _)) =
-  if qual /= Module.toPrefix rawHome then
-    Result.throw (Error.OverloadForeignAbstract region qual name rawHome)
-  else
-    do  Src.Signature abstractType srcClauses <- Result.ok srcType
-        noClauses region qual name srcClauses
-        annotation@(Can.Forall _ tipe) <- CanType.toAnnotation env abstractType
-        case dispatchArgument tipe of
-          Just (Can.TVar _) ->
-            Result.ok ((Env._home env, name), annotation)
+addAbstract :: Env.Env -> A.Located Src.Overload -> Result i w (Can.OverloadName, Can.Annotation)
+addAbstract env (A.At region overload) =
+  case overload of
+    Src.DefineFor _ (A.At _ name) _ _ _ ->
+      $(Crash.crash 'addAbstract) ("addAbstract only ever sees abstract declarations, not " ++ N.toChars name)
 
-          _ ->
-            Result.throw (Error.OverloadAbstractNotDispatching region qual name)
+    Src.Abstract (A.At _ name) (Src.Signature srcType _) ->
+      do  annotation@(Can.Forall _ tipe) <- CanType.toAnnotation env srcType
+          case dispatchArgument tipe of
+            Just (Can.TVar _) ->
+              Result.ok ((Env._home env, name), annotation)
 
-
--- An abstract declaration is what other clauses point at, so it cannot itself
--- ask for anything.
-noClauses :: A.Region -> Module.Prefix -> N.Name -> [A.Located Src.Constraint] -> Result i w ()
-noClauses region qual name srcClauses =
-  case srcClauses of
-    []  -> Result.ok ()
-    _:_ -> Result.throw (Error.WhereOnAbstract region qual name)
+            _ ->
+              Result.throw $
+                Error.OverloadAbstractNotDispatching region
+                  (Module.toPrefix (ModuleName._module (Env._home env))) name
 
 
 addToEnv :: Module.Name -> Map.Map Can.OverloadName Can.Annotation -> Env.Env -> Env.Env
@@ -364,7 +357,20 @@ defName def =
 
 
 canonicalizeInstance :: Env.Env -> A.Located Src.Overload -> Result i [W.Warning] Instance
-canonicalizeInstance env (A.At region (Src.Overload (A.At qualRegion qual) (A.At _ name) srcType body)) =
+canonicalizeInstance env (A.At region overload) =
+  case overload of
+    Src.Abstract (A.At _ name) _ ->
+      $(Crash.crash 'canonicalizeInstance) ("canonicalizeInstance only ever sees definitions, not " ++ N.toChars name)
+
+    Src.DefineFor (A.At qualRegion qual) (A.At _ name) srcType srcArgs srcBody ->
+      canonicalizeDefine env region qualRegion qual name srcType srcArgs srcBody
+
+
+canonicalizeDefine
+  :: Env.Env -> A.Region -> A.Region -> Module.Prefix -> N.Name
+  -> Src.Signature -> [Src.Pattern] -> Src.Expr
+  -> Result i [W.Warning] Instance
+canonicalizeDefine env region qualRegion qual name srcType srcArgs srcBody =
   case Map.lookup name =<< Map.lookup qual (Env._q_overloads env) of
     Nothing ->
       Result.throw (Error.OverloadNotDeclared qualRegion qual name)
@@ -385,7 +391,7 @@ canonicalizeInstance env (A.At region (Src.Overload (A.At qualRegion qual) (A.At
                   if home /= ovHome && home /= typeHome then
                     Result.throw (Error.OverloadNotOwned region qual name ovHome typeHome)
                   else
-                    do  def <- toDef (Env.withClauses clauses env) region (mangle ovHome name key) name freeVars tipe body
+                    do  def <- toDef (Env.withClauses clauses env) region (mangle ovHome name key) name freeVars tipe srcArgs srcBody
                         Result.ok (Found region (ovHome, name) key dispatched clauses, def)
 
 
@@ -396,14 +402,10 @@ toDef
   -> N.Name
   -> Can.FreeVars
   -> Can.Type
-  -> Maybe ([Src.Pattern], Src.Expr)
+  -> [Src.Pattern]
+  -> Src.Expr
   -> Result i [W.Warning] Can.Def
-toDef env region mangled name freeVars tipe body =
-  case body of
-    Nothing ->
-      $(Crash.crash 'toDef) "canonicalizeInstance only ever looks at overloads that have a body"
-
-    Just (srcArgs, srcBody) ->
+toDef env region mangled name freeVars tipe srcArgs srcBody =
       do  ((args, resultType), argBindings) <-
             Pattern.verify (Error.DPFuncArgs name) $
               Expr.gatherTypedArgs env name srcArgs tipe Index.first []

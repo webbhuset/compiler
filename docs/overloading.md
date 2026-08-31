@@ -2,9 +2,8 @@
 
 One name can have many definitions, and the compiler picks the one whose
 signature matches the type it is used at. There is no `class` and no
-`instance`: a module declares a name abstract by writing a signature with no
-body, and other modules define it by writing the same qualified name with a
-concrete signature and a body.
+`instance`: a module declares a name with `abstract`, and other modules define
+it by writing that name qualified, with a concrete signature and a body.
 
 ```elm
 module Ord exposing (Ordering(..))
@@ -16,8 +15,8 @@ type Ordering
     | More
 
 
--- abstract: the name exists, dispatches on `a`, has no body
-Ord.compare : a -> a -> Ordering
+-- the name exists, dispatches on `a`, and has no body here
+abstract compare : a -> a -> Ordering
 ```
 
 ```elm
@@ -50,29 +49,28 @@ import Ord
 Ord.compare (Card 1) (Card 2)      --> Ord.Less
 ```
 
-The qualified name in definition position is the whole ceremony. Nothing is
-opened, nothing is imported beyond the module that declares the name, and the
-use site reads like any other qualified call.
+One keyword and a qualified name in definition position is the whole ceremony.
+Nothing is opened, nothing is imported beyond the module that declares the
+name, and the use site reads like any other qualified call.
 
 
 ## Declaring a name abstract
 
-An abstract declaration is a signature with no body, written qualified with the
-declaring module's own name:
+An abstract declaration is a signature with no body, introduced by `abstract`:
 
 ```elm
 module Ord exposing (Ordering(..))
 
-Ord.compare : a -> a -> Ordering
+abstract compare : a -> a -> Ordering
 ```
 
-The first argument decides which definition a use site means, so it must be a
-type variable. `Ord.compare : Int -> Int -> Ordering` is rejected: there is
-only ever one `Int`, so there would be nothing to choose between.
+It declares the name in the module it is written in, which is what makes that
+module the name's owner. `abstract` is contextual, like `port`, so a value
+called `abstract` still works.
 
-The qualifier has to name the module the declaration is in. Writing
-`Ord.compare : ...` inside module `Card` is an error, because then two modules
-could both claim the name.
+The first argument decides which definition a use site means, so it must be a
+type variable. `abstract compare : Int -> Int -> Ordering` is rejected: there
+is only ever one `Int`, so there would be nothing to choose between.
 
 There is no default body. A default would be silently wrong for most types — an
 `Same`-returning `compare` would break every sorted structure whose key type
@@ -140,13 +138,17 @@ Both modules above satisfy it: `Card` owns `Card`, and `Ord` owns `compare`, so
 ```elm
 module Ord exposing (Ordering(..))
 
-Ord.compare : a -> a -> Ordering
+abstract compare : a -> a -> Ordering
 
 
 Ord.compare : Int -> Int -> Ordering
 Ord.compare a b =
     ...
 ```
+
+A definition stays qualified even in the declaring module, because there the
+qualifier says which overloaded name is being defined rather than which module
+to look in.
 
 Without this rule any module could add `Ord.compare : Card -> Card ->
 Ordering`, two modules could add different ones, and a sorted structure built

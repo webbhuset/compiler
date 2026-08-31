@@ -68,7 +68,6 @@ data Error
   | WhereWrongType A.Region Module.Prefix N.Name T.Var Can.Type
   | WhereNotDispatching A.Region Module.Prefix N.Name [T.Var]
   | WhereDuplicate A.Region Module.Prefix N.Name T.Var
-  | OverloadForeignAbstract A.Region Module.Prefix N.Name Module.Name
   | OverloadAbstractNotDispatching A.Region Module.Prefix N.Name
   | OverloadInstanceNotDispatching A.Region Module.Prefix N.Name
   | OverloadNotOwned A.Region Module.Prefix N.Name ModuleName.Canonical ModuleName.Canonical
@@ -339,23 +338,8 @@ toReport source err =
               ++ N.toChars name ++ " : ...` on its own first, and you need to import it."
           )
 
-    OverloadForeignAbstract region qual name home ->
-      Report.Report "MISPLACED OVERLOAD" region [] $
-        Code.toSnippet source region Nothing
-          (
-            D.reflow $
-              "This declares `" ++ Module.prefixToChars qual ++ "." ++ N.toChars name
-              ++ "` abstract, but we are in module " ++ Module.toChars home ++ ":"
-          ,
-            D.reflow $
-              "A name can only be declared abstract by the module that owns it, so this\
-              \ line belongs in " ++ Module.prefixToChars qual ++ ". If you meant to define "
-              ++ Module.prefixToChars qual ++ "." ++ N.toChars name
-              ++ " for one particular type, give it a body."
-          )
-
     OverloadAbstractNotDispatching region qual name ->
-      Report.Report "BAD OVERLOAD SIGNATURE" region [] $
+      Report.Report "BAD ABSTRACT DECLARATION" region [] $
         Code.toSnippet source region Nothing
           (
             D.reflow $
@@ -368,9 +352,8 @@ toReport source err =
                   \ variable. That variable is what picks the definition at each use site."
               , D.toSimpleNote $
                   "A signature starting with a specific type has nothing to choose between,\
-                  \ so it is really an ordinary definition. Give it a body to define "
-                  ++ Module.prefixToChars qual ++ "." ++ N.toChars name
-                  ++ " for that one type."
+                  \ so it is really an ordinary definition. Drop the `abstract` and give it\
+                  \ a body."
               ]
           )
 
