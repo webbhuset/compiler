@@ -9,6 +9,7 @@ module Reporting.Error.Overload
 import qualified Data.Name as Name
 
 import qualified AST.Canonical as Can
+import qualified AST.Utils.Type as Type
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
 import qualified Reporting.Doc as D
@@ -48,8 +49,14 @@ toReport source localizer err =
             D.stack
               [ D.indent 4 $ RT.canToDoc localizer RT.None dispatched
               , D.reflow $
-                  "Add one in module " ++ homeOf dispatched home ++ ", or in module "
-                  ++ Name.toChars (ModuleName._module home) ++ "."
+                  case homeOf dispatched of
+                    Just typeHome | typeHome /= ModuleName._module home ->
+                      "Add one in module " ++ Name.toChars typeHome ++ ", or in module "
+                      ++ Name.toChars (ModuleName._module home) ++ "."
+
+                    _ ->
+                      "That type belongs to no module of its own, so the definition has to\
+                      \ go in module " ++ Name.toChars (ModuleName._module home) ++ "."
               ]
           )
 
@@ -103,9 +110,8 @@ toQualified home name =
   Name.toChars (ModuleName._module home) ++ "." ++ Name.toChars name
 
 
-homeOf :: Can.Type -> ModuleName.Canonical -> String
-homeOf tipe fallback =
-  case tipe of
-    Can.TType home _ _    -> Name.toChars (ModuleName._module home)
-    Can.TAlias home _ _ _ -> Name.toChars (ModuleName._module home)
-    _                     -> Name.toChars (ModuleName._module fallback)
+homeOf :: Can.Type -> Maybe Name.Name
+homeOf tipe =
+  case Type.iteratedDealias tipe of
+    Can.TType home _ _ -> Just (ModuleName._module home)
+    _                  -> Nothing

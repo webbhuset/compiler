@@ -14,12 +14,13 @@ import qualified Data.Name as Name
 import System.IO.Unsafe (unsafePerformIO)
 
 import qualified AST.Canonical as Can
+import qualified AST.Utils.Type as Type
 import qualified Canonicalize.Overload as Overload
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Overload as Error
 import Type.Type (Variable)
-import qualified Type.Type as Type
+import qualified Type.Type as Solver
 
 
 
@@ -96,7 +97,7 @@ resolveSite home overloads (region, Site needs clauses) =
   do  -- Rendered together so that two of these come out written with the same
       -- type variable name only when they really are the same variable.
       types <-
-        Type.toRelatedTypes $
+        Solver.toRelatedTypes $
           map (\(Need _ var) -> var) needs ++ map snd clauses
 
       let (needTypes, clauseTypes) = splitAt (length needs) types
@@ -131,8 +132,8 @@ resolveAt
   -> Can.OverloadName
   -> Maybe Can.Type
   -> Either (A.Region -> Error.Error) Target
-resolveAt overloads inScope ovName@(ovHome, name) maybeDispatched =
-  case maybeDispatched of
+resolveAt overloads inScope ovName@(ovHome, name) rawDispatched =
+  case Type.iteratedDealias <$> rawDispatched of
     Nothing ->
       Left $ \region -> Error.Ambiguous region ovHome name Nothing
 

@@ -21,7 +21,8 @@ import qualified AST.Source as Src
 import qualified Canonicalize.Environment as Env
 import qualified Canonicalize.Expression as Expr
 import qualified Canonicalize.Pattern as Pattern
-import qualified Canonicalize.Type as Type
+import qualified AST.Utils.Type as Type
+import qualified Canonicalize.Type as CanType
 import qualified Data.Index as Index
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
@@ -88,7 +89,7 @@ addAbstract rawHome env (A.At region (Src.Overload (A.At _ qual) (A.At _ name) s
   else
     do  Src.Signature abstractType srcClauses <- Result.ok srcType
         noClauses region qual name srcClauses
-        annotation@(Can.Forall _ tipe) <- Type.toAnnotation env abstractType
+        annotation@(Can.Forall _ tipe) <- CanType.toAnnotation env abstractType
         case dispatchArgument tipe of
           Just (Can.TVar _) ->
             Result.ok ((Env._home env, name), annotation)
@@ -135,7 +136,7 @@ addToEnv rawHome table env@(Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) =
 
 canonicalizeSignature :: Env.Env -> Src.Signature -> Result i w (Can.Annotation, [Can.Constraint])
 canonicalizeSignature env (Src.Signature srcType srcClauses) =
-  do  annotation@(Can.Forall freeVars _) <- Type.toAnnotation env srcType
+  do  annotation@(Can.Forall freeVars _) <- CanType.toAnnotation env srcType
       clauses <- addClauses env freeVars Map.empty (reverse srcClauses)
       Result.ok (annotation, Map.elems clauses)
 
@@ -157,7 +158,7 @@ addClauses env freeVars seen srcClauses =
           Result.throw (Error.OverloadNotDeclared region qual name)
 
         Just (Env.Overload ovHome abstract) ->
-          do  tipe <- Type.canonicalize env srcType
+          do  tipe <- CanType.canonicalize env srcType
               case dispatchArgument tipe of
                 Just (Can.TVar var) | Map.member var freeVars ->
                   if tipe /= substitute var abstract then
@@ -436,13 +437,15 @@ dispatchArgument tipe =
     _                               -> Nothing
 
 
+-- Aliases are transparent, so dispatch has to see through them. Otherwise
+-- `type alias Name = String` could carry a second definition for String, and
+-- which one ran would depend on how a signature happened to spell the type.
 dispatchKey :: Can.Type -> Maybe Can.OverloadKey
 dispatchKey tipe =
-  case tipe of
-    Can.TType home name _    -> Just (home, name)
-    Can.TAlias home name _ _ -> Just (home, name)
-    Can.TTuple _ _ maybeC    -> Just (tupleKey maybeC)
-    _                        -> Nothing
+  case Type.iteratedDealias tipe of
+    Can.TType home name _ -> Just (home, name)
+    Can.TTuple _ _ maybeC -> Just (tupleKey maybeC)
+    _                     -> Nothing
 
 
 -- A tuple has no name of its own, so it gets one. Its home is elm/core's
