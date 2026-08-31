@@ -475,16 +475,41 @@ optimizePotentialTailCall cycle name args expr =
         optimizeTail cycle name argNames expr
 
 
+-- The overloads were optimized once already, so the callee is taken bare here
+-- rather than through optimize, which would add them a second time.
+callWithDicts :: Cycle -> Can.Expr -> [Opt.Expr] -> [Opt.Expr] -> Names.Tracker Opt.Expr
+callWithDicts cycle func odicts oargs =
+  case A.toValue func of
+    Can.VarConstrained _ home name _ _ ->
+      do  ofunc <- Names.registerGlobal home name
+          pure $ Opt.Call ofunc oargs
+
+    _ ->
+      do  ofunc <- optimize cycle func
+          pure $ Opt.Call ofunc (drop (length odicts) oargs)
+
+
 optimizeTail :: Cycle -> Name.Name -> [Name.Name] -> Can.Expr -> Names.Tracker Opt.Expr
 optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
   case expression of
     Can.Call func args ->
-      do  oargs <- optimizeArgs cycle func args
+      do  -- A constrained function passes its own overloads along, so a self
+          -- call still lines up with the parameter list and stays a tail call.
+          odicts <-
+            case A.toValue func of
+              Can.VarConstrained (Can.Dispatch useHome useRegion _) _ _ _ _ ->
+                traverse fromTarget (Overload.lookupResolved useHome useRegion)
+
+              _ ->
+                pure []
+
+          oargs <- (odicts ++) <$> optimizeArgs cycle func args
 
           let isMatchingName =
                 case A.toValue func of
                   Can.VarLocal      name -> rootName == name
                   Can.VarTopLevel _ name -> rootName == name
+                  Can.VarConstrained _ _ name _ _ -> rootName == name
                   _                      -> False
 
           if isMatchingName
@@ -494,11 +519,9 @@ optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
                   pure $ Opt.TailCall rootName pairs
 
                 Index.LengthMismatch _ _ ->
-                  do  ofunc <- optimize cycle func
-                      pure $ Opt.Call ofunc oargs
+                  callWithDicts cycle func odicts oargs
             else
-              do  ofunc <- optimize cycle func
-                  pure $ Opt.Call ofunc oargs
+              callWithDicts cycle func odicts oargs
 
     Can.If branches finally ->
       let
