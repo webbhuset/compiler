@@ -49,6 +49,7 @@ declaration =
       oneOf E.DeclStart
         [ typeDecl maybeDocs start
         , portDecl maybeDocs
+        , abstractDecl maybeDocs start
         , valueDecl maybeDocs start
         , overloadDecl maybeDocs start
         ]
@@ -121,25 +122,44 @@ overloadDecl maybeDocs start =
             word1 0x3A#Word8 {-:-} E.OverloadColon
             Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentType
             (tipe, afterType) <- specialize E.OverloadType Type.expression
-            (constraints, typeEnd) <- specialize E.OverloadWhere (Where.clauses afterType)
+            (constraints, _) <- specialize E.OverloadWhere (Where.clauses afterType)
             let signature = Src.Signature tipe constraints
-            oneOfWithFallback
-              [ do  bodyName <-
-                      backtrack $
-                        do  Space.checkFreshLine E.OverloadIndentBody
-                            defName <- addLocation (Var.foreignAlpha E.OverloadBodyName)
-                            n <- matchOverloadName qual name defName
-                            Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
-                            notColon
-                            return n
+            Space.checkFreshLine E.OverloadIndentBody
+            defName <- addLocation (Var.foreignAlpha E.OverloadBodyName)
+            bodyName <- matchOverloadName qual name defName
+            Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentBody
+            ((args, body), end) <- chompOverloadBody []
+            let ov = Src.DefineFor qual bodyName signature args body
+            return (Overload maybeDocs (A.at start end ov), end)
 
-                    ((args, body), end) <- chompOverloadBody []
-                    let ov = Src.Overload qual bodyName signature (Just (args, body))
-                    return (Overload maybeDocs (A.at start end ov), end)
-              ]
-              ( Overload maybeDocs (A.at start typeEnd (Src.Overload qual name signature Nothing))
-              , typeEnd
-              )
+
+
+-- ABSTRACT DECLARATIONS
+--
+--     abstract compare : a -> a -> Order
+--
+-- Declares a name this module owns for other modules to define. `abstract` is
+-- contextual like `port`, so a value of that name still works: the lookahead
+-- backs out unless a lower case name and a colon follow.
+
+
+{-# INLINE abstractDecl #-}
+abstractDecl :: Maybe Src.Comment -> A.Position -> Space.Parser E.Decl Decl
+abstractDecl maybeDocs start =
+  do  name <-
+        backtrack $
+          do  Keyword.abstract_ E.DeclStart
+              Space.chompAndCheckIndent E.DeclAbstractSpace E.DeclAbstractIndentName
+              abstractName <- addLocation (Var.lower E.DeclAbstractName)
+              Space.chompAndCheckIndent E.DeclAbstractSpace E.DeclAbstractIndentColon
+              word1 0x3A#Word8 {-:-} E.DeclAbstractColon
+              return abstractName
+
+      specialize (E.DeclAbstract (A.toValue name)) $
+        do  Space.chompAndCheckIndent E.AbstractSpace E.AbstractIndentType
+            (tipe, end) <- specialize E.AbstractType Type.expression
+            let ov = Src.Abstract name (Src.Signature tipe [])
+            return (Overload maybeDocs (A.at start end ov), end)
 
 
 -- Only `Module.name` counts; a bare name is an ordinary definition and an
@@ -154,22 +174,8 @@ toOverloadName (A.At region expr) =
       P.Parser $ \_ (P.State _ _ _ cur) _ _ _ eerr -> eerr cur E.DeclStart
 
 
--- The line after a signature only belongs to it if it repeats the same
--- qualified name. Anything else is the next declaration, and failing here
--- without committing is what lets the signature stand on its own as an
--- abstract declaration.
--- The same name again followed by a colon is the next declaration, not this
--- one's body: an abstract declaration and a definition of it can sit next to
--- each other in the module that owns the name.
-notColon :: Parser E.Overload ()
-notColon =
-  P.Parser $ \_ state@(P.State pos end _ cur) _ eok _ eerr ->
-    if ltAddr pos end && eqIndex pos 0# 0x3A#Word8 {-:-} then
-      eerr cur E.OverloadBodyName
-    else
-      eok () state
-
-
+-- A definition repeats its qualified name before the body, so this checks that
+-- the repeat matches rather than silently accepting any name.
 matchOverloadName :: A.Located Name.Name -> A.Located Name.Name -> A.Located Src.Expr_ -> Parser E.Overload (A.Located Name.Name)
 matchOverloadName (A.At _ qual) (A.At _ name) (A.At region expr) =
   case expr of

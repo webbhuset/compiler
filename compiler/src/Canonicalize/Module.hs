@@ -50,7 +50,7 @@ canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ ov
 
       (env0, cunions, caliases, ctags) <- Local.add modul importEnv
 
-      (env1, localAbstracts) <- Overload.addAbstracts rawHome overloads env0
+      (env1, localAbstracts) <- Overload.addAbstracts overloads env0
       (env, localConstrained) <- Overload.addConstrained env1 values
 
       (instanceDefs, coverloads) <-

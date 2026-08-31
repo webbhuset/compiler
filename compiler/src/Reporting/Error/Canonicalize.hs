@@ -62,7 +62,6 @@ data Error
   | WhereWrongType A.Region Name.Name Name.Name Name.Name Can.Type
   | WhereNotDispatching A.Region Name.Name Name.Name [Name.Name]
   | WhereDuplicate A.Region Name.Name Name.Name Name.Name
-  | OverloadForeignAbstract A.Region Name.Name Name.Name Name.Name
   | OverloadAbstractNotDispatching A.Region Name.Name Name.Name
   | OverloadInstanceNotDispatching A.Region Name.Name Name.Name
   | OverloadNotOwned A.Region Name.Name Name.Name ModuleName.Canonical ModuleName.Canonical
@@ -396,23 +395,8 @@ toReport source err =
               ++ Name.toChars name ++ " : ...` on its own first, and you need to import it."
           )
 
-    OverloadForeignAbstract region qual name home ->
-      Report.Report "MISPLACED OVERLOAD" region [] $
-        Code.toSnippet source region Nothing
-          (
-            D.reflow $
-              "This declares `" ++ Name.toChars qual ++ "." ++ Name.toChars name
-              ++ "` abstract, but we are in module " ++ Name.toChars home ++ ":"
-          ,
-            D.reflow $
-              "A name can only be declared abstract by the module that owns it, so this\
-              \ line belongs in " ++ Name.toChars qual ++ ". If you meant to define "
-              ++ Name.toChars qual ++ "." ++ Name.toChars name
-              ++ " for one particular type, give it a body."
-          )
-
     OverloadAbstractNotDispatching region qual name ->
-      Report.Report "BAD OVERLOAD SIGNATURE" region [] $
+      Report.Report "BAD ABSTRACT DECLARATION" region [] $
         Code.toSnippet source region Nothing
           (
             D.reflow $
@@ -425,9 +409,8 @@ toReport source err =
                   \ variable. That variable is what picks the definition at each use site."
               , D.toSimpleNote $
                   "A signature starting with a specific type has nothing to choose between,\
-                  \ so it is really an ordinary definition. Give it a body to define "
-                  ++ Name.toChars qual ++ "." ++ Name.toChars name
-                  ++ " for that one type."
+                  \ so it is really an ordinary definition. Drop the `abstract` and give it\
+                  \ a body."
               ]
           )
 
