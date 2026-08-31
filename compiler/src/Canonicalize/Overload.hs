@@ -6,6 +6,7 @@ module Canonicalize.Overload
   , canonicalizeSignature
   , dictName
   , dispatchVar
+  , dispatchKey
   , abstractVar
   , substitute
   )
@@ -453,4 +454,14 @@ dispatchKey tipe =
   case tipe of
     Can.TType home name _    -> Just (home, name)
     Can.TAlias home name _ _ -> Just (home, name)
+    Can.TPair _ _            -> Just (tupleKey "Tuple2")
+    Can.TTriple _ _ _        -> Just (tupleKey "Tuple3")
     _                        -> Nothing
+
+
+-- A tuple has no name of its own, so it gets one. Its home is elm/core's
+-- Tuple, which means only the module that declares the overload can define
+-- for it: a tuple is structural and belongs to nobody else.
+tupleKey :: [Char] -> Can.OverloadKey
+tupleKey name =
+  ( ModuleName.tuple, T.nameFromString (S.fromChars name) )
