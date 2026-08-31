@@ -164,11 +164,71 @@ have no home module, so there is nothing for the rule to bite on and they
 cannot have definitions.
 
 
+## `where` clauses
+
+A function that uses an overload on one of its own type variables says so,
+because otherwise its signature would be a lie — it does not really work for
+every `a`:
+
+```elm
+smallest : a -> a -> Ordering
+    where Ord.compare : a -> a -> Ordering
+smallest x y =
+    Ord.compare x y
+```
+
+The clause is a signature, which is a concept the language already has. It says
+nothing new about `Ord.compare`: the type has to be exactly the abstract
+signature with its own variable replaced by the one you need it at, and the
+compiler checks that. Several clauses stack, one `where` line each.
+
+A definition can have them too, which is how an overload is given for a
+container:
+
+```elm
+Ord.compare : List a -> List a -> Ordering
+    where Ord.compare : a -> a -> Ordering
+Ord.compare xs ys =
+    case ( xs, ys ) of
+        ( [], [] ) -> Same
+        ( [], _ ) -> Less
+        ( _, [] ) -> More
+        ( x :: xrest, y :: yrest ) ->
+            case Ord.compare x y of
+                Same -> Ord.compare xrest yrest
+                other -> other
+```
+
+Then `Ord.compare [ [ card ] ] [ [ card ] ]` works: the use resolves to the
+`List` definition, which needs `Ord.compare` at `List Card`, which resolves to
+the `List` definition again, which needs it at `Card`.
+
+Nothing about this is visible in the type. `smallest` is a two argument
+function, `List.sort` would be a one argument function, and a `where` clause
+neither adds a parameter you can see nor changes what the value can be passed
+to.
+
+
 ## What resolves and what does not
 
 Resolution happens after type inference, so the compiler dispatches on the type
-the solver actually settled on. Where that type is still open, the use site is
-an error:
+the solver actually settled on. Where that type is a variable with no clause
+for it, the error is the line to add:
+
+```
+-- MISSING WHERE CLAUSE -------------------------------------------------------
+
+This needs Ord.compare on `a`, which could be any type:
+
+22|     Ord.compare x x
+        ^^^^^^^^^^^
+So the signature above has to say that it needs it, by adding this line under
+it:
+
+    where Ord.compare : a -> a -> Ord.Ordering
+```
+
+Where the type is still open, the use site is an error too:
 
 ```elm
 Ord.compare 7 7
@@ -201,19 +261,8 @@ seven =
 Ord.compare seven seven            --> Ord.Same
 ```
 
-The same applies inside a polymorphic function. This does not compile, because
-`a` is not a type:
-
-```elm
-sort : List a -> List a            -- cannot use Ord.compare
-```
-
-Writing the constraint down — `where Ord.compare : a -> a -> Ordering` — is how
-that will be expressed, and is not implemented yet. Until then, an overloaded
-name is only usable where the dispatch type is concrete.
-
-When the type is concrete but has no definition, the error says which signature
-to write and where:
+When the type is concrete but has no definition, the error says where to put
+one:
 
 ```
 -- NO DEFINITION --------------------------------------------------------------
@@ -222,28 +271,37 @@ There is no definition of Ord.compare for this type:
 
 12|         out (Debug.toString (Ord.compare 1.5 2.5))
                                  ^^^^^^^^^^^
-Using it here needs one with this signature:
+    Float
 
-    Ord.compare : Float -> Float -> Ord.Ordering
-
-Add it to module Basics, or to module Ord.
+Add one in module Basics, or in module Ord.
 ```
 
 
 ## How it compiles
 
-There is no dictionary and no runtime dispatch. Each use site is rewritten to a
-direct call to one definition, so an overloaded call costs exactly what the
-equivalent hand-written call costs, and unused definitions are dead code like
-any other.
+Where the type is known, there is no dictionary and no runtime dispatch: the
+use site becomes a direct call to one definition, so it costs exactly what the
+equivalent hand-written call costs.
 
-A definition becomes an ordinary top-level value in its module under a mangled
-name, plus an entry in that module's overload table recording which type it is
-for. The table travels in the module's interface, and each interface carries
-the union of its imports' tables, so a table is complete for everything its
-module can reach. Ownership is what makes that enough: a use site that
-dispatches `Ord.compare` at `Card` necessarily depends on both `Ord` and
-`Card`, and the definition lives in one of them.
+A `where` clause becomes one hidden leading parameter, and a reference to a
+constrained value is applied to whatever its caller resolved. `smallest` above
+compiles to a three argument function, and `smallest x y` at `Card` compiles to
+`smallest(compareCard, x, y)`. Passing the argument is the only cost, and it is
+paid only where a type variable made the choice genuinely late; a call at a
+known type still resolves to a definition, and a chain of them is built once at
+the outermost call rather than looked up as the program runs.
+
+Definitions become ordinary top-level values in their module under mangled
+names, plus an entry in that module's overload table recording which type each
+one is for and what it needs in turn. The table travels in the module's
+interface, and each interface carries the union of its imports' tables, so a
+table is complete for everything its module can reach. Ownership is what makes
+that enough: a use site that dispatches `Ord.compare` at `Card` necessarily
+depends on both `Ord` and `Card`, and the definition lives in one of them.
+
+Unused definitions are dead code like any other, though a definition reached
+only through a `where` parameter is kept whenever the function that takes it
+is.
 
 Because interfaces changed shape, `elm-stuff` and `~/.elm` from an earlier
 build have to be removed.
@@ -251,16 +309,20 @@ build have to be removed.
 
 ## Relationship to `comparable`
 
-`comparable`, `number`, `appendable` and `compappend` are untouched. The
-long-term plan is for them to become ordinary abstract names with ordinary
-definitions, replacing a hard-coded lattice with something extensible, but that
-needs `where` clauses first — `List.sort` cannot be written without them.
+`comparable`, `number`, `appendable` and `compappend` are untouched. They could
+now become ordinary abstract names with ordinary definitions, replacing a
+hard-coded lattice with something extensible, but that is a change to elm/core
+rather than to the compiler and has not been made.
 
 
 ## Current limits
 
-- **No `where` clauses.** An overloaded name can only be used where the
-  dispatch type is concrete. This is the main thing missing.
+- **Top level definitions only.** A `let` definition cannot have `where`
+  clauses, because it would have to take them as extra arguments and nothing
+  passes them. Move it out, or use the overload at a specific type.
+- **Clauses are not inferred.** The compiler prints the clause you need, but
+  will not add it for you, and a definition with no annotation cannot use an
+  overload on a type variable at all.
 - **Dispatch on the first argument only.** Return-type dispatch
   (`Decode.decode : Json -> Result Error a`) is not supported.
 - **Ground kinds only.** An abstract name dispatches on a type, not on a type
@@ -268,7 +330,7 @@ needs `where` clauses first — `List.sort` cannot be written without them.
   `Task.map` and `Result.map` stay separate names.
 - **No bundling.** You cannot require that `compare`, `min` and `max` are all
   defined together. In practice most of a class's methods are derivable from
-  one primitive, and those become ordinary constrained functions once `where`
-  clauses exist.
-- **Not documented in package docs.** Abstract declarations and definitions do
-  not appear in generated documentation.
+  one primitive, and those are ordinary functions with a `where` clause.
+- **Not documented in package docs.** Abstract declarations, definitions and
+  `where` clauses do not appear in generated documentation, so a constrained
+  value's published type does not yet say what it needs.
