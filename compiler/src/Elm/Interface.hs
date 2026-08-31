@@ -483,16 +483,38 @@ dTagDecl =
 
 
 eOverloads :: Can.Overloads -> E.Builder
-eOverloads (Can.Overloads abstracts instances) =
+eOverloads (Can.Overloads abstracts instances constrained) =
   E.dict32 eOverloadName eAnnotation abstracts
-  <> E.dict32 eOverloadName (E.dict32 eOverloadKey eOverloadName) instances
+  <> E.dict32 eOverloadName (E.dict32 eOverloadKey eInstance) instances
+  <> E.dict32 eOverloadName (E.list32 eConstraint) constrained
 
 
 dOverloads :: D.Decoder Can.Overloads
 dOverloads =
-  liftM2 Can.Overloads
+  liftM3 Can.Overloads
     (D.dict32 dOverloadName dAnnotation)
-    (D.dict32 dOverloadName (D.dict32 dOverloadKey dOverloadName))
+    (D.dict32 dOverloadName (D.dict32 dOverloadKey dInstance))
+    (D.dict32 dOverloadName (D.list32 dConstraint))
+
+
+eInstance :: Can.Instance -> E.Builder
+eInstance (Can.Instance name tipe) =
+  eOverloadName name <> eType tipe
+
+
+dInstance :: D.Decoder Can.Instance
+dInstance =
+  liftM2 Can.Instance dOverloadName dType
+
+
+eConstraint :: Can.Constraint -> E.Builder
+eConstraint (Can.Constraint name tipe) =
+  eOverloadName name <> eType tipe
+
+
+dConstraint :: D.Decoder Can.Constraint
+dConstraint =
+  liftM2 Can.Constraint dOverloadName dType
 
 
 eOverloadName :: Can.OverloadName -> E.Builder

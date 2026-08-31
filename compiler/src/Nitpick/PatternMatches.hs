@@ -207,7 +207,8 @@ checkExpr (A.At region expression) errors =
     Can.VarLocal _          -> errors
     Can.VarTopLevel _ _     -> errors
     Can.VarKernel _ _       -> errors
-    Can.VarOverload _ _ _ _ -> errors
+    Can.VarOverload _ _ _   -> errors
+    Can.VarConstrained _ _ _ _ _ -> errors
     Can.VarForeign _ _ _    -> errors
     Can.VarCtor _ _ _ _ _   -> errors
     Can.VarTag _ _ _        -> errors

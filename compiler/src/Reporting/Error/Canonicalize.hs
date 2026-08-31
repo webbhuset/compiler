@@ -33,6 +33,7 @@ import qualified Reporting.Doc as D
 import Reporting.Doc (Doc, (<+>))
 import qualified Reporting.Render.Code as Code
 import qualified Reporting.Render.Type as RT
+import qualified Reporting.Render.Type.Localizer as L
 import qualified Reporting.Report as Report
 import qualified Reporting.Suggest as Suggest
 
@@ -62,7 +63,11 @@ data Error
   | TagRowDuplicate A.Region N.Name
   | TagPatternNesting A.Region N.Name
   | OverloadNotDeclared A.Region Module.Prefix N.Name
-  | WhereNotImplemented A.Region Module.Prefix N.Name
+  | WhereOnLetDef A.Region Module.Prefix N.Name
+  | WhereOnAbstract A.Region Module.Prefix N.Name
+  | WhereWrongType A.Region Module.Prefix N.Name T.Var Can.Type
+  | WhereNotDispatching A.Region Module.Prefix N.Name [T.Var]
+  | WhereDuplicate A.Region Module.Prefix N.Name T.Var
   | OverloadForeignAbstract A.Region Module.Prefix N.Name Module.Name
   | OverloadAbstractNotDispatching A.Region Module.Prefix N.Name
   | OverloadInstanceNotDispatching A.Region Module.Prefix N.Name
@@ -237,17 +242,86 @@ toReport source err =
               "Remove one of them, each tag can only appear once in a variant type."
           )
 
-    WhereNotImplemented region qual name ->
-      Report.Report "WHERE CLAUSES ARE NOT READY" region [] $
+    WhereOnAbstract region qual name ->
+      Report.Report "WHERE CLAUSE ON A DECLARATION" region [] $
         Code.toSnippet source region Nothing
           (
             D.reflow $
-              "This signature says it needs `" ++ Module.prefixToChars qual ++ "."
-              ++ N.toChars name ++ "`, which this compiler parses but cannot compile yet:"
+              "This declares `" ++ Module.prefixToChars qual ++ "." ++ N.toChars name
+              ++ "` abstract, so it cannot ask for anything itself:"
           ,
             D.reflow $
-              "An overloaded name can only be used where the type it dispatches on is a\
-              \ specific type, so for now it cannot be used on a type variable at all."
+              "An abstract declaration is the signature other definitions have to match,\
+              \ and what other `where` clauses point at. Only a definition with a body\
+              \ can need overloads of its own."
+          )
+
+    WhereOnLetDef region qual name ->
+      Report.Report "WHERE CLAUSE IN A LET" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This `let` definition says it needs `" ++ Module.prefixToChars qual ++ "."
+              ++ N.toChars name ++ "`, which only a top level definition can do yet:"
+          ,
+            D.reflow $
+              "Move it out to the top level of the module, or use the overload on a\
+              \ specific type here rather than on a type variable."
+          )
+
+    WhereWrongType region qual name var expected ->
+      Report.Report "BAD WHERE CLAUSE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This is not the type `" ++ Module.prefixToChars qual ++ "." ++ N.toChars name
+              ++ "` has at `" ++ T.varToChars var ++ "`:"
+          ,
+            D.stack
+              [ D.reflow "It has to be written exactly like this:"
+              , D.indent 4 $ D.hang 4 $ D.sep $
+                  [ D.dullyellow (D.fromChars (Module.prefixToChars qual ++ "." ++ N.toChars name)), ":" ]
+                  ++ [ RT.canToDoc L.empty RT.None expected ]
+              , D.reflow $
+                  "A clause only says which type variable the overload is needed at, so\
+                  \ everything else about it comes from where it was declared."
+              ]
+          )
+
+    WhereNotDispatching region qual name freeVars ->
+      Report.Report "BAD WHERE CLAUSE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "I do not know which type variable `" ++ Module.prefixToChars qual ++ "."
+              ++ N.toChars name ++ "` is needed at here:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "The first argument says that, so it has to be one of the type variables\
+                  \ in the signature above."
+              , case freeVars of
+                  [] ->
+                    D.reflow $
+                      "That signature has no type variables, so it has nothing to need an\
+                      \ overload for. Call the definition you want directly instead."
+
+                  _ ->
+                    D.fillSep $
+                      ["The","ones","it","has","are"]
+                      ++ D.commaSep "and" D.dullyellow (map D.fromVar freeVars)
+              ]
+          )
+
+    WhereDuplicate region qual name var ->
+      Report.Report "DUPLICATE WHERE CLAUSE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This signature already says it needs `" ++ Module.prefixToChars qual ++ "."
+              ++ N.toChars name ++ "` at `" ++ T.varToChars var ++ "`:"
+          ,
+            D.reflow "Saying it twice does not ask for anything more. Remove one of them."
           )
 
     OverloadNotDeclared region qual name ->
