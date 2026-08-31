@@ -177,7 +177,10 @@ toDocs comment decls0 =
             Decl.Union c (A.At _ (Src.Union n _ _  )) -> go overview ds vs (cons c n ts)
             Decl.Alias c (A.At _ (Src.Alias n _ _  )) -> go overview ds vs (cons c n ts)
             Decl.TagDecl c (A.At _ (Src.TagDecl n _)) -> go overview ds (cons c n vs) ts
-            Decl.Overload c (A.At _ (Src.Overload _ n _ _)) -> go overview ds (cons c n vs) ts
+            -- Overloads are not documented yet, and their bare name can collide
+            -- with an ordinary value's, so their comments are dropped rather than
+            -- attached to the wrong entry.
+            Decl.Overload _ _ -> go overview ds vs ts
 
     cons maybeComment (A.At _ n) comments =
       case maybeComment of
