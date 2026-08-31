@@ -422,10 +422,15 @@ toReport source err =
               "I do not know which type this definition of `" ++ Name.toChars qual ++ "."
               ++ Name.toChars name ++ "` is for:"
           ,
-            D.reflow $
-              "The first argument decides that, so it has to be a named type like `Card`\
-              \ or `List a`, or a tuple. A type variable or a record has no name to look\
-              \ up."
+            D.stack
+              [ D.reflow $
+                  "The first argument decides that, so it has to be a named type like\
+                  \ `Card` or `List a`, a tuple, or a closed row carrying one tag."
+              , D.toSimpleNote $
+                  "A type variable and a record have no name to look up. A row carrying\
+                  \ several tags has no single one, and an open row could carry tags it\
+                  \ does not mention, so neither of those names one type either."
+              ]
           )
 
     OverloadNotOwned region qual name nameHome typeHome ->

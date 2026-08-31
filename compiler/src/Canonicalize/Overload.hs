@@ -445,9 +445,24 @@ dispatchArgument tipe =
 dispatchKey :: Can.Type -> Maybe Can.OverloadKey
 dispatchKey tipe =
   case Type.iteratedDealias tipe of
-    Can.TType home name _ -> Just (home, name)
-    Can.TTuple _ _ maybeC -> Just (tupleKey maybeC)
-    _                     -> Nothing
+    Can.TType home name _ ->
+      Just (home, name)
+
+    Can.TTuple _ _ maybeC ->
+      Just (tupleKey maybeC)
+
+    -- A tag is canonical: its identity is the module that declares it plus its
+    -- name, which is already what a dispatch key is. So a row carrying exactly
+    -- one, closed so nothing else can turn up in it, names one type. A wider
+    -- row has no single tag, and an open one could carry tags it does not
+    -- mention.
+    Can.TTagRow tags Nothing ->
+      case Map.keys tags of
+        [key] -> Just key
+        _     -> Nothing
+
+    _ ->
+      Nothing
 
 
 -- A tuple has no name of its own, so it gets one. Its home is elm/core's

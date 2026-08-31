@@ -88,8 +88,9 @@ Ord.compare (Card a) (Card b) =
     ...
 ```
 
-Its first argument names the type it is for. That has to be a named type or a
-tuple; a type variable or a record has no name to dispatch on.
+Its first argument names the type it is for. That has to be a named type, a
+tuple, or a closed row carrying one tag; a type variable or a record has no
+name to dispatch on.
 
 Definitions can use the overload themselves, including on their own type:
 
@@ -166,6 +167,35 @@ have no home module, so there is nothing for the rule to bite on and they
 cannot have definitions. Tuples are the one structural exception: they are
 treated as belonging to `Tuple`, so only the module that declares the name can
 define for them, which is the same answer the rule would give.
+
+Structural variant tags are not really an exception, because a tag is
+canonical: its identity is the module that declares it plus its name, which is
+already what a dispatch key is. So a closed row carrying one tag names a type
+that a module owns, and can carry a definition:
+
+```elm
+module Overload.Vec3 exposing (..)
+
+import Overload.Math as Math
+
+
+type tag V3 a b c
+
+
+type alias Vec3 a =
+    [ V3 a a a ]
+
+
+Math.add : Vec3 a -> Vec3 a -> Vec3 a
+    where Math.add : a -> a -> a
+Math.add (V3 x1 y1 z1) (V3 x2 y2 z2) =
+    V3 (Math.add x1 x2) (Math.add y1 y2) (Math.add z1 z2)
+```
+
+Only `Overload.Vec3` can define it, since that is where `V3` is declared, and
+the alias makes no difference either way. A row carrying several tags has no
+single one to key on, and an open row could carry tags it does not mention, so
+neither of those can be dispatched on.
 
 A type alias is not a type, so it cannot own anything either. Dispatch sees
 through aliases, which means
