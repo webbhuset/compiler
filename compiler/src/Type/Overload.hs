@@ -220,6 +220,10 @@ match declared actual subst =
     (Can.TLambda a1 b1, Can.TLambda a2 b2) ->
       match a1 a2 (match b1 b2 subst)
 
+    (Can.TTagRow tags1 _, Can.TTagRow tags2 _) ->
+      foldr (uncurry match) subst $
+        concat (Map.elems (Map.intersectionWith zip tags1 tags2))
+
     (Can.TPair a1 b1, Can.TPair a2 b2) ->
       match a1 a2 (match b1 b2 subst)
 

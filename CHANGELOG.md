@@ -430,8 +430,10 @@ Ord.compare (Card a) (Card b) =
   operator. `<` and friends still belong to `Basics`, which every module
   imports openly, so only elm/core can give those a new meaning.
 - A definition can be for a tuple, which is what `comparable` covers that
-  a named type does not. Dispatch sees through type aliases, so
-  `type alias Name = String` cannot carry a second definition for String. `comparable` itself cannot be a definition: it is
+  a named type does not, or for a closed row carrying one structural
+  variant tag, since a tag's identity is already its module plus its name.
+  Dispatch sees through type aliases, so `type alias Name = String` cannot
+  carry a second definition for String. `comparable` itself cannot be a definition: it is
   a type variable, so it would be a default overlapping every real one.
 - An overload used on a type variable with no clause for it reports the
   exact line to add. Clauses are not inferred, only suggested, and a `let`
