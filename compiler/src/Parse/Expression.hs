@@ -19,6 +19,7 @@ import qualified Parse.Symbol as Symbol
 import qualified Parse.Type as Type
 import qualified Parse.String as String
 import qualified Parse.Variable as Var
+import qualified Parse.Where as Where
 import Parse.Primitives hiding (State)
 import qualified Parse.Primitives as P
 import qualified Reporting.Annotation as A
@@ -559,17 +560,19 @@ definition =
               [
                 do  word1 0x3A#Word8 {-:-} E.DefEquals
                     Space.chompAndCheckIndent E.DefSpace E.DefIndentType
-                    (tipe, _) <- specialize E.DefType Type.expression
+                    (tipe, typeEnd) <- specialize E.DefType Type.expression
+                    (constraints, _) <- specialize E.DefWhere (Where.clauses typeEnd)
+                    let signature = Src.Signature tipe constraints
                     Space.checkAligned E.DefAlignment
                     defName <- chompMatchingName name
                     Space.chompAndCheckIndent E.DefSpace E.DefIndentEquals
-                    chompDefArgsAndBody start defName (Just tipe) []
+                    chompDefArgsAndBody start defName (Just signature) []
               ,
                 chompDefArgsAndBody start aname Nothing []
               ]
 
 
-chompDefArgsAndBody :: A.Position -> A.Located Name.Name -> Maybe Src.Type -> [Src.Pattern] -> Space.Parser E.Def (A.Located Src.Def)
+chompDefArgsAndBody :: A.Position -> A.Located Name.Name -> Maybe Src.Signature -> [Src.Pattern] -> Space.Parser E.Def (A.Located Src.Def)
 chompDefArgsAndBody start name tipe revArgs =
   oneOf E.DefEquals
     [ do  arg <- specialize E.DefArg Pattern.term

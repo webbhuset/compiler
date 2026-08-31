@@ -188,6 +188,7 @@ executable elm
         Parse.Symbol
         Parse.Type
         Parse.Variable
+        Parse.Where
         Parse.Primitives
         Reporting.Annotation
         Reporting.Doc

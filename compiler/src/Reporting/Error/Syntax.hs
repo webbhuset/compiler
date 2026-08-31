@@ -9,6 +9,7 @@ module Reporting.Error.Syntax
   , Decl(..)
   , DeclType(..)
   , Overload(..)
+  , Where(..)
   , TypeAlias(..)
   , CustomType(..)
   , DeclDef(..)
@@ -163,6 +164,7 @@ data DeclDef
   | DeclDefBody Expr Cursor
   | DeclDefNameRepeat Cursor
   | DeclDefNameMatch Name.Name Cursor
+  | DeclDefWhere Where Cursor
   --
   | DeclDefIndentType Cursor
   | DeclDefIndentEquals Cursor
@@ -191,10 +193,28 @@ data Overload
   | OverloadColon Cursor
   | OverloadEquals Cursor
   | OverloadBodyName Cursor
+  | OverloadWhere Where Cursor
   --
   | OverloadIndentColon Cursor
   | OverloadIndentType Cursor
   | OverloadIndentBody Cursor
+
+
+-- WHERE CLAUSES
+--
+--     sort : List a -> List a
+--         where Ord.compare : a -> a -> Ordering
+--
+data Where
+  = WhereSpace Space Cursor
+  | WhereName Cursor
+  | WhereColon Cursor
+  | WhereType Name.Name Type Cursor
+  --
+  | WhereIndentWhere Cursor
+  | WhereIndentName Cursor
+  | WhereIndentColon Cursor
+  | WhereIndentType Cursor
 
 
 data DeclType
@@ -369,6 +389,7 @@ data Def
   | DefArg Pattern Cursor
   | DefEquals Cursor
   | DefBody Expr Cursor
+  | DefWhere Where Cursor
   | DefIndentEquals Cursor
   | DefIndentType Cursor
   | DefIndentBody Cursor
@@ -1960,6 +1981,9 @@ toDeclTagReport source tag startCur =
 toOverloadReport :: Code.Source -> Name.Name -> Overload -> Cursor -> Report.Report
 toOverloadReport source name overload startCur =
   case overload of
+    OverloadWhere whereClause _ ->
+      toWhereReport source whereClause
+
     OverloadSpace space cur ->
       toSpaceReport source space cur
 
@@ -1996,6 +2020,61 @@ toOverloadReport source name overload startCur =
     OverloadIndentBody cur ->
       toOverloadStuck source cur
         "I was expecting the body of this overload."
+
+
+toWhereReport :: Code.Source -> Where -> Report.Report
+toWhereReport source whereClause =
+  case whereClause of
+    WhereSpace space cur ->
+      toSpaceReport source space cur
+
+    WhereType name tipe cur ->
+      toTypeReport source (TC_Annotation name) tipe cur
+
+    WhereName cur ->
+      toWhereStuck source cur
+        "I was expecting the qualified name of an overload, like `Ord.compare`."
+
+    WhereColon cur ->
+      toWhereStuck source cur
+        "I was expecting a colon and then the type this signature needs that overload at."
+
+    WhereIndentWhere cur ->
+      toWhereStuck source cur
+        "I was expecting the word `where`."
+
+    WhereIndentName cur ->
+      toWhereStuck source cur
+        "I was expecting the qualified name of an overload next, like `Ord.compare`."
+
+    WhereIndentColon cur ->
+      toWhereStuck source cur
+        "I was expecting a colon next."
+
+    WhereIndentType cur ->
+      toWhereStuck source cur
+        "I was expecting the type this signature needs that overload at."
+
+
+toWhereStuck :: Code.Source -> Cursor -> [Char.Char] -> Report.Report
+toWhereStuck source cur message =
+  let region = toRegion cur in
+  Report.Report "UNFINISHED WHERE CLAUSE" region [] $
+    Code.toSnippet source region Nothing
+      (
+        D.reflow "I am partway through a `where` clause, but I got stuck here:"
+      ,
+        D.stack
+          [ D.reflow message
+          , D.reflow $
+              "A `where` clause says which overloads a signature needs, so that it can\
+              \ use them on a type variable:"
+          , D.indent 4 $ D.vcat
+              [ D.dullyellow "sort : List a -> List a"
+              , D.dullyellow "    where Ord.compare : a -> a -> Ordering"
+              ]
+          ]
+      )
 
 
 toOverloadStuck :: Code.Source -> Cursor -> [Char.Char] -> Report.Report
@@ -2414,6 +2493,9 @@ customTypeNote =
 toDeclDefReport :: Code.Source -> Name.Name -> DeclDef -> Cursor -> Report.Report
 toDeclDefReport source name declDef startCur =
   case declDef of
+    DeclDefWhere whereClause _ ->
+      toWhereReport source whereClause
+
     DeclDefSpace space cur ->
       toSpaceReport source space cur
 
@@ -3573,6 +3655,9 @@ toUnfinishLetReport source cur startCur message =
 toLetDefReport :: Code.Source -> Name.Name -> Def -> Cursor -> Report.Report
 toLetDefReport source name def startCur =
   case def of
+    DefWhere whereClause _ ->
+      toWhereReport source whereClause
+
     DefSpace space cur ->
       toSpaceReport source space cur
 

@@ -22,6 +22,7 @@ import qualified Parse.Space as Space
 import qualified Parse.Symbol as Symbol
 import qualified Parse.Type as Type
 import qualified Parse.Variable as Var
+import qualified Parse.Where as Where
 import Parse.Primitives hiding (State)
 import qualified Parse.Primitives as P
 import qualified Reporting.Annotation as A
@@ -83,11 +84,13 @@ valueDecl maybeDocs start =
               [
                 do  word1 0x3A#Word8 {-:-} E.DeclDefEquals
                     Space.chompAndCheckIndent E.DeclDefSpace E.DeclDefIndentType
-                    (tipe, _) <- specialize E.DeclDefType Type.expression
+                    (tipe, typeEnd) <- specialize E.DeclDefType Type.expression
+                    (constraints, _) <- specialize E.DeclDefWhere (Where.clauses typeEnd)
+                    let signature = Src.Signature tipe constraints
                     Space.checkFreshLine E.DeclDefNameRepeat
                     defName <- chompMatchingName name
                     Space.chompAndCheckIndent E.DeclDefSpace E.DeclDefIndentEquals
-                    chompDefArgsAndBody maybeDocs start defName (Just tipe) []
+                    chompDefArgsAndBody maybeDocs start defName (Just signature) []
               ,
                 chompDefArgsAndBody maybeDocs start (A.at start end name) Nothing []
               ]
@@ -117,7 +120,9 @@ overloadDecl maybeDocs start =
         do  Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentColon
             word1 0x3A#Word8 {-:-} E.OverloadColon
             Space.chompAndCheckIndent E.OverloadSpace E.OverloadIndentType
-            (tipe, typeEnd) <- specialize E.OverloadType Type.expression
+            (tipe, afterType) <- specialize E.OverloadType Type.expression
+            (constraints, typeEnd) <- specialize E.OverloadWhere (Where.clauses afterType)
+            let signature = Src.Signature tipe constraints
             oneOfWithFallback
               [ do  bodyName <-
                       backtrack $
@@ -129,10 +134,10 @@ overloadDecl maybeDocs start =
                             return n
 
                     ((args, body), end) <- chompOverloadBody []
-                    let ov = Src.Overload qual bodyName tipe (Just (args, body))
+                    let ov = Src.Overload qual bodyName signature (Just (args, body))
                     return (Overload maybeDocs (A.at start end ov), end)
               ]
-              ( Overload maybeDocs (A.at start typeEnd (Src.Overload qual name tipe Nothing))
+              ( Overload maybeDocs (A.at start typeEnd (Src.Overload qual name signature Nothing))
               , typeEnd
               )
 
@@ -153,15 +158,6 @@ toOverloadName (A.At region expr) =
 -- qualified name. Anything else is the next declaration, and failing here
 -- without committing is what lets the signature stand on its own as an
 -- abstract declaration.
--- Deciding whether a signature has a body means reading past the end of the
--- signature, so the lookahead has to be undoable: without this a failure part
--- way through would be a syntax error instead of "there is no body here".
-backtrack :: Parser x a -> Parser x a
-backtrack (Parser parser) =
-  P.Parser $ \fpc state@(P.State _ _ _ start) cok eok _ eerr ->
-    parser fpc state cok eok (\_ toError -> eerr start toError) eerr
-
-
 -- The same name again followed by a colon is the next declaration, not this
 -- one's body: an abstract declaration and a definition of it can sit next to
 -- each other in the module that owns the name.
@@ -198,7 +194,7 @@ chompOverloadBody revArgs =
 
 
 
-chompDefArgsAndBody :: Maybe Src.Comment -> A.Position -> A.Located Name.Name -> Maybe Src.Type -> [Src.Pattern] -> Space.Parser E.DeclDef Decl
+chompDefArgsAndBody :: Maybe Src.Comment -> A.Position -> A.Located Name.Name -> Maybe Src.Signature -> [Src.Pattern] -> Space.Parser E.DeclDef Decl
 chompDefArgsAndBody maybeDocs start name tipe revArgs =
   oneOf E.DeclDefEquals
     [ do  arg <- specialize E.DeclDefArg Pattern.term

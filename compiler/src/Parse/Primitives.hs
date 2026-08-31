@@ -15,7 +15,7 @@ module Parse.Primitives
   , isIndented
   , distanceToIndent
   --
-  , oneOf, oneOfWithFallback
+  , oneOf, oneOfWithFallback, backtrack
   , inContext, specialize
   , getPosition, getRegion, addLocation, addEnd
   , withIndent, withBacksetIndent, withIndentFrom
@@ -201,6 +201,17 @@ oneOfHelp fpc state cok eok cerr eerr toError parsers =
 
 
 -- ONE OF WITH FALLBACK
+
+
+-- Undo the input a parser consumed when it fails, so a failure part way
+-- through a lookahead reads as "this is not that" rather than as a syntax
+-- error. Only needed where deciding which construct we are in means reading
+-- past the point of no return.
+{-# INLINE backtrack #-}
+backtrack :: Parser x a -> Parser x a
+backtrack (Parser parser) =
+  Parser $ \fpc state@(State _ _ _ start) cok eok _ eerr ->
+    parser fpc state cok eok (\_ toError -> eerr start toError) eerr
 
 
 {-# INLINE oneOfWithFallback #-}

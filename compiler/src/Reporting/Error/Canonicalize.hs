@@ -56,6 +56,7 @@ data Error
   | TagRowDuplicate A.Region Name.Name
   | TagPatternNesting A.Region Name.Name
   | OverloadNotDeclared A.Region Name.Name Name.Name
+  | WhereNotImplemented A.Region Name.Name Name.Name
   | OverloadForeignAbstract A.Region Name.Name Name.Name Name.Name
   | OverloadAbstractNotDispatching A.Region Name.Name Name.Name
   | OverloadInstanceNotDispatching A.Region Name.Name Name.Name
@@ -291,6 +292,19 @@ toReport source err =
           ,
             D.reflow $
               "Remove one of them, each tag can only appear once in a variant type."
+          )
+
+    WhereNotImplemented region qual name ->
+      Report.Report "WHERE CLAUSES ARE NOT READY" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This signature says it needs `" ++ Name.toChars qual ++ "."
+              ++ Name.toChars name ++ "`, which this compiler parses but cannot compile yet:"
+          ,
+            D.reflow $
+              "An overloaded name can only be used where the type it dispatches on is a\
+              \ specific type, so for now it cannot be used on a type variable at all."
           )
 
     OverloadNotDeclared region qual name ->

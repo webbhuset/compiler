@@ -408,8 +408,8 @@ addDefNodes env nodes (A.At _ def) =
               let node = ( Define cdef, name, Map.keys freeLocals )
               logLetLocals args freeLocals (node:nodes)
 
-        Just tipe ->
-          do  (Can.Forall freeVars ctipe) <- Type.toAnnotation env tipe
+        Just signature ->
+          do  (Can.Forall freeVars ctipe) <- Type.toAnnotation env =<< Type.signatureType signature
               ((args, resultType), argBindings) <-
                 Pattern.verify (Error.DPFuncArgs name) $
                   gatherTypedArgs env name srcArgs ctipe Index.first []
