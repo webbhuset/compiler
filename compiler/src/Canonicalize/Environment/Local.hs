@@ -46,11 +46,11 @@ add module_ env =
 
 
 addTagCtors :: Src.Module -> Env.Env -> Result i w (Env.Env, [((Name.Name, Can.TagDecl), CtorDups)])
-addTagCtors (Src.Module _ _ _ _ _ _ _ tagDecls _ _ _) (Env.Env home vs ts cs bs qvs qts qcs qos) =
+addTagCtors (Src.Module _ _ _ _ _ _ _ tagDecls _ _ _) (Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) =
   do  tagInfo <- traverse (canonicalizeTagDecl home) tagDecls
       tags <- Dups.detect Error.DuplicateCtor (Dups.unions (map snd tagInfo))
       let cs2 = Map.union tags cs
-      Result.ok (Env.Env home vs ts cs2 bs qvs qts qcs qos, tagInfo)
+      Result.ok (Env.Env home vs ts cs2 bs qvs qts qcs qos qcn cls, tagInfo)
 
 
 
@@ -58,11 +58,11 @@ addTagCtors (Src.Module _ _ _ _ _ _ _ tagDecls _ _ _) (Env.Env home vs ts cs bs 
 
 
 addVars :: Src.Module -> Env.Env -> Result i w Env.Env
-addVars module_ (Env.Env home vs ts cs bs qvs qts qcs qos) =
+addVars module_ (Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) =
   do  topLevelVars <- collectVars module_
       let vs2 = Map.union topLevelVars vs
       -- Use union to overwrite foreign stuff.
-      Result.ok $ Env.Env home vs2 ts cs bs qvs qts qcs qos
+      Result.ok $ Env.Env home vs2 ts cs bs qvs qts qcs qos qcn cls
 
 
 collectVars :: Src.Module -> Result i w (Map.Map Name.Name Env.Var)
@@ -107,7 +107,7 @@ toEffectDups effects =
 
 
 addTypes :: Src.Module -> Env.Env -> Result i w Env.Env
-addTypes (Src.Module _ _ _ _ _ unions aliases _ _ _ _) (Env.Env home vs ts cs bs qvs qts qcs qos) =
+addTypes (Src.Module _ _ _ _ _ unions aliases _ _ _ _) (Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) =
   let
     addAliasDups dups (A.At _ (Src.Alias (A.At region name) _ _)) = Dups.insert name region () dups
     addUnionDups dups (A.At _ (Src.Union (A.At region name) _ _)) = Dups.insert name region () dups
@@ -116,7 +116,7 @@ addTypes (Src.Module _ _ _ _ _ unions aliases _ _ _ _) (Env.Env home vs ts cs bs
   in
   do  _ <- Dups.detect Error.DuplicateType typeNameDups
       ts1 <- foldM (addUnion home) ts unions
-      addAliases aliases (Env.Env home vs ts1 cs bs qvs qts qcs qos)
+      addAliases aliases (Env.Env home vs ts1 cs bs qvs qts qcs qos qcn cls)
 
 
 addUnion :: ModuleName.Canonical -> Env.Exposed Env.Type -> A.Located Src.Union -> Result i w (Env.Exposed Env.Type)
@@ -140,14 +140,14 @@ addAliases aliases env =
 
 
 addAlias :: Env.Env -> Graph.SCC (A.Located Src.Alias) -> Result i w Env.Env
-addAlias env@(Env.Env home vs ts cs bs qvs qts qcs qos) scc =
+addAlias env@(Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) scc =
   case scc of
     Graph.AcyclicSCC alias@(A.At _ (Src.Alias (A.At _ name) _ tipe)) ->
       do  args <- checkAliasFreeVars alias
           ctype <- Type.canonicalize env tipe
           let one = Env.Specific home (Env.Alias (length args) home args ctype)
           let ts1 = Map.insert name one ts
-          Result.ok $ Env.Env home vs ts1 cs bs qvs qts qcs qos
+          Result.ok $ Env.Env home vs ts1 cs bs qvs qts qcs qos qcn cls
 
     Graph.CyclicSCC [] ->
       Result.ok env
@@ -292,7 +292,7 @@ addFreeVars freeVars (A.At region tipe) =
 
 
 addCtors :: Src.Module -> [((Name.Name, Can.TagDecl), CtorDups)] -> Env.Env -> Result i w (Env.Env, Unions, Aliases, Tags)
-addCtors (Src.Module _ _ _ _ _ unions aliases _ _ _ _) tagInfo env@(Env.Env home vs ts cs bs qvs qts qcs qos) =
+addCtors (Src.Module _ _ _ _ _ unions aliases _ _ _ _) tagInfo env@(Env.Env home vs ts cs bs qvs qts qcs qos qcn cls) =
   do  unionInfo <- traverse (canonicalizeUnion env) unions
       aliasInfo <- traverse (canonicalizeAlias env) aliases
 
@@ -308,7 +308,7 @@ addCtors (Src.Module _ _ _ _ _ unions aliases _ _ _ _) tagInfo env@(Env.Env home
       let cs2 = Map.union ctors cs
 
       Result.ok
-        ( Env.Env home vs ts cs2 bs qvs qts qcs qos
+        ( Env.Env home vs ts cs2 bs qvs qts qcs qos qcn cls
         , Map.fromList (map fst unionInfo)
         , Map.fromList (map fst aliasInfo)
         , Map.fromList (map fst tagInfo)
@@ -338,7 +338,7 @@ canonicalizeTagDecl home (A.At _ (Src.TagDecl (A.At region name) args)) =
 
 
 canonicalizeAlias :: Env.Env -> A.Located Src.Alias -> Result i w ( (Name.Name, Can.Alias), CtorDups )
-canonicalizeAlias env@(Env.Env home _ _ _ _ _ _ _ _) (A.At _ (Src.Alias (A.At region name) args tipe)) =
+canonicalizeAlias env@(Env.Env home _ _ _ _ _ _ _ _ _ _) (A.At _ (Src.Alias (A.At region name) args tipe)) =
   do  let vars = map A.toValue args
       ctipe <- Type.canonicalize env tipe
       Result.ok
@@ -370,7 +370,7 @@ toRecordCtor home name vars fields =
 
 
 canonicalizeUnion :: Env.Env -> A.Located Src.Union -> Result i w ( (Name.Name, Can.Union), CtorDups )
-canonicalizeUnion env@(Env.Env home _ _ _ _ _ _ _ _) (A.At _ (Src.Union (A.At _ name) avars ctors)) =
+canonicalizeUnion env@(Env.Env home _ _ _ _ _ _ _ _ _ _) (A.At _ (Src.Union (A.At _ name) avars ctors)) =
   do  cctors <- Index.indexedTraverse (canonicalizeCtor env) ctors
       let vars = map A.toValue avars
       let alts = map A.toValue cctors

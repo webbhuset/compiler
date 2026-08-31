@@ -10,6 +10,7 @@ module Canonicalize.Environment
   , Type(..)
   , Ctor(..)
   , addLocals
+  , withClauses
   , findType
   , findTypeQual
   , findCtor
@@ -57,6 +58,12 @@ data Env =
     , _q_types :: Qualified Type
     , _q_ctors :: Qualified Ctor
     , _q_overloads :: Map.Map Name.Name (Map.Map Name.Name Overload)
+    -- Values whose signature carries `where` clauses, wherever they live. A
+    -- reference to one has to pass the overloads it asks for.
+    , _constrained :: Map.Map (ModuleName.Canonical, Name.Name) (Can.Annotation, [Can.Constraint])
+    -- The clauses of the definition being canonicalized, which is what an
+    -- overloaded name used on a type variable can reach.
+    , _clauses :: [Can.Constraint]
     }
 
 
@@ -162,7 +169,7 @@ data Binop =
 
 
 addLocals :: Map.Map Name.Name A.Region -> Env -> Result i w Env
-addLocals names (Env home vars ts cs bs qvs qts qcs qos) =
+addLocals names (Env home vars ts cs bs qvs qts qcs qos qcn cls) =
   do  newVars <-
         Map.mergeA
           (Map.mapMissing addLocalLeft)
@@ -171,7 +178,13 @@ addLocals names (Env home vars ts cs bs qvs qts qcs qos) =
           names
           vars
 
-      Result.ok (Env home newVars ts cs bs qvs qts qcs qos)
+      Result.ok (Env home newVars ts cs bs qvs qts qcs qos qcn cls)
+
+
+-- The clauses a definition's body can reach, set while canonicalizing it.
+withClauses :: [Can.Constraint] -> Env -> Env
+withClauses clauses (Env home vars ts cs bs qvs qts qcs qos qcn _) =
+  Env home vars ts cs bs qvs qts qcs qos qcn clauses
 
 
 addLocalLeft :: Name.Name -> A.Region -> Var
@@ -201,7 +214,7 @@ addLocalBoth name region var =
 
 
 findType :: A.Region -> Env -> Name.Name -> Result i w Type
-findType region (Env _ _ ts _ _ _ qts _ _) name =
+findType region (Env _ _ ts _ _ _ qts _ _ _ _) name =
   case Map.lookup name ts of
     Just (Specific _ tipe) ->
       Result.ok tipe
@@ -214,7 +227,7 @@ findType region (Env _ _ ts _ _ _ qts _ _) name =
 
 
 findTypeQual :: A.Region -> Env -> Name.Name -> Name.Name -> Result i w Type
-findTypeQual region (Env _ _ ts _ _ _ qts _ _) prefix name =
+findTypeQual region (Env _ _ ts _ _ _ qts _ _ _ _) prefix name =
   case Map.lookup prefix qts of
     Just qualified ->
       case Map.lookup name qualified of
@@ -236,7 +249,7 @@ findTypeQual region (Env _ _ ts _ _ _ qts _ _) prefix name =
 
 
 findCtor :: A.Region -> Env -> Name.Name -> Result i w Ctor
-findCtor region (Env _ _ _ cs _ _ _ qcs _) name =
+findCtor region (Env _ _ _ cs _ _ _ qcs _ _ _) name =
   case Map.lookup name cs of
     Just (Specific _ ctor) ->
       Result.ok ctor
@@ -249,7 +262,7 @@ findCtor region (Env _ _ _ cs _ _ _ qcs _) name =
 
 
 findCtorQual :: A.Region -> Env -> Name.Name -> Name.Name -> Result i w Ctor
-findCtorQual region (Env _ _ _ cs _ _ _ qcs _) prefix name =
+findCtorQual region (Env _ _ _ cs _ _ _ qcs _ _ _) prefix name =
   case Map.lookup prefix qcs of
     Just qualified ->
       case Map.lookup name qualified of
@@ -271,7 +284,7 @@ findCtorQual region (Env _ _ _ cs _ _ _ qcs _) prefix name =
 
 
 findBinop :: A.Region -> Env -> Name.Name -> Result i w Binop
-findBinop region (Env _ _ _ _ binops _ _ _ _) name =
+findBinop region (Env _ _ _ _ binops _ _ _ _ _ _) name =
   case Map.lookup name binops of
     Just (Specific _ binop) ->
       Result.ok binop

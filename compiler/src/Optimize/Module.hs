@@ -19,6 +19,7 @@ import qualified AST.Utils.Type as Type
 import qualified Canonicalize.Effects as Effects
 import qualified Elm.ModuleName as ModuleName
 import qualified Optimize.Expression as Expr
+import qualified Canonicalize.Overload as Overload
 import qualified Optimize.Names as Names
 import qualified Optimize.Port as Port
 import qualified Reporting.Annotation as A
@@ -40,8 +41,8 @@ type Annotations =
 
 
 optimize :: Annotations -> Can.Module -> Result i [W.Warning] Opt.LocalGraph
-optimize annotations (Can.Module home _ _ decls unions aliases tags _ _ effects) =
-  addDecls home annotations decls $
+optimize annotations (Can.Module home _ _ decls unions aliases tags overloads _ effects) =
+  addDecls home (Can._constrained overloads) annotations decls $
     addEffects home effects $
       addUnions home unions $
         addTags home tags $
@@ -203,17 +204,21 @@ addToGraph name node fields (Opt.LocalGraph main nodes fieldCounts) =
 -- ADD DECLS
 
 
-addDecls :: ModuleName.Canonical -> Annotations -> Can.Decls -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
-addDecls home annotations decls graph =
+type Constrained =
+  Map.Map Can.OverloadName [Can.Constraint]
+
+
+addDecls :: ModuleName.Canonical -> Constrained -> Annotations -> Can.Decls -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
+addDecls home constrained annotations decls graph =
   case decls of
     Can.Declare def subDecls ->
-      addDecls home annotations subDecls =<< addDef home annotations def graph
+      addDecls home constrained annotations subDecls =<< addDef home constrained annotations def graph
 
     Can.DeclareRec d ds subDecls ->
       let defs = d:ds in
       case findMain defs of
         Nothing ->
-          addDecls home annotations subDecls (addRecDefs home defs graph)
+          addDecls home constrained annotations subDecls (addRecDefs home defs graph)
 
         Just region ->
           Result.throw $ E.BadCycle region (defToName d) (map defToName ds)
@@ -248,16 +253,27 @@ defToName def =
 -- ADD DEFS
 
 
-addDef :: ModuleName.Canonical -> Annotations -> Can.Def -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
-addDef home annotations def graph =
+addDef :: ModuleName.Canonical -> Constrained -> Annotations -> Can.Def -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
+addDef home constrained annotations def graph =
   case def of
     Can.Def (A.At region name) args body ->
       do  let (Can.Forall _ tipe) = annotations ! name
           Result.warn $ W.MissingTypeAnnotation region name tipe
-          addDefHelp region annotations home name args body graph
+          addDefHelp region annotations home name (dicts home constrained name ++ args) body graph
 
     Can.TypedDef (A.At region name) _ typedArgs body _ ->
-      addDefHelp region annotations home name (map fst typedArgs) body graph
+      addDefHelp region annotations home name
+        (dicts home constrained name ++ map fst typedArgs) body graph
+
+
+-- The overloads a definition asked for become leading parameters, which is
+-- what a reference to it passes. They are added here rather than while
+-- canonicalizing so that the type it is written with stays the type it has.
+dicts :: ModuleName.Canonical -> Constrained -> Name.Name -> [Can.Pattern]
+dicts home constrained name =
+  [ A.At A.zero (Can.PVar (Overload.dictName constraint))
+  | constraint <- Map.findWithDefault [] (home, name) constrained
+  ]
 
 
 addDefHelp :: A.Region -> Annotations -> ModuleName.Canonical -> Name.Name -> [Can.Pattern] -> Can.Expr -> Opt.LocalGraph -> Result i w Opt.LocalGraph

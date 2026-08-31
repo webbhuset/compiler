@@ -23,11 +23,13 @@ module Type.Type
   , nameToFlex
   , nameToRigid
   , toAnnotation
+  , toRelatedTypes
   , toErrorType
   )
   where
 
 
+import Control.Monad (foldM)
 import Control.Monad.State.Strict (StateT, liftIO)
 import qualified Control.Monad.State.Strict as State
 import Data.Foldable (foldrM)
@@ -343,6 +345,15 @@ toAnnotation variable =
       (tipe, NameState freeVars _ _ _ _ _) <-
         State.runStateT (variableToCanType variable) (makeNameState userNames)
       return $ Can.Forall freeVars tipe
+
+
+-- Render several variables under one naming. Two of them come out written
+-- with the same type variable name only when they really are the same
+-- variable, which is what makes it safe to compare the results.
+toRelatedTypes :: [Variable] -> IO [Can.Type]
+toRelatedTypes variables =
+  do  userNames <- foldM (flip getVarNames) Map.empty variables
+      State.evalStateT (traverse variableToCanType variables) (makeNameState userNames)
 
 
 variableToCanType :: Variable -> StateT NameState IO Can.Type

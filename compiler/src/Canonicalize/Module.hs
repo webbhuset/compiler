@@ -18,7 +18,6 @@ import qualified Canonicalize.Environment.Local as Local
 import qualified Canonicalize.Expression as Expr
 import qualified Canonicalize.Overload as Overload
 import qualified Canonicalize.Pattern as Pattern
-import qualified Canonicalize.Type as Type
 import qualified Data.Index as Index
 import qualified Elm.Interface as I
 import qualified Elm.ModuleName as ModuleName
@@ -51,11 +50,14 @@ canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ ov
 
       (env0, cunions, caliases, ctags) <- Local.add modul importEnv
 
-      (env, localAbstracts) <- Overload.addAbstracts rawHome overloads env0
+      (env1, localAbstracts) <- Overload.addAbstracts rawHome overloads env0
+      (env, localConstrained) <- Overload.addConstrained env1 values
 
       (instanceDefs, coverloads) <-
         Overload.canonicalizeInstances env
-          (Can.unionOverloads localAbstracts importedOverloads)
+          (Can.unionOverloads
+            (Can.Overloads Map.empty Map.empty localConstrained)
+            (Can.unionOverloads localAbstracts importedOverloads))
           overloads
 
       cvalues <- addInstanceDefs instanceDefs <$> canonicalizeValues env values
@@ -161,15 +163,15 @@ type NodeTwo =
 
 
 toNodeOne :: Env.Env -> A.Located Src.Value -> Result i [W.Warning] NodeOne
-toNodeOne env (A.At _ (Src.Value aname@(A.At _ name) srcArgs body maybeType)) =
+toNodeOne outerEnv (A.At _ (Src.Value aname@(A.At _ name) srcArgs body maybeType)) =
   case maybeType of
     Nothing ->
       do  (args, argBindings) <-
             Pattern.verify (Error.DPFuncArgs name) $
-              traverse (Pattern.canonicalize env) srcArgs
+              traverse (Pattern.canonicalize outerEnv) srcArgs
 
           newEnv <-
-            Env.addLocals argBindings env
+            Env.addLocals argBindings outerEnv
 
           (cbody, freeLocals) <-
             Expr.verifyBindings W.Pattern argBindings (Expr.canonicalize newEnv body)
@@ -182,14 +184,15 @@ toNodeOne env (A.At _ (Src.Value aname@(A.At _ name) srcArgs body maybeType)) =
             )
 
     Just signature ->
-      do  (Can.Forall freeVars tipe) <- Type.toAnnotation env =<< Type.signatureType signature
+      do  (Can.Forall freeVars tipe, clauses) <- Overload.canonicalizeSignature outerEnv signature
+          let bodyEnv = Env.withClauses clauses outerEnv
 
           ((args,resultType), argBindings) <-
             Pattern.verify (Error.DPFuncArgs name) $
-              Expr.gatherTypedArgs env name srcArgs tipe Index.first []
+              Expr.gatherTypedArgs bodyEnv name srcArgs tipe Index.first []
 
           newEnv <-
-            Env.addLocals argBindings env
+            Env.addLocals argBindings bodyEnv
 
           (cbody, freeLocals) <-
             Expr.verifyBindings W.Pattern argBindings (Expr.canonicalize newEnv body)

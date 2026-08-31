@@ -274,7 +274,10 @@ checkExpr (A.At region expression) errors =
     Can.VarKernel _ _ ->
       errors
 
-    Can.VarOverload _ _ _ _ ->
+    Can.VarOverload _ _ _ ->
+      errors
+
+    Can.VarConstrained _ _ _ _ _ ->
       errors
 
     Can.VarForeign _ _ _ ->

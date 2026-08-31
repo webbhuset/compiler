@@ -25,6 +25,9 @@ module AST.Canonical
   , Ctor(..)
   , TagDecl(..)
   , Overloads(..)
+  , Constraint(..)
+  , Instance(..)
+  , Dispatch(..)
   , OverloadName
   , OverloadKey
   , emptyOverloads
@@ -91,7 +94,8 @@ data Expr_
   -- an overloaded name: which definition it means depends on the type it is
   -- used at, so it is left unresolved here and settled after inference. The
   -- region identifies the use site to the resolver.
-  | VarOverload ModuleName.Canonical A.Region OverloadName Annotation
+  | VarOverload Dispatch OverloadName Annotation
+  | VarConstrained Dispatch ModuleName.Canonical Name Annotation [Constraint]
   | VarForeign ModuleName.Canonical Name Annotation
   | VarCtor CtorOpts ModuleName.Canonical Name Index.ZeroBased Annotation
   | VarTag ModuleName.Canonical Name [Name] -- CACHE type params for inference
@@ -119,6 +123,13 @@ data Expr_
   | Tuple Expr Expr (Maybe Expr)
   | Shader Shader.Source Shader.Types
   | Css ModuleName.Canonical Css.Content
+
+
+-- Where a name whose meaning depends on a type is used: the module the use is
+-- in and where in it, plus the `where` clauses in scope there. Which
+-- definition it means is settled after type inference; see Type.Overload.
+data Dispatch =
+  Dispatch ModuleName.Canonical A.Region [Constraint]
 
 
 data CaseBranch =
@@ -285,27 +296,53 @@ type OverloadName = (ModuleName.Canonical, Name)
 type OverloadKey = (ModuleName.Canonical, Name)
 
 
+-- One `where` clause: an overload, and the type the signature needs it at.
+-- The type variable it dispatches on is one of the signature's own.
+data Constraint =
+  Constraint OverloadName Type
+  deriving (Eq)
+
+
+-- A definition of an overload: what to call, and the type it is for. The type
+-- is kept because it can be shaped, as in `Ord.compare : List a -> ...`, and
+-- then resolving a use at `List Card` has to work out what `a` was.
+data Instance =
+  Instance OverloadName Type
+  deriving (Eq)
+
+
 data Overloads =
   Overloads
     { _abstracts :: Map.Map OverloadName Annotation
-    , _instances :: Map.Map OverloadName (Map.Map OverloadKey OverloadName)
+    , _instances :: Map.Map OverloadName (Map.Map OverloadKey Instance)
+    , _constrained :: Map.Map OverloadName [Constraint]
     }
     deriving (Eq)
 
 
 emptyOverloads :: Overloads
 emptyOverloads =
-  Overloads Map.empty Map.empty
+  Overloads Map.empty Map.empty Map.empty
 
 
 unionOverloads :: Overloads -> Overloads -> Overloads
-unionOverloads (Overloads a1 i1) (Overloads a2 i2) =
-  Overloads (Map.union a1 a2) (Map.unionWith Map.union i1 i2)
+unionOverloads (Overloads a1 i1 c1) (Overloads a2 i2 c2) =
+  Overloads (Map.union a1 a2) (Map.unionWith Map.union i1 i2) (Map.union c1 c2)
 
 
 instance Binary Overloads where
-  get = liftM2 Overloads get get
-  put (Overloads a b) = put a >> put b
+  get = liftM3 Overloads get get get
+  put (Overloads a b c) = put a >> put b >> put c
+
+
+instance Binary Constraint where
+  get = liftM2 Constraint get get
+  put (Constraint a b) = put a >> put b
+
+
+instance Binary Instance where
+  get = liftM2 Instance get get
+  put (Instance a b) = put a >> put b
 
 
 -- A structural variant tag declaration: `variant Success a` becomes

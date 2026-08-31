@@ -26,8 +26,9 @@ import qualified Reporting.Report as Report
 
 
 data Error
-  = NoDefinition A.Region ModuleName.Canonical Name.Name Can.Type Can.Type
-  | Ambiguous A.Region ModuleName.Canonical Name.Name Can.Type
+  = NoDefinition A.Region ModuleName.Canonical Name.Name Can.Type
+  | NoClause A.Region ModuleName.Canonical Name.Name Name.Name (Maybe Can.Type)
+  | Ambiguous A.Region ModuleName.Canonical Name.Name (Maybe Can.Type)
 
 
 
@@ -37,7 +38,7 @@ data Error
 toReport :: Code.Source -> L.Localizer -> Error -> Report.Report
 toReport source localizer err =
   case err of
-    NoDefinition region home name dispatchType wanted ->
+    NoDefinition region home name dispatched ->
       Report.Report "NO DEFINITION" region [] $
         Code.toSnippet source region Nothing
           (
@@ -45,18 +46,34 @@ toReport source localizer err =
               "There is no definition of " ++ toQualified home name ++ " for this type:"
           ,
             D.stack
-              [ D.reflow $
-                  "Using it here needs one with this signature:"
-              , D.indent 4 $ D.hang 4 $ D.sep $
-                  [ D.dullyellow (D.fromChars (toQualified home name)), ":" ]
-                  ++ [ RT.canToDoc localizer RT.None wanted ]
+              [ D.indent 4 $ RT.canToDoc localizer RT.None dispatched
               , D.reflow $
-                  "Add it to module " ++ homeOf dispatchType home ++ ", or to module "
+                  "Add one in module " ++ homeOf dispatched home ++ ", or in module "
                   ++ Name.toChars (ModuleName._module home) ++ "."
               ]
           )
 
-    Ambiguous region home name dispatchType ->
+    NoClause region home name var wanted ->
+      Report.Report "MISSING WHERE CLAUSE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This needs " ++ toQualified home name ++ " on `" ++ Name.toChars var
+              ++ "`, which could be any type:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "So the signature above has to say that it needs it, by adding this line\
+                  \ under it:"
+              , D.indent 4 $ D.hang 4 $ D.sep $
+                  [ D.dullyellow (D.fromChars ("where " ++ toQualified home name)), ":" ]
+                  ++ case wanted of
+                       Just tipe -> [ RT.canToDoc localizer RT.None tipe ]
+                       Nothing   -> [ "..." ]
+              ]
+          )
+
+    Ambiguous region home name maybeDispatched ->
       Report.Report "AMBIGUOUS OVERLOAD" region [] $
         Code.toSnippet source region Nothing
           (
@@ -64,14 +81,20 @@ toReport source localizer err =
               "I cannot tell which definition of " ++ toQualified home name
               ++ " this use needs:"
           ,
-            D.stack
-              [ D.reflow $
-                  "The type it dispatches on came out as:"
-              , D.indent 4 $ RT.canToDoc localizer RT.None dispatchType
-              , D.reflow $
-                  "which is not a specific enough type to pick a definition. Adding a type\
-                  \ annotation that says which type you mean should settle it."
-              ]
+            case maybeDispatched of
+              Nothing ->
+                D.reflow $
+                  "Nothing here says what type it is used at. Adding a type annotation\
+                  \ that says which type you mean should settle it."
+
+              Just dispatched ->
+                D.stack
+                  [ D.reflow "The type it dispatches on came out as:"
+                  , D.indent 4 $ RT.canToDoc localizer RT.None dispatched
+                  , D.reflow $
+                      "which is not a specific enough type to pick a definition. Adding a\
+                      \ type annotation that says which type you mean should settle it."
+                  ]
           )
 
 

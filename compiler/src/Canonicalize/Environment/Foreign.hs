@@ -42,7 +42,33 @@ createInitialEnv home ifaces imports =
       (State vs ts cs bs qvs qts qcs qos) <- foldM (addImport ifaces) emptyState safeImports
       let overloads =
             foldr (unionImported ifaces) Can.emptyOverloads safeImports
-      Result.ok (Env.Env home (Map.map infoToVar vs) ts cs bs qvs qts qcs qos, overloads)
+      Result.ok
+        ( Env.Env home (Map.map infoToVar vs) ts cs bs qvs qts qcs qos
+            (foldr (addConstrained ifaces) Map.empty safeImports)
+            []
+        , overloads
+        )
+
+
+-- The values in scope whose signature has `where` clauses. Only the modules
+-- imported here can contribute, since a value has to be in scope before its
+-- clauses can matter, and their own annotations are already recorded.
+addConstrained
+  :: Map.Map ModuleName.Raw I.Interface
+  -> Src.Import
+  -> Map.Map (ModuleName.Canonical, Name.Name) (Can.Annotation, [Can.Constraint])
+  -> Map.Map (ModuleName.Canonical, Name.Name) (Can.Annotation, [Can.Constraint])
+addConstrained ifaces (Src.Import (A.At _ name) _ _) table =
+  let
+    (I.Interface pkg defs _ _ _ _ _ overloads) = ifaces ! name
+    !home = ModuleName.Canonical pkg name
+  in
+  Map.union table $ Map.fromList
+    [ ((home, valueName), (annotation, constraints))
+    | ((valueHome, valueName), constraints) <- Map.toList (Can._constrained overloads)
+    , valueHome == home
+    , Just annotation <- [Map.lookup valueName defs]
+    ]
 
 
 unionImported :: Map.Map ModuleName.Raw I.Interface -> Src.Import -> Can.Overloads -> Can.Overloads

@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Canonicalize.Type
   ( toAnnotation
-  , signatureType
   , canonicalize
   )
   where
@@ -31,18 +30,6 @@ type Result i w a =
 
 
 -- TO ANNOTATION
-
-
--- `where` clauses parse but do not compile yet, so a signature is still just
--- its type.
-signatureType :: Src.Signature -> Result i w Src.Type
-signatureType (Src.Signature tipe constraints) =
-  case constraints of
-    [] ->
-      Result.ok tipe
-
-    A.At region (Src.Constraint (A.At _ qual) (A.At _ name) _) : _ ->
-      Result.throw (Error.WhereNotImplemented region qual name)
 
 
 toAnnotation :: Env.Env -> Src.Type -> Result i w Can.Annotation

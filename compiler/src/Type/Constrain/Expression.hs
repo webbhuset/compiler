@@ -21,6 +21,7 @@ import qualified Reporting.Error.Type as E
 import Reporting.Error.Type (Expected(..), Context(..), SubContext(..), MaybeName(..), Category(..), PExpected(..), PContext(..))
 import qualified Type.Constrain.Pattern as Pattern
 import qualified Type.Instantiate as Instantiate
+import qualified Canonicalize.Overload as CanOverload
 import qualified Type.Overload as Overload
 import Type.Type as Type hiding (Descriptor(..))
 
@@ -56,17 +57,31 @@ constrain rtv (A.At region expression) expected =
       return $ CForeign region name annotation expected
 
     -- An overloaded name is typed by its abstract signature; the variable
-    -- standing for this use site is handed to Type.Overload, which reads
-    -- the type back once the solver has settled it and picks a definition.
-    Can.VarOverload useHome useRegion (ovHome, ovName) annotation ->
-      do  var <- mkFlexVar
-          let tipe = VarN var
-          Overload.record useHome useRegion (ovHome, ovName) var
-          return $ exists [var] $
-            CAnd
-              [ CForeign region ovName annotation (NoExpectation tipe)
-              , CEqual region (Foreign ovName) tipe expected
-              ]
+    -- standing for this use site is handed to Type.Overload, which reads the
+    -- type back once the solver has settled it and picks a definition.
+    Can.VarOverload dispatch ovName annotation@(Can.Forall freeVars srcType) ->
+      do  freshVars <- traverse (\_ -> mkFlexVar) freeVars
+          tipe <- Instantiate.fromSrcType (Map.map VarN freshVars) srcType
+          recordDispatch rtv dispatch
+            [ Overload.Need ovName (freshVars Map.! var)
+            | Just var <- [CanOverload.abstractVar annotation]
+            ]
+          return $ exists (Map.elems freshVars) $
+            CEqual region (Foreign (snd ovName)) tipe expected
+
+    -- A value whose signature has `where` clauses. Its type is instantiated
+    -- here rather than by the solver so that the variables its clauses
+    -- dispatch on are in hand: those are what say which definitions this
+    -- reference has to be given.
+    Can.VarConstrained dispatch _ name (Can.Forall freeVars srcType) constraints ->
+      do  freshVars <- traverse (\_ -> mkFlexVar) freeVars
+          valueType <- Instantiate.fromSrcType (Map.map VarN freshVars) srcType
+          recordDispatch rtv dispatch
+            [ Overload.Need ovName (freshVars Map.! CanOverload.dispatchVar c)
+            | c@(Can.Constraint ovName _) <- constraints
+            ]
+          return $ exists (Map.elems freshVars) $
+            CEqual region (Foreign name) valueType expected
 
     Can.VarCtor _ _ name _ annotation ->
       return $ CForeign region name annotation expected
@@ -172,6 +187,23 @@ constrain rtv (A.At region expression) expected =
 
     Can.Css _home (Css.Content _ types) ->
       constrainCss region types expected
+
+
+
+-- RECORDING A DISPATCH SITE
+--
+-- The `where` clauses in scope are paired with the rigid variable each one
+-- dispatches on, which is what lets the resolver tell a use at one of them
+-- from a use at some unrelated type variable.
+
+
+recordDispatch :: RTV -> Can.Dispatch -> [Overload.Need] -> IO ()
+recordDispatch rtv (Can.Dispatch home region clauses) needs =
+  Overload.record home region needs
+    [ (c, var)
+    | c <- clauses
+    , Just (VarN var) <- [Map.lookup (CanOverload.dispatchVar c) rtv]
+    ]
 
 
 
@@ -514,7 +546,8 @@ getName (A.At _ expr) =
     Can.VarLocal name        -> FuncName name
     Can.VarTopLevel _ name   -> FuncName name
     Can.VarForeign _ name _  -> FuncName name
-    Can.VarOverload _ _ (_, name) _ -> FuncName name
+    Can.VarOverload _ (_, name) _ -> FuncName name
+    Can.VarConstrained _ _ name _ _ -> FuncName name
     Can.VarCtor _ _ name _ _ -> CtorName name
     Can.VarOperator op _ _ _ -> OpName op
     Can.VarKernel _ name     -> FuncName name

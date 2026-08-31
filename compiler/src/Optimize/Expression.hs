@@ -33,6 +33,27 @@ type Cycle =
   Set.Set Name.Name
 
 
+-- WHAT AN OVERLOAD RESOLVED TO
+--
+-- A definition, which may itself need overloads passed to it, or one of the
+-- enclosing definition's own `where` parameters.
+
+
+fromTarget :: Overload.Target -> Names.Tracker Opt.Expr
+fromTarget target =
+  case target of
+    Overload.Parameter name ->
+      pure (Opt.VarLocal name)
+
+    Overload.Definition (home, name) [] ->
+      Names.registerGlobal home name
+
+    Overload.Definition (home, name) inner ->
+      Opt.Call
+        <$> Names.registerGlobal home name
+        <*> traverse fromTarget inner
+
+
 optimize :: Cycle -> Can.Expr -> Names.Tracker Opt.Expr
 optimize cycle (A.At region expression) =
   case expression of
@@ -51,14 +72,26 @@ optimize cycle (A.At region expression) =
     Can.VarForeign home name _ ->
       Names.registerGlobal home name
 
-    -- resolved by Type.Overload once the use site's type was known
-    Can.VarOverload useHome useRegion (ovHome, ovName) _ ->
+    -- Resolved by Type.Overload once the use site's type was known.
+    Can.VarOverload (Can.Dispatch useHome useRegion _) (ovHome, ovName) _ ->
       case Overload.lookupResolved useHome useRegion of
-        Just (defHome, defName) ->
-          Names.registerGlobal defHome defName
+        target : _ ->
+          fromTarget target
 
-        Nothing ->
+        [] ->
           Names.registerGlobal ovHome ovName
+
+    -- A value that asks for overloads takes them as leading arguments, added
+    -- here so that the type it is written with stays the type it has.
+    Can.VarConstrained (Can.Dispatch useHome useRegion _) home name _ _ ->
+      case Overload.lookupResolved useHome useRegion of
+        [] ->
+          Names.registerGlobal home name
+
+        targets ->
+          Opt.Call
+            <$> Names.registerGlobal home name
+            <*> traverse fromTarget targets
 
     Can.VarCtor opts home name index _ ->
       Names.registerCtor home name index opts
@@ -103,6 +136,15 @@ optimize cycle (A.At region expression) =
       do  (argNames, destructors) <- destructArgs args
           obody <- optimize cycle body
           pure $ Opt.Function argNames (foldr Opt.Destruct obody destructors)
+
+    -- Kept as one call so that a constrained function is applied to its
+    -- overloads and its own arguments in a single step.
+    Can.Call func@(A.At _ (Can.VarConstrained (Can.Dispatch useHome useRegion _) home name _ _)) args ->
+      Opt.Call
+        <$> Names.registerGlobal home name
+        <*> ((++)
+              <$> traverse fromTarget (Overload.lookupResolved useHome useRegion)
+              <*> optimizeArgs cycle func args)
 
     Can.Call func args ->
       Opt.Call

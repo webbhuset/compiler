@@ -408,8 +408,9 @@ addDefNodes env nodes (A.At _ def) =
               let node = ( Define cdef, name, Map.keys freeLocals )
               logLetLocals args freeLocals (node:nodes)
 
-        Just signature ->
-          do  (Can.Forall freeVars ctipe) <- Type.toAnnotation env =<< Type.signatureType signature
+        Just (Src.Signature srcType srcClauses) ->
+          do  noClauses srcClauses
+              (Can.Forall freeVars ctipe) <- Type.toAnnotation env srcType
               ((args, resultType), argBindings) <-
                 Pattern.verify (Error.DPFuncArgs name) $
                   gatherTypedArgs env name srcArgs ctipe Index.first []
@@ -687,8 +688,21 @@ delayedUsage (Result.Result k) =
 -- FIND VARIABLE
 
 
+-- Only a top level definition can carry `where` clauses so far: a local one
+-- would have to take the overloads it asks for as extra arguments, and nothing
+-- passes them.
+noClauses :: [A.Located Src.Constraint] -> Result i w ()
+noClauses srcClauses =
+  case srcClauses of
+    [] ->
+      Result.ok ()
+
+    A.At region (Src.Constraint (A.At _ qual) (A.At _ name) _) : _ ->
+      Result.throw (Error.WhereOnLetDef region qual name)
+
+
 findVar :: A.Region -> Env.Env -> Name.Name -> Result FreeLocals w Can.Expr_
-findVar region (Env.Env localHome vs _ _ _ qvs _ _ _) name =
+findVar region (Env.Env localHome vs _ _ _ qvs _ _ _ qcn cls) name =
   case Map.lookup name vs of
     Just var ->
       case var of
@@ -696,14 +710,25 @@ findVar region (Env.Env localHome vs _ _ _ qvs _ _ _) name =
           logVar name (Can.VarLocal name)
 
         Env.TopLevel _ ->
-          logVar name (Can.VarTopLevel localHome name)
+          logVar name $
+            case Map.lookup (localHome, name) qcn of
+              Just (annotation, constraints) ->
+                Can.VarConstrained (Can.Dispatch localHome region cls) localHome name annotation constraints
+
+              Nothing ->
+                Can.VarTopLevel localHome name
 
         Env.Foreign home annotation ->
           Result.ok $
             if home == ModuleName.debug then
               Can.VarDebug localHome name annotation
             else
-              Can.VarForeign home name annotation
+              case Map.lookup (home, name) qcn of
+                Just (_, constraints) ->
+                  Can.VarConstrained (Can.Dispatch localHome region cls) home name annotation constraints
+
+                Nothing ->
+                  Can.VarForeign home name annotation
 
         Env.Foreigns h hs ->
           Result.throw (Error.AmbiguousVar region Nothing name h hs)
@@ -713,12 +738,12 @@ findVar region (Env.Env localHome vs _ _ _ qvs _ _ _) name =
 
 
 findVarQual :: A.Region -> Env.Env -> Name.Name -> Name.Name -> Result FreeLocals w Can.Expr_
-findVarQual region (Env.Env localHome vs _ _ _ qvs _ _ qos) prefix name =
+findVarQual region (Env.Env localHome vs _ _ _ qvs _ _ qos qcn cls) prefix name =
   case Map.lookup name =<< Map.lookup prefix qos of
     Just (Env.Overload ovHome annotation) ->
       -- Which definition this is stays open until the type checker has
       -- settled the use site's type; see Type.Overload.
-      Result.ok (Can.VarOverload localHome region (ovHome, name) annotation)
+      Result.ok (Can.VarOverload (Can.Dispatch localHome region cls) (ovHome, name) annotation)
 
     Nothing ->
      case Map.lookup prefix qvs of
@@ -729,7 +754,12 @@ findVarQual region (Env.Env localHome vs _ _ _ qvs _ _ qos) prefix name =
                if home == ModuleName.debug then
                  Can.VarDebug localHome name annotation
                else
-                 Can.VarForeign home name annotation
+                 case Map.lookup (home, name) qcn of
+                   Just (_, constraints) ->
+                     Can.VarConstrained (Can.Dispatch localHome region cls) home name annotation constraints
+
+                   Nothing ->
+                     Can.VarForeign home name annotation
 
            Just (Env.Ambiguous h hs) ->
              Result.throw (Error.AmbiguousVar region (Just prefix) name h hs)
