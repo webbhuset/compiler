@@ -577,6 +577,9 @@ problemToHint problem =
           \ both sides so they refer to the same one."
       ]
 
+    -- This fires both when a tag flows through a chain unhandled and when a
+    -- tag is handed to something that does not take it, and the two look
+    -- identical here, so the wording has to be true of both.
     T.TagsUnhandled tags ->
       case map (D.green . D.fromName) tags of
         [] ->
@@ -584,20 +587,20 @@ problemToHint problem =
 
         [t1] ->
           [ D.toFancyHint $
-              ["The",t1,"tag","can","still","occur","at","this","point,","but","it"
-              ,"is","not","handled","here.","Handle","it","before","this","point,"
-              ,"or","add","it","to","the","variant","row","that","is","expected!"
-              ]
+              ["The",t1,"tag","is","not","accepted","here."]
+          , D.toSimpleNote $
+              "Matching a tag and passing the rest along removes it from the row, so\
+              \ if this value goes through other functions first, handling it in one of\
+              \ them is often what you want."
           ]
 
         tagDocs ->
           [ D.toFancyHint $
-              ["The"] ++ D.commaSep "and" id tagDocs
-              ++ ["tags","can","still","occur","at","this","point,","but","they"
-                 ,"are","not","handled","here.","Handle","them","before","this"
-                 ,"point,","or","add","them","to","the","variant","row","that"
-                 ,"is","expected!"
-                 ]
+              ["The"] ++ D.commaSep "and" id tagDocs ++ ["tags","are","not","accepted","here."]
+          , D.toSimpleNote $
+              "Matching a tag and passing the rest along removes it from the row, so\
+              \ if this value goes through other functions first, handling them in one\
+              \ of those is often what you want."
           ]
 
 
