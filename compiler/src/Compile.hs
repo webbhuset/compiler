@@ -8,6 +8,7 @@ module Compile
 
 import qualified Data.Map as Map
 import qualified Data.Name as Name
+import qualified Data.NonEmptyList as NE
 import qualified Data.Set as Set
 
 import qualified AST.Source as Src
@@ -24,6 +25,7 @@ import qualified Reporting.Error as E
 import qualified Reporting.Result as R
 import qualified Reporting.Render.Type.Localizer as Localizer
 import qualified Type.Comparable as Comparable
+import qualified Type.Overload as Overload
 import qualified Type.Constrain.Module as Type
 import qualified Type.Solve as Type
 
@@ -48,6 +50,7 @@ compile pkg ifaces modul =
   do  canonical   <- canonicalize pkg ifaces modul
       let comparables = Comparable.compute ifaces canonical
       annotations <- typeCheck comparables modul canonical
+      ()          <- resolveOverloads modul canonical
       ()          <- nitpick canonical
       objects     <- optimize modul annotations canonical
       return (Artifacts canonical annotations objects (Comparable._atoms comparables))
@@ -75,6 +78,18 @@ typeCheck comparables modul canonical =
 
     Left errors ->
       Left (E.BadTypes (Localizer.fromModule modul) errors)
+
+
+-- Runs after typeCheck, because which definition each overloaded use site
+-- means is decided by the type the solver gave it.
+resolveOverloads :: Src.Module -> Can.Module -> Either E.Error ()
+resolveOverloads modul (Can.Module home _ _ _ _ _ _ overloads _ _) =
+  case unsafePerformIO (Overload.resolveModule home overloads) of
+    [] ->
+      Right ()
+
+    e:es ->
+      Left (E.BadOverloads (Localizer.fromModule modul) (NE.List e es))
 
 
 nitpick :: Can.Module -> Either E.Error ()

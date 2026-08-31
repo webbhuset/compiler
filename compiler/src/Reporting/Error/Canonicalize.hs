@@ -55,7 +55,12 @@ data Error
   | TagRowNotATag A.Region Name.Name
   | TagRowDuplicate A.Region Name.Name
   | TagPatternNesting A.Region Name.Name
-  | OverloadNotImplemented A.Region Name.Name Name.Name
+  | OverloadNotDeclared A.Region Name.Name Name.Name
+  | OverloadForeignAbstract A.Region Name.Name Name.Name Name.Name
+  | OverloadAbstractNotDispatching A.Region Name.Name Name.Name
+  | OverloadInstanceNotDispatching A.Region Name.Name Name.Name
+  | OverloadNotOwned A.Region Name.Name Name.Name ModuleName.Canonical ModuleName.Canonical
+  | OverloadDuplicate Name.Name Name.Name Name.Name A.Region A.Region
   | ImportOpenTag A.Region Name.Name
   | ExportOpenTag A.Region Name.Name
   | DuplicatePattern DuplicatePatternContext Name.Name A.Region A.Region
@@ -288,18 +293,112 @@ toReport source err =
               "Remove one of them, each tag can only appear once in a variant type."
           )
 
-    OverloadNotImplemented region qual name ->
-      Report.Report "OVERLOADS ARE NOT READY" region [] $
+    OverloadNotDeclared region qual name ->
+      Report.Report "UNKNOWN OVERLOAD" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "There is no overloaded name `" ++ Name.toChars name ++ "` in "
+              ++ Name.toChars qual ++ ":"
+          ,
+            D.reflow $
+              "A definition like this one can only be given for a name that some module\
+              \ has declared abstract, by writing its signature with no body. So "
+              ++ Name.toChars qual ++ " needs to say `" ++ Name.toChars qual ++ "."
+              ++ Name.toChars name ++ " : ...` on its own first, and you need to import it."
+          )
+
+    OverloadForeignAbstract region qual name home ->
+      Report.Report "MISPLACED OVERLOAD" region [] $
         Code.toSnippet source region Nothing
           (
             D.reflow $
               "This declares `" ++ Name.toChars qual ++ "." ++ Name.toChars name
-              ++ "` as an overload, which this compiler parses but cannot compile yet:"
+              ++ "` abstract, but we are in module " ++ Name.toChars home ++ ":"
           ,
             D.reflow $
-              "Overloading by signature is only half built. The syntax is accepted so it\
-              \ can be written and read, but nothing resolves a use site to a definition\
-              \ yet, so the declaration cannot mean anything."
+              "A name can only be declared abstract by the module that owns it, so this\
+              \ line belongs in " ++ Name.toChars qual ++ ". If you meant to define "
+              ++ Name.toChars qual ++ "." ++ Name.toChars name
+              ++ " for one particular type, give it a body."
+          )
+
+    OverloadAbstractNotDispatching region qual name ->
+      Report.Report "BAD OVERLOAD SIGNATURE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "I do not know what `" ++ Name.toChars qual ++ "." ++ Name.toChars name
+              ++ "` dispatches on:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "An abstract signature has to be a function whose first argument is a type\
+                  \ variable. That variable is what picks the definition at each use site."
+              , D.toSimpleNote $
+                  "A signature starting with a specific type has nothing to choose between,\
+                  \ so it is really an ordinary definition. Give it a body to define "
+                  ++ Name.toChars qual ++ "." ++ Name.toChars name
+                  ++ " for that one type."
+              ]
+          )
+
+    OverloadInstanceNotDispatching region qual name ->
+      Report.Report "BAD OVERLOAD DEFINITION" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "I do not know which type this definition of `" ++ Name.toChars qual ++ "."
+              ++ Name.toChars name ++ "` is for:"
+          ,
+            D.reflow $
+              "The first argument decides that, so it has to be a named type like `Card` or\
+              \ `List a`. A type variable, a record or a tuple has no name to look up."
+          )
+
+    OverloadNotOwned region qual name nameHome typeHome ->
+      Report.Report "OVERLOAD IN THE WRONG MODULE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This module cannot define `" ++ Name.toChars qual ++ "."
+              ++ Name.toChars name ++ "` for that type:"
+          ,
+            D.stack
+              [ D.reflow $
+                  "A definition has to live either in the module that declares the name, "
+                  ++ Name.toChars (ModuleName._module nameHome) ++ ", or in the module that declares the\
+                  \ type it is for, " ++ Name.toChars (ModuleName._module typeHome) ++ "."
+              , D.toSimpleNote $
+                  "Without that rule two modules could define it differently, and code that\
+                  \ mixed them would silently disagree about what the type means."
+              ]
+          )
+
+    OverloadDuplicate qual name typeName r1 r2 ->
+      let
+        advice =
+          D.reflow $
+            "There can only be one definition per type, otherwise which one runs would\
+            \ depend on where the call happens to be written. Remove one of them."
+      in
+      Report.Report "DUPLICATE OVERLOAD" r2 [] $
+        Code.toPair source r1 r2
+          (
+            D.reflow $
+              "There are two definitions of `" ++ Name.toChars qual ++ "."
+              ++ Name.toChars name ++ "` for " ++ Name.toChars typeName ++ ":"
+          ,
+            advice
+          )
+          (
+            D.reflow $
+              "`" ++ Name.toChars qual ++ "." ++ Name.toChars name
+              ++ "` is defined for " ++ Name.toChars typeName ++ " here:"
+          ,
+            "And again over here:"
+          ,
+            advice
           )
 
     TagPatternNesting region name ->

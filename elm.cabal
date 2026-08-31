@@ -152,6 +152,7 @@ executable elm
         Canonicalize.Environment.Local
         Canonicalize.Expression
         Canonicalize.Module
+        Canonicalize.Overload
         Canonicalize.Pattern
         Canonicalize.Type
         Compile
@@ -196,6 +197,7 @@ executable elm
         Reporting.Error.Import
         Reporting.Error.Json
         Reporting.Error.Main
+        Reporting.Error.Overload
         Reporting.Error.Pattern
         Reporting.Error.Syntax
         Reporting.Error.Type
@@ -213,6 +215,7 @@ executable elm
         Type.Error
         Type.Instantiate
         Type.Occurs
+        Type.Overload
         Type.Solve
         Type.Type
         Type.Unify

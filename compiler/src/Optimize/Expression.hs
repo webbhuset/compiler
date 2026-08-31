@@ -21,6 +21,7 @@ import qualified Data.Index as Index
 import qualified Elm.ModuleName as ModuleName
 import qualified Optimize.Case as Case
 import qualified Optimize.Names as Names
+import qualified Type.Overload as Overload
 import qualified Reporting.Annotation as A
 
 
@@ -49,6 +50,15 @@ optimize cycle (A.At region expression) =
 
     Can.VarForeign home name _ ->
       Names.registerGlobal home name
+
+    -- resolved by Type.Overload once the use site's type was known
+    Can.VarOverload useHome useRegion (ovHome, ovName) _ ->
+      case Overload.lookupResolved useHome useRegion of
+        Just (defHome, defName) ->
+          Names.registerGlobal defHome defName
+
+        Nothing ->
+          Names.registerGlobal ovHome ovName
 
     Can.VarCtor opts home name index _ ->
       Names.registerCtor home name index opts

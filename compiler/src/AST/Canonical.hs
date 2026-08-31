@@ -12,6 +12,7 @@ module AST.Canonical
   , PatternCtorArg(..)
   -- types
   , Annotation(..)
+  , FreeVars
   , Type(..)
   , AliasType(..)
   , FieldType(..)
@@ -23,6 +24,11 @@ module AST.Canonical
   , Union(..)
   , Ctor(..)
   , TagDecl(..)
+  , Overloads(..)
+  , OverloadName
+  , OverloadKey
+  , emptyOverloads
+  , unionOverloads
   , TagKey
   , Exports(..)
   , Export(..)
@@ -82,6 +88,10 @@ data Expr_
   = VarLocal Name
   | VarTopLevel ModuleName.Canonical Name
   | VarKernel Name Name
+  -- an overloaded name: which definition it means depends on the type it is
+  -- used at, so it is left unresolved here and settled after inference. The
+  -- region identifies the use site to the resolver.
+  | VarOverload ModuleName.Canonical A.Region OverloadName Annotation
   | VarForeign ModuleName.Canonical Name Annotation
   | VarCtor CtorOpts ModuleName.Canonical Name Index.ZeroBased Annotation
   | VarTag ModuleName.Canonical Name [Name] -- CACHE type params for inference
@@ -254,9 +264,48 @@ data Module =
     , _unions  :: Map.Map Name Union
     , _aliases :: Map.Map Name Alias
     , _tags    :: Map.Map Name TagDecl
+    , _overloads :: Overloads
     , _binops  :: Map.Map Name Binop
     , _effects :: Effects
     }
+
+
+-- OVERLOADS
+--
+-- An abstract name declared in one module and defined, once per type, in
+-- the module that owns the name or the module that owns the type. Both
+-- tables hold the transitive closure of what a module can see, so a use
+-- site only has to consult its own.
+
+
+type OverloadName = (ModuleName.Canonical, Name)
+
+
+-- The type an overload dispatches on, identified by its head constructor.
+type OverloadKey = (ModuleName.Canonical, Name)
+
+
+data Overloads =
+  Overloads
+    { _abstracts :: Map.Map OverloadName Annotation
+    , _instances :: Map.Map OverloadName (Map.Map OverloadKey OverloadName)
+    }
+    deriving (Eq)
+
+
+emptyOverloads :: Overloads
+emptyOverloads =
+  Overloads Map.empty Map.empty
+
+
+unionOverloads :: Overloads -> Overloads -> Overloads
+unionOverloads (Overloads a1 i1) (Overloads a2 i2) =
+  Overloads (Map.union a1 a2) (Map.unionWith Map.union i1 i2)
+
+
+instance Binary Overloads where
+  get = liftM2 Overloads get get
+  put (Overloads a b) = put a >> put b
 
 
 -- A structural variant tag declaration: `variant Success a` becomes

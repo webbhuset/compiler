@@ -31,10 +31,23 @@ type Result i w a =
   Result.Result i w Error.Error a
 
 
-createInitialEnv :: ModuleName.Canonical -> Map.Map ModuleName.Raw I.Interface -> [Src.Import] -> Result i w Env.Env
+-- The overload table comes back separately because it is not part of the
+-- environment: the environment says which abstract names are in scope, while
+-- the table says which definitions exist anywhere in the program so far. Each
+-- interface already carries the union of its own imports, so unioning the
+-- direct imports here makes the result transitively complete.
+createInitialEnv :: ModuleName.Canonical -> Map.Map ModuleName.Raw I.Interface -> [Src.Import] -> Result i w (Env.Env, Can.Overloads)
 createInitialEnv home ifaces imports =
-  do  (State vs ts cs bs qvs qts qcs) <- foldM (addImport ifaces) emptyState (toSafeImports home imports)
-      Result.ok (Env.Env home (Map.map infoToVar vs) ts cs bs qvs qts qcs)
+  do  let safeImports = toSafeImports home imports
+      (State vs ts cs bs qvs qts qcs qos) <- foldM (addImport ifaces) emptyState safeImports
+      let overloads =
+            foldr (unionImported ifaces) Can.emptyOverloads safeImports
+      Result.ok (Env.Env home (Map.map infoToVar vs) ts cs bs qvs qts qcs qos, overloads)
+
+
+unionImported :: Map.Map ModuleName.Raw I.Interface -> Src.Import -> Can.Overloads -> Can.Overloads
+unionImported ifaces (Src.Import (A.At _ name) _ _) overloads =
+  Can.unionOverloads (I._overloads (ifaces ! name)) overloads
 
 
 infoToVar :: Env.Info Can.Annotation -> Env.Var
@@ -57,12 +70,13 @@ data State =
     , _q_vars :: Env.Qualified Can.Annotation
     , _q_types :: Env.Qualified Env.Type
     , _q_ctors :: Env.Qualified Env.Ctor
+    , _q_overloads :: Map.Map Name.Name (Map.Map Name.Name Env.Overload)
     }
 
 
 emptyState :: State
 emptyState =
-  State Map.empty emptyTypes Map.empty Map.empty Map.empty Map.empty Map.empty
+  State Map.empty emptyTypes Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty
 
 
 emptyTypes :: Env.Exposed Env.Type
@@ -97,9 +111,9 @@ isNormal (Src.Import (A.At _ name) maybeAlias _) =
 
 
 addImport :: Map.Map ModuleName.Raw I.Interface -> State -> Src.Import -> Result i w State
-addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybeAlias exposing) =
+addImport ifaces (State vs ts cs bs qvs qts qcs qos) (Src.Import (A.At _ name) maybeAlias exposing) =
   let
-    (I.Interface pkg defs unions aliases tags binops _) = ifaces ! name
+    (I.Interface pkg defs unions aliases tags binops _ overloads) = ifaces ! name
     !prefix = maybe name id maybeAlias
     !home = ModuleName.Canonical pkg name
 
@@ -116,6 +130,16 @@ addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybe
     !qvs2 = addQualified prefix vars qvs
     !qts2 = addQualified prefix types qts
     !qcs2 = addQualified prefix ctors qcs
+
+    -- Only the names this module itself declares abstract; the rest of its
+    -- table is inherited from its own imports and is not reachable through it.
+    !ownAbstracts =
+      Map.fromList
+        [ (n, Env.Overload h annotation)
+        | ((h, n), annotation) <- Map.toList (Can._abstracts overloads)
+        , h == home
+        ]
+    !qos2 = if Map.null ownAbstracts then qos else Map.insertWith Map.union prefix ownAbstracts qos
   in
   case exposing of
     Src.Open ->
@@ -125,12 +149,12 @@ addImport ifaces (State vs ts cs bs qvs qts qcs) (Src.Import (A.At _ name) maybe
         !cs2 = addExposed cs ctors
         !bs2 = addExposed bs (Map.mapWithKey (binopToBinop home) binops)
       in
-      Result.ok (State vs2 ts2 cs2 bs2 qvs2 qts2 qcs2)
+      Result.ok (State vs2 ts2 cs2 bs2 qvs2 qts2 qcs2 qos2)
 
     Src.Explicit exposedList ->
       foldM
         (addExposedValue home vars rawTypeInfo tagCtors binops)
-        (State vs ts cs bs qvs2 qts2 qcs2)
+        (State vs ts cs bs qvs2 qts2 qcs2 qos2)
         exposedList
 
 
@@ -222,12 +246,12 @@ addExposedValue
   -> State
   -> Src.Exposed
   -> Result i w State
-addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs) exposed =
+addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs qos) exposed =
   case exposed of
     Src.Lower (A.At region name) ->
       case Map.lookup name vars of
         Just info ->
-          Result.ok (State (Map.insertWith Env.mergeInfo name info vs) ts cs bs qvs qts qcs)
+          Result.ok (State (Map.insertWith Env.mergeInfo name info vs) ts cs bs qvs qts qcs qos)
 
         Nothing ->
           Result.throw (Error.ImportExposingNotFound region home name (Map.keys vars))
@@ -242,19 +266,19 @@ addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs) 
                   let
                     !ts2 = Map.insert name (Env.Specific home tipe) ts
                   in
-                  Result.ok (State vs ts2 cs bs qvs qts qcs)
+                  Result.ok (State vs ts2 cs bs qvs qts qcs qos)
 
                 Env.Alias _ _ _ _ ->
                   let
                     !ts2 = Map.insert name (Env.Specific home tipe) ts
                     !cs2 = addExposed cs ctors
                   in
-                  Result.ok (State vs ts2 cs2 bs qvs qts qcs)
+                  Result.ok (State vs ts2 cs2 bs qvs qts qcs qos)
 
             Nothing ->
               case Map.lookup name tagCtors of
                 Just info ->
-                  Result.ok (State vs ts (Map.insertWith Env.mergeInfo name info cs) bs qvs qts qcs)
+                  Result.ok (State vs ts (Map.insertWith Env.mergeInfo name info cs) bs qvs qts qcs qos)
 
                 Nothing ->
                   case checkForCtorMistake name types of
@@ -273,7 +297,7 @@ addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs) 
                     !ts2 = Map.insert name (Env.Specific home tipe) ts
                     !cs2 = addExposed cs ctors
                   in
-                  Result.ok (State vs ts2 cs2 bs qvs qts qcs)
+                  Result.ok (State vs ts2 cs2 bs qvs qts qcs qos)
 
                 Env.Alias _ _ _ _ ->
                   Result.throw (Error.ImportOpenAlias dotDotRegion name)
@@ -290,7 +314,7 @@ addExposedValue home vars types tagCtors binops (State vs ts cs bs qvs qts qcs) 
           let
             !bs2 = Map.insert op (binopToBinop home op binop) bs
           in
-          Result.ok (State vs ts cs bs2 qvs qts qcs)
+          Result.ok (State vs ts cs bs2 qvs qts qcs qos)
 
         Nothing ->
           Result.throw (Error.ImportExposingNotFound region home op (Map.keys binops))

@@ -16,6 +16,7 @@ import qualified Canonicalize.Environment.Dups as Dups
 import qualified Canonicalize.Environment.Foreign as Foreign
 import qualified Canonicalize.Environment.Local as Local
 import qualified Canonicalize.Expression as Expr
+import qualified Canonicalize.Overload as Overload
 import qualified Canonicalize.Pattern as Pattern
 import qualified Canonicalize.Type as Type
 import qualified Data.Index as Index
@@ -41,30 +42,38 @@ type Result i w a =
 
 
 canonicalize :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Result i [W.Warning] Can.Module
-canonicalize pkg ifaces modul@(Src.Module _ _ _ _ _ _ _ _ overloads _ _) =
-  case overloads of
-    A.At region (Src.Overload (A.At _ qual) (A.At _ name) _ _) : _ ->
-      Result.throw (Error.OverloadNotImplemented region qual name)
-
-    [] ->
-      canonicalizeHelp pkg ifaces modul
-
-
-canonicalizeHelp :: Pkg.Name -> Map.Map ModuleName.Raw I.Interface -> Src.Module -> Result i [W.Warning] Can.Module
-canonicalizeHelp pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ _ binops effects) =
-  do  let home = ModuleName.Canonical pkg (Src.getName modul)
+canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ overloads binops effects) =
+  do  let rawHome = Src.getName modul
+      let home = ModuleName.Canonical pkg rawHome
       let cbinops = Map.fromList (map canonicalizeBinop binops)
 
-      (env, cunions, caliases, ctags) <-
-        Local.add modul =<<
-          Foreign.createInitialEnv home ifaces imports
+      (importEnv, importedOverloads) <- Foreign.createInitialEnv home ifaces imports
 
-      cvalues <- canonicalizeValues env values
+      (env0, cunions, caliases, ctags) <- Local.add modul importEnv
+
+      (env, localAbstracts) <- Overload.addAbstracts rawHome overloads env0
+
+      (instanceDefs, coverloads) <-
+        Overload.canonicalizeInstances env
+          (Can.unionOverloads localAbstracts importedOverloads)
+          overloads
+
+      cvalues <- addInstanceDefs instanceDefs <$> canonicalizeValues env values
       ceffects <- Effects.canonicalize env values cunions effects
       cexports <- canonicalizeExports values cunions caliases ctags cbinops ceffects exports
 
-      return $ Can.Module home cexports docs cvalues cunions caliases ctags cbinops ceffects
+      return $ Can.Module home cexports docs cvalues cunions caliases ctags coverloads cbinops ceffects
 
+
+-- Overload definitions go last so their bodies can see every ordinary value in
+-- the module. Nothing can see them: their names are unwritable, and use sites
+-- reach them through the overload table instead.
+addInstanceDefs :: [Can.Def] -> Can.Decls -> Can.Decls
+addInstanceDefs defs decls =
+  case decls of
+    Can.Declare def rest      -> Can.Declare def (addInstanceDefs defs rest)
+    Can.DeclareRec d ds rest  -> Can.DeclareRec d ds (addInstanceDefs defs rest)
+    Can.SaveTheEnvironment    -> foldr Can.Declare Can.SaveTheEnvironment defs
 
 
 -- CANONICALIZE BINOP

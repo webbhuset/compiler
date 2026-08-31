@@ -6,6 +6,7 @@ module Canonicalize.Environment
   , Info(..)
   , mergeInfo
   , Var(..)
+  , Overload(..)
   , Type(..)
   , Ctor(..)
   , addLocals
@@ -55,6 +56,7 @@ data Env =
     , _q_vars :: Qualified Can.Annotation
     , _q_types :: Qualified Type
     , _q_ctors :: Qualified Ctor
+    , _q_overloads :: Map.Map Name.Name (Map.Map Name.Name Overload)
     }
 
 
@@ -98,6 +100,21 @@ data Var
   | TopLevel A.Region
   | Foreign ModuleName.Canonical Can.Annotation
   | Foreigns ModuleName.Canonical (OneOrMore.OneOrMore ModuleName.Canonical)
+
+
+
+-- OVERLOADS
+--
+-- A name declared abstract in some module. It is reached by qualifier like
+-- any other imported value, but the definition it stands for is only known
+-- once the type checker has settled the use site's type.
+
+
+data Overload =
+  Overload
+    { _ov_home :: ModuleName.Canonical
+    , _ov_annotation :: Can.Annotation
+    }
 
 
 
@@ -145,7 +162,7 @@ data Binop =
 
 
 addLocals :: Map.Map Name.Name A.Region -> Env -> Result i w Env
-addLocals names (Env home vars ts cs bs qvs qts qcs) =
+addLocals names (Env home vars ts cs bs qvs qts qcs qos) =
   do  newVars <-
         Map.mergeA
           (Map.mapMissing addLocalLeft)
@@ -154,7 +171,7 @@ addLocals names (Env home vars ts cs bs qvs qts qcs) =
           names
           vars
 
-      Result.ok (Env home newVars ts cs bs qvs qts qcs)
+      Result.ok (Env home newVars ts cs bs qvs qts qcs qos)
 
 
 addLocalLeft :: Name.Name -> A.Region -> Var
@@ -184,7 +201,7 @@ addLocalBoth name region var =
 
 
 findType :: A.Region -> Env -> Name.Name -> Result i w Type
-findType region (Env _ _ ts _ _ _ qts _) name =
+findType region (Env _ _ ts _ _ _ qts _ _) name =
   case Map.lookup name ts of
     Just (Specific _ tipe) ->
       Result.ok tipe
@@ -197,7 +214,7 @@ findType region (Env _ _ ts _ _ _ qts _) name =
 
 
 findTypeQual :: A.Region -> Env -> Name.Name -> Name.Name -> Result i w Type
-findTypeQual region (Env _ _ ts _ _ _ qts _) prefix name =
+findTypeQual region (Env _ _ ts _ _ _ qts _ _) prefix name =
   case Map.lookup prefix qts of
     Just qualified ->
       case Map.lookup name qualified of
@@ -219,7 +236,7 @@ findTypeQual region (Env _ _ ts _ _ _ qts _) prefix name =
 
 
 findCtor :: A.Region -> Env -> Name.Name -> Result i w Ctor
-findCtor region (Env _ _ _ cs _ _ _ qcs) name =
+findCtor region (Env _ _ _ cs _ _ _ qcs _) name =
   case Map.lookup name cs of
     Just (Specific _ ctor) ->
       Result.ok ctor
@@ -232,7 +249,7 @@ findCtor region (Env _ _ _ cs _ _ _ qcs) name =
 
 
 findCtorQual :: A.Region -> Env -> Name.Name -> Name.Name -> Result i w Ctor
-findCtorQual region (Env _ _ _ cs _ _ _ qcs) prefix name =
+findCtorQual region (Env _ _ _ cs _ _ _ qcs _) prefix name =
   case Map.lookup prefix qcs of
     Just qualified ->
       case Map.lookup name qualified of
@@ -254,7 +271,7 @@ findCtorQual region (Env _ _ _ cs _ _ _ qcs) prefix name =
 
 
 findBinop :: A.Region -> Env -> Name.Name -> Result i w Binop
-findBinop region (Env _ _ _ _ binops _ _ _) name =
+findBinop region (Env _ _ _ _ binops _ _ _ _) name =
   case Map.lookup name binops of
     Just (Specific _ binop) ->
       Result.ok binop

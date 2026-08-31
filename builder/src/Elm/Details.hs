@@ -644,7 +644,7 @@ crawlKernel foreignDeps mvar pkg src name =
 getDepHome :: ForeignInterface -> Maybe Pkg.Name
 getDepHome fi =
   case fi of
-    ForeignSpecific (I.Interface pkg _ _ _ _ _ _) -> Just pkg
+    ForeignSpecific (I.Interface pkg _ _ _ _ _ _ _) -> Just pkg
     ForeignAmbiguous                          -> Nothing
 
 

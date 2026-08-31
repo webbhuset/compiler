@@ -46,6 +46,9 @@ data Interface =
     , _comparables :: Set.Set (ModuleName.Canonical, Name.Name)
       -- all comparable newtypes visible from this module, including the
       -- ones inherited from its imports (see Type.Comparable)
+    , _overloads :: Can.Overloads
+      -- every abstract overload name and definition visible from this
+      -- module, its imports included, so a use site consults one table
     }
   deriving (Eq)
 
@@ -78,7 +81,7 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Set.Set (ModuleName.Canonical, Name.Name) -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotations comparables =
+fromModule home (Can.Module _ exports _ _ unions aliases tags overloads binops _) annotations comparables =
   Interface
     { _home = home
     , _values = restrict exports annotations
@@ -87,6 +90,7 @@ fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotati
     , _tags = restrict exports tags
     , _binops = restrict exports (Map.map (toOp annotations) binops)
     , _comparables = comparables
+    , _overloads = overloads
     }
 
 
@@ -174,7 +178,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _ _ _) =
+private (Interface pkg _ unions aliases _ _ _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -205,8 +209,8 @@ privatize di =
 
 
 instance Binary Interface where
-  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get
-  put (Interface a b c d e f g) = put a >> put b >> put c >> put d >> put e >> put f >> put g
+  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (Interface a b c d e f g h) = put a >> put b >> put c >> put d >> put e >> put f >> put g >> put h
 
 
 instance Binary Union where

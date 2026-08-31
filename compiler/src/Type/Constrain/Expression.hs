@@ -21,6 +21,7 @@ import qualified Reporting.Error.Type as E
 import Reporting.Error.Type (Expected(..), Context(..), SubContext(..), MaybeName(..), Category(..), PExpected(..), PContext(..))
 import qualified Type.Constrain.Pattern as Pattern
 import qualified Type.Instantiate as Instantiate
+import qualified Type.Overload as Overload
 import Type.Type as Type hiding (Descriptor(..))
 
 
@@ -53,6 +54,19 @@ constrain rtv (A.At region expression) expected =
 
     Can.VarForeign _ name annotation ->
       return $ CForeign region name annotation expected
+
+    -- An overloaded name is typed by its abstract signature; the variable
+    -- standing for this use site is handed to Type.Overload, which reads
+    -- the type back once the solver has settled it and picks a definition.
+    Can.VarOverload useHome useRegion (ovHome, ovName) annotation ->
+      do  var <- mkFlexVar
+          let tipe = VarN var
+          Overload.record useHome useRegion (ovHome, ovName) var
+          return $ exists [var] $
+            CAnd
+              [ CForeign region ovName annotation (NoExpectation tipe)
+              , CEqual region (Foreign ovName) tipe expected
+              ]
 
     Can.VarCtor _ _ name _ annotation ->
       return $ CForeign region name annotation expected
@@ -500,6 +514,7 @@ getName (A.At _ expr) =
     Can.VarLocal name        -> FuncName name
     Can.VarTopLevel _ name   -> FuncName name
     Can.VarForeign _ name _  -> FuncName name
+    Can.VarOverload _ _ (_, name) _ -> FuncName name
     Can.VarCtor _ _ name _ _ -> CtorName name
     Can.VarOperator op _ _ _ -> OpName op
     Can.VarKernel _ name     -> FuncName name

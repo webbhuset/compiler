@@ -40,7 +40,7 @@ type Annotations =
 
 
 optimize :: Annotations -> Can.Module -> Result i [W.Warning] Opt.LocalGraph
-optimize annotations (Can.Module home _ _ decls unions aliases tags _ effects) =
+optimize annotations (Can.Module home _ _ decls unions aliases tags _ _ effects) =
   addDecls home annotations decls $
     addEffects home effects $
       addUnions home unions $
