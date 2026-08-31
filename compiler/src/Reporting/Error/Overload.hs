@@ -11,6 +11,7 @@ import qualified AST.Canonical as Can
 import qualified AST.Prim.Module as Module
 import qualified AST.Prim.Name as N
 import qualified AST.Prim.TypeVar as T
+import qualified AST.Utils.Type as Type
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
 import qualified Reporting.Doc as D
@@ -50,8 +51,14 @@ toReport source localizer err =
             D.stack
               [ D.indent 4 $ RT.canToDoc localizer RT.None dispatched
               , D.reflow $
-                  "Add one in module " ++ homeOf dispatched home ++ ", or in module "
-                  ++ Module.toChars (ModuleName._module home) ++ "."
+                  case homeOf dispatched of
+                    Just typeHome | typeHome /= ModuleName._module home ->
+                      "Add one in module " ++ Module.toChars typeHome ++ ", or in module "
+                      ++ Module.toChars (ModuleName._module home) ++ "."
+
+                    _ ->
+                      "That type belongs to no module of its own, so the definition has to\
+                      \ go in module " ++ Module.toChars (ModuleName._module home) ++ "."
               ]
           )
 
@@ -105,9 +112,8 @@ toQualified home name =
   Module.toChars (ModuleName._module home) ++ "." ++ N.toChars name
 
 
-homeOf :: Can.Type -> ModuleName.Canonical -> String
-homeOf tipe fallback =
-  case tipe of
-    Can.TType home _ _    -> Module.toChars (ModuleName._module home)
-    Can.TAlias home _ _ _ -> Module.toChars (ModuleName._module home)
-    _                     -> Module.toChars (ModuleName._module fallback)
+homeOf :: Can.Type -> Maybe Module.Name
+homeOf tipe =
+  case Type.iteratedDealias tipe of
+    Can.TType home _ _ -> Just (ModuleName._module home)
+    _                  -> Nothing

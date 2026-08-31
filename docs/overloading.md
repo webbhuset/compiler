@@ -165,6 +165,20 @@ cannot have definitions. Tuples are the one structural exception: they are
 treated as belonging to `Tuple`, so only the module that declares the name can
 define for them, which is the same answer the rule would give.
 
+A type alias is not a type, so it cannot own anything either. Dispatch sees
+through aliases, which means
+
+```elm
+type alias Name = String
+
+Ordering.compare : Name -> Name -> Order      -- rejected outside String or Ordering
+```
+
+is a definition for `String` and has to live where one for `String` would.
+Without that, `Name` and `String` — the same type — could each carry a
+different ordering, and which one ran would depend on how a signature happened
+to spell the type.
+
 
 ## Operators
 
