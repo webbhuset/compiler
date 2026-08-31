@@ -153,7 +153,7 @@ data Context
 
 
 check :: Can.Module -> Either (NE.List Error) ()
-check (Can.Module _ _ _ decls _ _ _ _ _) =
+check (Can.Module _ _ _ decls _ _ _ _ _ _) =
   case checkDecls decls [] of
     []   -> Right ()
     e:es -> Left (NE.List e es)
@@ -207,6 +207,7 @@ checkExpr (A.At region expression) errors =
     Can.VarLocal _          -> errors
     Can.VarTopLevel _ _     -> errors
     Can.VarKernel _ _       -> errors
+    Can.VarOverload _ _ _ _ -> errors
     Can.VarForeign _ _ _    -> errors
     Can.VarCtor _ _ _ _ _   -> errors
     Can.VarTag _ _ _        -> errors

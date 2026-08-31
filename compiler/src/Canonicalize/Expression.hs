@@ -723,7 +723,7 @@ delayedUsage (Result.Result k) =
 
 
 findVar :: A.Region -> Env.Env -> N.Name -> Result FreeLocals w Can.Expr_
-findVar region (Env.Env localHome vs _ _ _ qvs _ _) name =
+findVar region (Env.Env localHome vs _ _ _ qvs _ _ _) name =
   case Map.lookup name vs of
     Just var ->
       case var of
@@ -748,28 +748,35 @@ findVar region (Env.Env localHome vs _ _ _ qvs _ _) name =
 
 
 findVarQual :: A.Region -> Env.Env -> Module.Prefix -> N.Name -> Result FreeLocals w Can.Expr_
-findVarQual region (Env.Env localHome vs _ _ _ qvs _ _) prefix name =
-  case Map.lookup prefix qvs of
-    Just qualified ->
-      case Map.lookup name qualified of
-        Just (Env.Specific home annotation) ->
-          Result.ok $
-            if home == ModuleName.debug then
-              Can.VarDebug localHome name annotation
-            else
-              Can.VarForeign home name annotation
-
-        Just (Env.Ambiguous h hs) ->
-          Result.throw (Error.AmbiguousVar region (Just prefix) name h hs)
-
-        Nothing ->
-          Result.throw (Error.NotFoundVar region (Just prefix) name (toPossibleNames vs qvs))
+findVarQual region (Env.Env localHome vs _ _ _ qvs _ _ qos) prefix name =
+  case Map.lookup name =<< Map.lookup prefix qos of
+    Just (Env.Overload ovHome annotation) ->
+      -- Which definition this is stays open until the type checker has
+      -- settled the use site's type; see Type.Overload.
+      Result.ok (Can.VarOverload localHome region (ovHome, name) annotation)
 
     Nothing ->
-      let prefixName = Module.fromString (Module.prefixToString prefix) in
-      if Module.isKernel prefixName && Pkg.isKernel (ModuleName._package localHome)
-      then Result.ok $ Can.VarKernel (Module.getKernel prefixName) name
-      else Result.throw $ Error.NotFoundVar region (Just prefix) name (toPossibleNames vs qvs)
+      case Map.lookup prefix qvs of
+        Just qualified ->
+          case Map.lookup name qualified of
+            Just (Env.Specific home annotation) ->
+              Result.ok $
+                if home == ModuleName.debug then
+                  Can.VarDebug localHome name annotation
+                else
+                  Can.VarForeign home name annotation
+
+            Just (Env.Ambiguous h hs) ->
+              Result.throw (Error.AmbiguousVar region (Just prefix) name h hs)
+
+            Nothing ->
+              Result.throw (Error.NotFoundVar region (Just prefix) name (toPossibleNames vs qvs))
+
+        Nothing ->
+          let prefixName = Module.fromString (Module.prefixToString prefix) in
+          if Module.isKernel prefixName && Pkg.isKernel (ModuleName._package localHome)
+          then Result.ok $ Can.VarKernel (Module.getKernel prefixName) name
+          else Result.throw $ Error.NotFoundVar region (Just prefix) name (toPossibleNames vs qvs)
 
 
 toPossibleNames :: Map.Map N.Name Env.Var -> Env.Qualified N.Name Can.Annotation -> Error.PossibleNames N.Name

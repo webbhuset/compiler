@@ -125,7 +125,7 @@ merge (Types types1) (Types types2) =
 
 
 fromInterface :: Module.Name -> I.Interface -> Types
-fromInterface name (I.Interface pkg _ unions aliases _ _ _) =
+fromInterface name (I.Interface pkg _ unions aliases _ _ _ _) =
   Types $ Map.singleton (ModuleName.Canonical pkg name) $
     Types_ (Map.map I.extractUnion unions) (Map.map I.extractAlias aliases)
 
@@ -134,7 +134,7 @@ fromDependencyInterface :: ModuleName.Canonical -> I.DependencyInterface -> Type
 fromDependencyInterface home di =
   Types $ Map.singleton home $
     case di of
-      I.Public (I.Interface _ _ unions aliases _ _ _) ->
+      I.Public (I.Interface _ _ unions aliases _ _ _ _) ->
         Types_ (Map.map I.extractUnion unions) (Map.map I.extractAlias aliases)
 
       I.Private _ unions aliases ->

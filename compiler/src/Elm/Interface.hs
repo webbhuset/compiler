@@ -57,6 +57,9 @@ data Interface =
     , _comparables :: Set.Set (ModuleName.Canonical, T.Name)
       -- all comparable newtypes visible from this module, including the
       -- ones inherited from its imports (see Type.Comparable)
+    , _overloads :: Can.Overloads
+      -- every abstract overload name and definition visible from this
+      -- module, its imports included, so a use site consults one table
     }
   deriving (Eq)
 
@@ -89,7 +92,7 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Set.Set (ModuleName.Canonical, T.Name) -> Interface
-fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotations comparables =
+fromModule home (Can.Module _ exports _ _ unions aliases tags overloads binops _) annotations comparables =
   Interface
     { _home    = home
     , _values  = restrictValues  exports annotations
@@ -98,6 +101,7 @@ fromModule home (Can.Module _ exports _ _ unions aliases tags binops _) annotati
     , _tags    = restrictTags    exports tags
     , _binops  = restrictBinops  exports (Map.map (toOp annotations) binops)
     , _comparables = comparables
+    , _overloads = overloads
     }
 
 
@@ -214,7 +218,7 @@ public =
 
 
 private :: Interface -> DependencyInterface
-private (Interface pkg _ unions aliases _ _ _) =
+private (Interface pkg _ unions aliases _ _ _ _) =
   Private pkg (Map.map extractUnion unions) (Map.map extractAlias aliases)
 
 
@@ -245,7 +249,7 @@ privatize di =
 
 
 eInterface :: Interface -> E.Builder
-eInterface (Interface h vs us as ts bs cs) =
+eInterface (Interface h vs us as ts bs cs os) =
   Pkg.eName h
   <> E.dict32 N.encode eAnnotation vs
   <> E.dict32 T.encode eUnion us
@@ -253,6 +257,7 @@ eInterface (Interface h vs us as ts bs cs) =
   <> E.dict32 N.encode eTagDecl ts
   <> E.dict32 Op.encode eBinop bs
   <> E.set32 (\(home, name) -> ModuleName.eCanonical home <> T.encode name) cs
+  <> eOverloads os
 
 
 dInterface :: D.Decoder Interface
@@ -265,6 +270,7 @@ dInterface =
     <*> D.dict32 N.decode dTagDecl
     <*> D.dict32 Op.decode dBinop
     <*> D.set32 (liftM2 (,) ModuleName.dCanonical T.decode)
+    <*> dOverloads
 
 
 eUnion :: Union -> E.Builder
@@ -474,3 +480,36 @@ eTagDecl (Can.TagDecl vs) =
 dTagDecl :: D.Decoder Can.TagDecl
 dTagDecl =
   liftM Can.TagDecl (D.list8 T.dVar)
+
+
+eOverloads :: Can.Overloads -> E.Builder
+eOverloads (Can.Overloads abstracts instances) =
+  E.dict32 eOverloadName eAnnotation abstracts
+  <> E.dict32 eOverloadName (E.dict32 eOverloadKey eOverloadName) instances
+
+
+dOverloads :: D.Decoder Can.Overloads
+dOverloads =
+  liftM2 Can.Overloads
+    (D.dict32 dOverloadName dAnnotation)
+    (D.dict32 dOverloadName (D.dict32 dOverloadKey dOverloadName))
+
+
+eOverloadName :: Can.OverloadName -> E.Builder
+eOverloadName (home, name) =
+  ModuleName.eCanonical home <> N.encode name
+
+
+dOverloadName :: D.Decoder Can.OverloadName
+dOverloadName =
+  liftM2 (,) ModuleName.dCanonical N.decode
+
+
+eOverloadKey :: Can.OverloadKey -> E.Builder
+eOverloadKey (home, name) =
+  ModuleName.eCanonical home <> T.encode name
+
+
+dOverloadKey :: D.Decoder Can.OverloadKey
+dOverloadKey =
+  liftM2 (,) ModuleName.dCanonical T.decode

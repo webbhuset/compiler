@@ -88,7 +88,7 @@ data Binop = Binop Comment Type.Type Op.Associativity Op.Precedence
 
 
 fromModule :: Can.Module -> IO (Either E.Error Module)
-fromModule modul@(Can.Module _ exports docs _ _ _ _ _ _) =
+fromModule modul@(Can.Module _ exports docs _ _ _ _ _ _ _) =
   case exports of
     Can.ExportEverything region ->
       return $ Left $ E.ImplicitExposing region
@@ -517,7 +517,7 @@ onlyInDocs errDup errDoc name regions =
 
 
 checkDefs :: Map.Map T.Name (A.Region, Can.ExportType) -> Map.Map N.Name A.Region -> Map.Map Op.Name A.Region -> Src.Comment -> Map.Map N.Name Src.Comment -> Map.Map T.Name Src.Comment -> Can.Module -> Either E.Error Module
-checkDefs exportTypes exportValues exportBinops (Src.Comment overview) vComments tComments (Can.Module (ModuleName.Canonical _ name) _ _ decls unions aliases _ binops _) =
+checkDefs exportTypes exportValues exportBinops (Src.Comment overview) vComments tComments (Can.Module (ModuleName.Canonical _ name) _ _ decls unions aliases _ _ binops _) =
   case snd $ Result.run checker of
     Right a -> Right a
     Left xs -> Left $ E.DefProblems (OOM.destruct NE.List xs)
