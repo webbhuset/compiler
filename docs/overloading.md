@@ -1,60 +1,95 @@
 # Overloading by signature
 
-One name can have many definitions, and the compiler picks the one whose
-signature matches the type it is used at. There is no `class` and no
-`instance`: a module declares a name with `abstract`, and other modules define
-it by writing that name qualified, with a concrete signature and a body.
+## Two kinds of polymorphism
+
+*Polymorphism* is one name in the source that works for more than one type.
+There are two ways to get it, and they are genuinely different.
+
+**Parametric.** One implementation works for every type, because it never looks
+inside the values:
 
 ```elm
-module Ord exposing (Ordering(..))
-
-
-type Ordering
-    = Less
-    | Same
-    | More
-
-
--- the name exists, dispatches on `a`, and has no body here
-abstract compare : a -> a -> Ordering
+List.length : List a -> Int
 ```
 
+`List.length` counts links. It does not care whether it is holding `Int`s or
+`String`s, so a single piece of compiled code serves them all. Elm has had this
+since the beginning and it needs no machinery — the `a` in the signature is the
+whole story.
+
+**Ad-hoc.** A *different* implementation per type, sharing one name:
+
 ```elm
-module Card exposing (Card(..))
+compare : Int -> Int -> Order
+compare : String -> String -> Order
+compare : List Int -> List Int -> Order
+```
 
-import Ord exposing (Ordering(..))
+Comparing two `Int`s is a machine instruction. Comparing two `String`s walks
+characters. Comparing two lists walks elements and calls the element's
+comparison. Same name, three unrelated bodies. There is nothing to write once,
+so the language has to provide some way to say "pick the right one here".
 
 
+## Where Elm is today
+
+Elm supports ad-hoc polymorphism, but only for a fixed set of types chosen by
+the compiler. That is what the special type variables mean:
+
+```elm
+compare : comparable -> comparable -> Order
+(+)     : number -> number -> number
+(++)    : appendable -> appendable -> appendable
+```
+
+`comparable` is not a type variable like `a`. It is a hard-coded list — `Int`,
+`Float`, `Char`, `String`, and lists and tuples of those — and `compare` has a
+different implementation for each. It works well, right up to the moment you
+define a type of your own:
+
+```elm
 type Card
     = Card Int
-
-
-Ord.compare : Card -> Card -> Ordering
-Ord.compare (Card a) (Card b) =
-    if a < b then
-        Less
-
-    else if a > b then
-        More
-
-    else
-        Same
 ```
 
-```elm
-import Card exposing (Card(..))
-import Ord
+`Card` is not comparable, cannot be a `Dict` key, cannot be sorted by
+`List.sort`, and there is nothing you can write to change that. The lattice is
+closed and only the compiler can add to it.
 
 
-Ord.compare (Card 1) (Card 2)      --> Ord.Less
-```
+## How other languages get out of this
 
-One keyword and a qualified name in definition position is the whole ceremony.
-Nothing is opened, nothing is imported beyond the module that declares the
-name, and the use site reads like any other qualified call.
+**Overloading**, as in C++, Java, C# and Swift: you may declare several
+functions with the same name and different parameter types, and the compiler
+picks one per call site by looking at the argument types. There is no new
+vocabulary to learn — an overload is an ordinary function that happens to share
+a name. The catch is that it stops at the call site. You cannot write a generic
+`sort` that uses an overloaded `compare` on its element type, because inside
+`sort` the element type is not known yet, so there is nothing to pick from.
+
+**Type classes**, as in Haskell, or traits in Rust: you declare a `class Ord a`
+with a method, `instance` it per type, and — the important part — a signature
+can *carry the requirement*: `sort :: Ord a => [a] -> [a]`. That solves the
+generic case, which is why it is the design that won. The cost is two new
+concepts, a class and an instance, plus rules about which module may write an
+instance.
+
+Standard ML sits where Elm does: `+` is overloaded over a fixed set of numeric
+types and you cannot extend it.
 
 
-## Declaring a name abstract
+## What this design is
+
+**Overloading by signature** is the first option plus the one thing it was
+missing. Declare that a name exists and dispatches on a type variable; define
+it per type by writing that name with a concrete signature; and where a
+function needs it on a type it does not know yet, say so in a `where` clause —
+which is a signature, not a new kind of declaration.
+
+No `class`, no `instance`, and nothing to learn beyond "a signature can say
+what it needs". The next five sections build it up one step at a time.
+
+## Step 1: declare the name
 
 An abstract declaration is a signature with no body, introduced by `abstract`:
 
@@ -78,7 +113,7 @@ forgot to define one — so a type with no definition is an error at the use
 site, not a value that quietly misbehaves.
 
 
-## Defining it for a type
+## Step 2: define it for a type
 
 A definition is the same qualified name with a concrete signature and a body:
 
@@ -127,14 +162,111 @@ Definitions are not values. They have no name you can write, so they cannot be
 exposed, passed around, or shadowed. Every route to one goes through the
 overloaded name.
 
+Those two steps are the whole thing, across three modules:
 
-## Ownership
+```elm
+module Ord exposing (Ordering(..))
+
+
+type Ordering
+    = Less
+    | Same
+    | More
+
+
+abstract compare : a -> a -> Ordering
+```
+
+```elm
+module Card exposing (Card(..))
+
+import Ord exposing (Ordering(..))
+
+
+type Card
+    = Card Int
+
+
+Ord.compare : Card -> Card -> Ordering
+Ord.compare (Card a) (Card b) =
+    if a < b then
+        Less
+
+    else if a > b then
+        More
+
+    else
+        Same
+```
+
+```elm
+import Card exposing (Card(..))
+import Ord
+
+
+Ord.compare (Card 1) (Card 2)      --> Ord.Less
+```
+
+Nothing was opened, nothing was imported beyond the module that declares the
+name, and the use site reads like any other qualified call. Compare that with
+what a type class would have needed: a `class` declaration, an `instance`
+block, and a rule about who may write one.
+
+
+## Step 3: use it where the type is not known yet
+
+A function that uses an overload on one of its own type variables says so,
+because otherwise its signature would be a lie — it does not really work for
+every `a`:
+
+```elm
+smallest : a -> a -> Ordering
+    where Ord.compare : a -> a -> Ordering
+smallest x y =
+    Ord.compare x y
+```
+
+The clause is a signature, which is a concept the language already has. It says
+nothing new about `Ord.compare`: the type has to be exactly the abstract
+signature with its own variable replaced by the one you need it at, and the
+compiler checks that. Several clauses stack, one `where` line each.
+
+A definition can have them too, which is how an overload is given for a
+container:
+
+```elm
+Ord.compare : List a -> List a -> Ordering
+    where Ord.compare : a -> a -> Ordering
+Ord.compare xs ys =
+    case ( xs, ys ) of
+        ( [], [] ) -> Same
+        ( [], _ ) -> Less
+        ( _, [] ) -> More
+        ( x :: xrest, y :: yrest ) ->
+            case Ord.compare x y of
+                Same -> Ord.compare xrest yrest
+                other -> other
+```
+
+Then `Ord.compare [ [ card ] ] [ [ card ] ]` works: the use resolves to the
+`List` definition, which needs `Ord.compare` at `List Card`, which resolves to
+the `List` definition again, which needs it at `Card`.
+
+Nothing about this is visible in the type. `smallest` is a two argument
+function, `List.sort` would be a one argument function, and a `where` clause
+neither adds a parameter you can see nor changes what the value can be passed
+to.
+
+
+## Step 4: who is allowed to define what
 
 > A definition must live in the module that declares the **name**, or in the
 > module that declares the **type** it dispatches on.
 
-Both modules above satisfy it: `Card` owns `Card`, and `Ord` owns `compare`, so
-`Ord` is where a definition for `Int` goes:
+Every example so far satisfies it. `Card` declares the type `Card`, so it may
+define `Ord.compare` for it. `Ord` declares the name `compare`, so it may
+define it for types it does not own — which is where the definitions for
+`Int`, `String` and `List a` go:
 
 ```elm
 module Ord exposing (Ordering(..))
@@ -212,7 +344,7 @@ different ordering, and which one ran would depend on how a signature happened
 to spell the type.
 
 
-## Operators
+## Step 5: operators
 
 An operator dispatches when the function behind it does. Declare it in the
 usual way, pointing at a function with a `where` clause:
@@ -238,51 +370,6 @@ to `Basics`, which every module imports openly, so only elm/core can give those
 a new meaning. Making `<` itself dispatch means changing `Basics` to declare
 `compare` abstract and derive the comparisons from it — at which point
 `comparable` has nothing left to do.
-
-
-## `where` clauses
-
-A function that uses an overload on one of its own type variables says so,
-because otherwise its signature would be a lie — it does not really work for
-every `a`:
-
-```elm
-smallest : a -> a -> Ordering
-    where Ord.compare : a -> a -> Ordering
-smallest x y =
-    Ord.compare x y
-```
-
-The clause is a signature, which is a concept the language already has. It says
-nothing new about `Ord.compare`: the type has to be exactly the abstract
-signature with its own variable replaced by the one you need it at, and the
-compiler checks that. Several clauses stack, one `where` line each.
-
-A definition can have them too, which is how an overload is given for a
-container:
-
-```elm
-Ord.compare : List a -> List a -> Ordering
-    where Ord.compare : a -> a -> Ordering
-Ord.compare xs ys =
-    case ( xs, ys ) of
-        ( [], [] ) -> Same
-        ( [], _ ) -> Less
-        ( _, [] ) -> More
-        ( x :: xrest, y :: yrest ) ->
-            case Ord.compare x y of
-                Same -> Ord.compare xrest yrest
-                other -> other
-```
-
-Then `Ord.compare [ [ card ] ] [ [ card ] ]` works: the use resolves to the
-`List` definition, which needs `Ord.compare` at `List Card`, which resolves to
-the `List` definition again, which needs it at `Card`.
-
-Nothing about this is visible in the type. `smallest` is a two argument
-function, `List.sort` would be a one argument function, and a `where` clause
-neither adds a parameter you can see nor changes what the value can be passed
-to.
 
 
 ## What resolves and what does not
@@ -383,17 +470,22 @@ Because interfaces changed shape, `elm-stuff` and `~/.elm` from an earlier
 build have to be removed.
 
 
-## Relationship to `comparable`
+## Back to `comparable`
 
-`comparable`, `number`, `appendable` and `compappend` are untouched. They could
-now become ordinary abstract names with ordinary definitions, replacing a
-hard-coded lattice with something extensible, but that is a change to elm/core
-rather than to the compiler and has not been made.
+The opening said `comparable` is a closed list only the compiler can add to.
+Nothing here has changed that yet: `comparable`, `number`, `appendable` and
+`compappend` are untouched, and `Card` still cannot be a `Dict` key.
+
+What has changed is that the closed list is no longer necessary. `compare`
+could become an ordinary abstract name with ordinary definitions for `Int`,
+`Float`, `Char`, `String`, `List a` and tuples — the same set, written out —
+and then a `Card` definition would join it like any other. That is a change to
+elm/core rather than to the compiler, and it has not been made.
 
 `comparable` cannot be written as a definition, and deliberately so:
 
 ```elm
-Ordering.compare : comparable -> comparable -> Order    -- rejected
+Ord.compare : comparable -> comparable -> Ordering      -- rejected
 ```
 
 A definition is chosen by the head constructor of its first argument, and
