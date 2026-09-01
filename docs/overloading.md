@@ -357,35 +357,47 @@ to spell the type.
 
 An operator dispatches when the function behind it does. An `infix`
 declaration names an ordinary function, and if that function has a `where`
-clause, the operator resolves exactly as a call to it would. That is what
-makes the built-in operators reachable.
+clause, the operator resolves exactly as a call to it would. That is what puts
+the built-in operators within reach of your own types.
 
-### The comparison operators
+### Making a type comparable
 
-`<`, `>`, `<=` and `>=` are the ones worth having, and today they are stuck at
-`comparable` — the closed list from the opening. The plan is to expose
-`compare` as an abstract name, so that a module which owns a type makes all
-four operators work on it by writing one definition:
+`<`, `>`, `<=` and `>=` are stuck at `comparable` today — the closed list from
+the opening. The plan is to expose `compare` as an abstract name, so a module
+that owns a type makes all four work by writing one definition:
 
 ```elm
+module Card exposing (Card(..))
+
+
+type Card
+    = Card Int
+
+
 Basics.compare : Card -> Card -> Order
 Basics.compare (Card a) (Card b) =
     Basics.compare a b
 ```
 
-and `Card 1 < Card 2` compiles, with no change at the use site.
+That is the whole change. `Card 1 < Card 2` compiles, and so do `>`, `<=` and
+`>=`, with nothing to write at the use site. The inner `Basics.compare a b`
+resolves to the `Int` definition, so you only ever describe the one step your
+type adds.
 
-The operators come for free because they are already derived from `compare` —
-that is how they are implemented today:
+The operators come along because they are already derived from the comparison
+— that is how they are implemented today:
 
 ```js
 var _Utils_lt = F2(function(a, b) { return _Utils_cmp(a, b) < 0; });
 ```
 
-so `lt`, `gt`, `le` and `ge` become ordinary constrained functions over the
-abstract `compare`, and nothing about the shape of the runtime changes:
+so `lt` and its friends become ordinary constrained functions and the `infix`
+declarations keep naming them:
 
 ```elm
+infix non 4 (<) = lt
+
+
 lt : a -> a -> Bool
     where Basics.compare : a -> a -> Order
 lt x y =
@@ -393,41 +405,61 @@ lt x y =
 ```
 
 Deriving them costs nothing. `Order` has three zero-argument constructors, so
-under `--optimize` its values are the integers `0`, `1` and `2`, and the
-comparison against `LT` compiles to a falsy test:
+under `--optimize` its values are the integers `0`, `1` and `2`, and comparing
+against `LT` is a falsy test:
 
 ```js
 var $Enum$Less = 0;
 var $Enum$lt = F2(function (a, b) { return !A2($Enum$cmp, a, b); });
 ```
 
-No allocation, and one call where the current `_Utils_lt` also makes one.
+No allocation, and one call where `_Utils_lt` also makes one.
 
-The same shape applies to arithmetic: one abstract `add`, and `+` follows.
+The payoff is bigger than the operators. `List.sort`, `Dict` and `Set` are all
+defined in terms of the comparison, so they would take a `where` clause instead
+of `comparable` and start working for any type that has a definition — which is
+the thing `comparable` cannot do today.
 
-**This part is not implemented.** An `infix` that names an abstract rather
-than an ordinary function currently crashes the compiler instead of working or
-reporting anything useful, so the change to `Basics` is gated on fixing that
-first.
+### Making a type addable
 
-### Operators of your own
-
-The same mechanism is available for an operator you declare yourself, which
-does work today:
+The same shape gives `+` for a vector:
 
 ```elm
-infix non 4 (|<|) = lt
+module Vec exposing (Vec2(..))
 
 
-lt : a -> a -> Bool
-    where Ord.compare : a -> a -> Ordering
-lt x y =
-    Ord.compare x y == Less
+type Vec2
+    = Vec2 Float Float
+
+
+Basics.add : Vec2 -> Vec2 -> Vec2
+Basics.add (Vec2 x1 y1) (Vec2 x2 y2) =
+    Vec2 (Basics.add x1 x2) (Basics.add y1 y2)
 ```
 
-`Card 1 |<| Card 2` picks the `Card` definition and `[ Card 1 ] |<| [ Card 2 ]`
-builds the `List` one, both evaluating to `True`. Using `|<|` inside another
-function asks for the same clause a direct call would.
+and `Vec2 1 2 + Vec2 3 4` is `Vec2 4 6`. Again the two inner additions resolve
+to the `Float` definition, so the only thing written down is what a vector adds
+on top of it.
+
+Arithmetic needs one extra step that comparison does not. `<` already has `lt`
+sitting behind it, but `+` *is* `add`, and an `infix` cannot name an abstract
+name directly. So the operator names a one-line forwarding function:
+
+```elm
+infix left 6 (+) = plus
+
+
+plus : a -> a -> a
+    where Basics.add : a -> a -> a
+plus x y =
+    Basics.add x y
+```
+
+**None of this is implemented**, but it needs no compiler change — both shapes
+above compile and run today. What is missing is the edit to elm/core: make
+`compare` and `add` abstract, write out the definitions for `Int`, `Float`,
+`Char`, `String`, lists and tuples, and give `Dict`, `Set` and `List.sort`
+their `where` clauses.
 
 
 ## What resolves and what does not
