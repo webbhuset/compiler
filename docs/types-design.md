@@ -10,8 +10,8 @@
 > 3. A row written in a `type` declaration **declares its tags**, so simple
 >    cases need only one declaration.
 >
-> For what exists now, read [records-and-variants.md](records-and-variants.md);
-> the mental model there is the same, but today a `type` may list many
+> For what exists now, read [structural-variants.md](structural-variants.md);
+> the mental model here is the same, but today a `type` may list many
 > constructors, which is a fourth way of saying something this design says
 > once.
 
@@ -370,8 +370,6 @@ A short way to decide:
 
 ## Where to go next
 
-- [records-and-variants.md](records-and-variants.md) — the same model against
-  the compiler as it is today.
-- [structural-variants.md](structural-variants.md) — the reference for rows:
-  exhaustiveness, narrowing a row with a `case`, the restrictions, and the
-  runtime representation.
+- [structural-variants.md](structural-variants.md) — rows against the compiler
+  as it is today: why you would reach for them, exhaustiveness, narrowing a row
+  with a `case`, the restrictions, and the runtime representation.

@@ -254,7 +254,7 @@ Worker.spawn Counter.main
 
 ## Structural variants
 
-*[guide](docs/records-and-variants.md) · [reference](docs/structural-variants.md)*
+*[docs](docs/structural-variants.md) · [type system](docs/types-design.md)*
 
 Anonymous, row-polymorphic sum types — the dual of extensible records. Tags
 are declared once and then combined structurally, so functions can accept
