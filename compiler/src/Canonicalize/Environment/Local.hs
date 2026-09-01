@@ -296,7 +296,7 @@ addCtors (Src.Module _ _ _ _ _ unions aliases _ _ _ _) tagInfo env@(Env.Env home
   do  unionInfo <- traverse (canonicalizeUnion env) unions
       aliasInfo <- traverse (canonicalizeAlias env) aliases
 
-      -- tagInfo is included again so that a `variant` clashing with a local
+      -- tagInfo is included again so that a `type tag` clashing with a local
       -- constructor is still reported as a duplicate
       ctors <-
         Dups.detect Error.DuplicateCtor $

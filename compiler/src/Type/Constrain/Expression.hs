@@ -214,7 +214,7 @@ recordDispatch rtv (Can.Dispatch home region clauses) needs =
 --
 --     Loading : [ r | Loading ]
 --
--- and a tag with arguments like `variant Success a` gives
+-- and a tag with arguments like `type tag Success a` gives
 --
 --     Success : a -> [ r | Success a ]
 --
