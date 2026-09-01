@@ -377,32 +377,46 @@ same clause a direct call would.
 
 `<`, `>`, `<=` and `>=` are the ones worth having, and today they are stuck at
 `comparable` — the closed list from the opening. The plan is to expose
-`Basics.lt` and its friends as abstract names, so that a module which owns a
-type can make the operators work on it by defining them:
+`compare` as an abstract name, so that a module which owns a type makes all
+four operators work on it by writing one definition:
 
 ```elm
-Basics.lt : Card -> Card -> Bool
-Basics.lt (Card a) (Card b) =
-    a < b
+Basics.compare : Card -> Card -> Order
+Basics.compare (Card a) (Card b) =
+    Basics.compare a b
 ```
 
 and `Card 1 < Card 2` compiles, with no change at the use site.
 
-Declaring `lt` abstract rather than deriving it from `compare` is deliberate.
-A derived `lt` would build an `Ordering` and immediately match on it, and `<`
-is far too hot an operator to allocate on. Defining it directly costs one extra
-definition per type, and that cost can be brought back down: `gt`, `le` and
-`ge` are all `lt` with the arguments swapped or the result negated, so they can
-be ordinary constrained functions rather than four more abstract names.
+The operators come for free because they are already derived from `compare` —
+that is how they are implemented today:
 
-```elm
-gt : a -> a -> Bool
-    where Basics.lt : a -> a -> Bool
-gt x y =
-    Basics.lt y x
+```js
+var _Utils_lt = F2(function(a, b) { return _Utils_cmp(a, b) < 0; });
 ```
 
-One definition per type, no allocation, and all four operators follow.
+so `lt`, `gt`, `le` and `ge` become ordinary constrained functions over the
+abstract `compare`, and nothing about the shape of the runtime changes:
+
+```elm
+lt : a -> a -> Bool
+    where Basics.compare : a -> a -> Order
+lt x y =
+    Basics.compare x y == LT
+```
+
+Deriving them costs nothing. `Order` has three zero-argument constructors, so
+under `--optimize` its values are the integers `0`, `1` and `2`, and the
+comparison against `LT` compiles to a falsy test:
+
+```js
+var $Enum$Less = 0;
+var $Enum$lt = F2(function (a, b) { return !A2($Enum$cmp, a, b); });
+```
+
+No allocation, and one call where the current `_Utils_lt` also makes one.
+
+The same shape applies to arithmetic: one abstract `add`, and `+` follows.
 
 **This part is not implemented.** An `infix` that names an abstract rather
 than an ordinary function currently crashes the compiler instead of working or
