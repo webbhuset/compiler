@@ -220,11 +220,20 @@ because otherwise its signature would be a lie — it does not really work for
 every `a`:
 
 ```elm
-smallest : a -> a -> Ordering
+smallest : a -> a -> a
     where Ord.compare : a -> a -> Ordering
 smallest x y =
-    Ord.compare x y
+    case Ord.compare x y of
+        More ->
+            y
+
+        _ ->
+            x
 ```
+
+Note that the clause's type is not `smallest`'s type. `smallest` returns an
+`a`; the overload it needs returns an `Ordering`. A clause describes the
+overload, not the function asking for it.
 
 The clause is a signature, which is a concept the language already has. It says
 nothing new about `Ord.compare`: the type has to be exactly the abstract
