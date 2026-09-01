@@ -357,21 +357,8 @@ to spell the type.
 
 An operator dispatches when the function behind it does. An `infix`
 declaration names an ordinary function, and if that function has a `where`
-clause, the operator resolves exactly as a call to it would:
-
-```elm
-infix non 4 (|<|) = lt
-
-
-lt : a -> a -> Bool
-    where Ord.compare : a -> a -> Ordering
-lt x y =
-    Ord.compare x y == Less
-```
-
-`Card 1 |<| Card 2` then picks the `Card` definition, `[ Card 2 ] |<| [ Card 1 ]`
-builds the `List` one, and using `|<|` inside another function asks for the
-same clause a direct call would.
+clause, the operator resolves exactly as a call to it would. That is what
+makes the built-in operators reachable.
 
 ### The comparison operators
 
@@ -422,6 +409,25 @@ The same shape applies to arithmetic: one abstract `add`, and `+` follows.
 than an ordinary function currently crashes the compiler instead of working or
 reporting anything useful, so the change to `Basics` is gated on fixing that
 first.
+
+### Operators of your own
+
+The same mechanism is available for an operator you declare yourself, which
+does work today:
+
+```elm
+infix non 4 (|<|) = lt
+
+
+lt : a -> a -> Bool
+    where Ord.compare : a -> a -> Ordering
+lt x y =
+    Ord.compare x y == Less
+```
+
+`Card 1 |<| Card 2` picks the `Card` definition and `[ Card 1 ] |<| [ Card 2 ]`
+builds the `List` one, both evaluating to `True`. Using `|<|` inside another
+function asks for the same clause a direct call would.
 
 
 ## What resolves and what does not
