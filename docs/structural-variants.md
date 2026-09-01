@@ -187,40 +187,53 @@ open.
 The abstract version of the pitch is "a function can name exactly the tags it
 produces". Here is what that buys in practice.
 
-Errors are the case where it pays off most, because every operation fails in
-its own particular way, and a caller almost never wants to handle all of them.
-`System.File` is written this way — each operation's error row lists what that
-operation can actually produce:
+Errors are where it pays off most, because every operation fails in its own
+way and a caller almost never wants to handle all of them. Suppose three
+modules are written this way — each operation's error row lists what that
+operation can actually produce, and nothing else:
 
 ```elm
-File.read  : String -> Task [ r | NotFound String, PermissionDenied String, IsADirectory String
-                             , TooManyOpenFiles String, NameTooLong String, SymlinkLoop String ] String
+module File exposing (NotFound, PermissionDenied, DiskFull, read, write)
 
-File.write : String -> String -> Task [ r | NotFound String, PermissionDenied String, IsADirectory String
-                                      , NoSpaceLeft String, ReadOnly String, TooManyOpenFiles String
-                                      , NameTooLong String, SymlinkLoop String ] ()
+type tag NotFound path
+type tag PermissionDenied path
+type tag DiskFull path
+
+
+read  : String -> Task [ r | NotFound String, PermissionDenied String ] String
+write : String -> String -> Task [ r | PermissionDenied String, DiskFull String ] ()
 ```
 
-Say a network module is written the same way:
-
 ```elm
-module Net exposing (Timeout, NetworkDown, BadStatus, get)
-
+module Net exposing (Timeout, BadStatus, get)
 
 type tag Timeout url
-type tag NetworkDown url
 type tag BadStatus code
 
 
-get : String -> Task [ r | Timeout String, NetworkDown String, BadStatus Int ] String
+get : String -> Task [ r | Timeout String, BadStatus Int ] String
 ```
+
+```elm
+module Json exposing (BadJson, decode)
+
+type tag BadJson message
+
+
+decode : Decoder a -> String -> Task [ r | BadJson String ] a
+```
+
+Note that `read` and `write` do not share an error type. They share two *tags*
+and differ in the third, which is the honest description: only writing can run
+out of disk.
 
 ### Chaining unions the rows
 
-Read from a cache; if the file is not there, fetch it and write it down:
+Read a cached copy; if the file is not there, fetch it and write it down; then
+decode whatever we ended up with:
 
 ```elm
-load url cache =
+load decoder url cache =
     File.read cache
         |> Task.onError
             (\err ->
@@ -236,130 +249,107 @@ load url cache =
                     other ->
                         Task.fail other
             )
+        |> Task.andThen (Json.decode decoder)
 ```
 
-No annotation needed — the error type is inferred, and it is the union of
-everything that can still go wrong:
+No annotation is needed — this is what the compiler infers:
 
 ```elm
 load :
-    String
+    Decoder a
+    -> String
     -> String
     ->
         Task
             [ r
-            | NotFound String
-            , PermissionDenied String
-            , IsADirectory String
-            , TooManyOpenFiles String
-            , NameTooLong String
-            , SymlinkLoop String
-            , NoSpaceLeft String
-            , ReadOnly String
+            | PermissionDenied String
+            , DiskFull String
             , Timeout String
-            , NetworkDown String
             , BadStatus Int
+            , BadJson String
             ]
-            String
+            a
 ```
 
-Three modules, three unrelated error vocabularies, no shared `Error` type to
-declare and no wrapping constructors to write. With nominal types you would
-need a `type LoadError = FileError File.Error | NetError Net.Error` and a
-`Task.mapError` at every step to build it.
+Three modules, three unrelated error vocabularies, and the result is their
+union with no shared type to declare and no wrapping constructors to write.
+With nominal types you would need a `type LoadError = FileError File.Error |
+NetError Net.Error | JsonError Json.Error` and a `Task.mapError` at every step
+to build it.
 
-Look closely at `NotFound` in that row. It was handled — and it is still
-there, because `File.write` can also produce it when the cache directory does
-not exist. The row is telling the truth: the `NotFound` you can still get is
-the one from writing, not the one from reading.
+Two things to read off that row. `NotFound` is gone, because it was handled
+and nothing later can produce it. And `BadJson` appeared just by adding a
+decode step — the failure a decoder introduces shows up in the type of
+everything downstream, without anyone having to widen an error type to make
+room for it.
 
 ### Handling some errors, not all
 
-Handling a tag and passing the rest along removes it. Treat a timeout and a
-missing cache directory as "no cached copy" and let everything else through:
+Handling a tag and passing the rest along removes it. Treat a timeout as "use
+the default" and let everything else through:
 
 ```elm
-loadOrBlank url cache =
-    load url cache
+loadOrDefault fallback decoder url cache =
+    load decoder url cache
         |> Task.onError
             (\err ->
                 case err of
                     Timeout _ ->
-                        Task.succeed ""
-
-                    NotFound _ ->
-                        Task.succeed ""
+                        Task.succeed fallback
 
                     other ->
                         Task.fail other
             )
 ```
 
-`other` is bound at the row minus the two tags just matched, so the result
-type shrinks on its own:
+`other` is bound at the row minus the tag just matched, so the result type
+shrinks on its own:
 
 ```elm
-loadOrBlank :
-    String
+loadOrDefault :
+    a
+    -> Decoder a
     -> String
-    ->
-        Task
-            [ r
-            | PermissionDenied String
-            , IsADirectory String
-            , TooManyOpenFiles String
-            , NameTooLong String
-            , SymlinkLoop String
-            , NoSpaceLeft String
-            , ReadOnly String
-            , NetworkDown String
-            , BadStatus Int
-            ]
-            String
+    -> String
+    -> Task [ r | PermissionDenied String, DiskFull String, BadStatus Int, BadJson String ] a
 ```
 
-The caller now cannot handle `Timeout`, because it can no longer happen. That
-is the part a nominal error type cannot express: `LoadError` stays `LoadError`
-however many of its cases you have already dealt with, so every caller keeps
-re-handling cases that are dead, or reaches for a `_ ->` that silently absorbs
-the ones that are not.
+The caller now *cannot* handle `Timeout`, because it can no longer happen.
+That is the part a nominal error type cannot express: `LoadError` stays
+`LoadError` however many of its cases you have already dealt with, so every
+caller keeps re-handling cases that are dead, or reaches for a `_ ->` that
+silently absorbs the ones that are not.
 
 ### The end of the chain proves you handled everything
 
-Eventually something has to turn the remainder into a message. That function
-takes a **closed** row — exactly what is left:
+Eventually something turns the remainder into a message. That function takes a
+**closed** row — exactly what is left:
 
 ```elm
 report :
     [ PermissionDenied String
-    , IsADirectory String
-    , TooManyOpenFiles String
-    , NameTooLong String
-    , SymlinkLoop String
-    , NoSpaceLeft String
-    , ReadOnly String
-    , NetworkDown String
+    , DiskFull String
     , BadStatus Int
+    , BadJson String
     ]
     -> String
 report err =
     case err of
-        NetworkDown url ->
-            "network is down, could not reach " ++ url
+        PermissionDenied path ->
+            "not allowed to touch " ++ path
+
+        DiskFull path ->
+            "no room left to write " ++ path
 
         BadStatus code ->
             "the server said " ++ String.fromInt code
 
-        PermissionDenied path ->
-            "not allowed to touch " ++ path
-
-        _ ->
-            "could not use the cache"
+        BadJson message ->
+            "could not read the response: " ++ message
 
 
-run : String -> String -> Task String String
-run url cache =
-    loadOrBlank url cache
+run fallback decoder url cache =
+    loadOrDefault fallback decoder url cache
         |> Task.mapError report
 ```
 
@@ -368,31 +358,26 @@ Forget one and the compiler stops you at the join, naming it:
 ```
 This function cannot handle the argument sent through the (|>) pipe:
 
+90|         |> Task.mapError report
+               ^^^^^^^^^^^^^^^^^^^^
 The argument is:
 
-    Task [ r | BadStatus Int, NetworkDown String, IsADirectory String, ... ] String
+    Task [ r | DiskFull String, PermissionDenied String, BadJson String, BadStatus Int ] a
 
 But (|>) is piping it to a function that expects:
 
-    Task [ NetworkDown String, IsADirectory String, ... ] String
+    Task [ DiskFull String, PermissionDenied String, BadStatus Int ] a
 
-Hint: The BadStatus tag is not accepted here.
+Hint: The BadJson tag is not accepted here.
 
 Note: Matching a tag and passing the rest along removes it from the row, so if
 this value goes through other functions first, handling it in one of them is
 often what you want.
 ```
 
-Add an operation to `Net` that can fail a new way, and every pipeline that
-does not handle it fails to compile, pointing at the exact tag. Nothing is
-silently swallowed, and there is no central error type for the new case to be
-added to.
-
-One limit worth knowing: a formatter written over a closed row only accepts
-that exact row. `System.Error.format` lists all thirteen file tags, so it
-cannot be handed the nine that survive here — widening a closed row is not
-expressible (see [widen-design.md](widen-design.md)). Handle the tags you care
-about and finish with `_`, as `report` does.
+Teach `Net.get` a new way to fail and every pipeline that does not handle it
+stops compiling, pointing at the exact tag. Nothing is silently swallowed, and
+there is no central error type for the new case to be added to.
 
 
 ## A second example: a display pipeline
