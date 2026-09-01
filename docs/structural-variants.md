@@ -1,5 +1,10 @@
 # Structural variants
 
+This is the reference. If you are meeting rows for the first time, or the
+choice between records, custom types and tags is not yet obvious, start with
+[records-and-variants.md](records-and-variants.md), which explains the four
+shapes and when each one is the right answer.
+
 Structural variants are anonymous sum types: the dual of Elm's extensible
 records. Where a record type lists the fields a value *has*, a variant type
 lists the tags a value *can be*:
