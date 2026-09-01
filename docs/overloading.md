@@ -355,30 +355,59 @@ to spell the type.
 
 ## Step 5: operators
 
-An operator dispatches when the function behind it does. Declare it in the
-usual way, pointing at a function with a `where` clause:
+An operator dispatches when the function behind it does. An `infix`
+declaration names an ordinary function, and if that function has a `where`
+clause, the operator resolves exactly as a call to it would:
 
 ```elm
 infix non 4 (|<|) = lt
 
 
 lt : a -> a -> Bool
-    where Ordering.compare : a -> a -> Order
+    where Ord.compare : a -> a -> Ordering
 lt x y =
-    Ordering.compare x y == LT
+    Ord.compare x y == Less
 ```
 
-Then `Card 1 |<| Card 2` picks the `Card` definition, `[ Card 2 ] |>| [ Card 1 ]`
-builds the `List` one, and an operator used on a type variable asks for the same
-clause a call would.
+`Card 1 |<| Card 2` then picks the `Card` definition, `[ Card 2 ] |<| [ Card 1 ]`
+builds the `List` one, and using `|<|` inside another function asks for the
+same clause a direct call would.
 
-Two things limit this, and neither comes from overloading. `infix` declarations
-are only allowed in kernel packages, which for this compiler means elm/* and
-anything reached through `git-dependencies`; and `<`, `>`, `<=` and `>=` belong
-to `Basics`, which every module imports openly, so only elm/core can give those
-a new meaning. Making `<` itself dispatch means changing `Basics` to declare
-`compare` abstract and derive the comparisons from it — at which point
-`comparable` has nothing left to do.
+### The comparison operators
+
+`<`, `>`, `<=` and `>=` are the ones worth having, and today they are stuck at
+`comparable` — the closed list from the opening. The plan is to expose
+`Basics.lt` and its friends as abstract names, so that a module which owns a
+type can make the operators work on it by defining them:
+
+```elm
+Basics.lt : Card -> Card -> Bool
+Basics.lt (Card a) (Card b) =
+    a < b
+```
+
+and `Card 1 < Card 2` compiles, with no change at the use site.
+
+Declaring `lt` abstract rather than deriving it from `compare` is deliberate.
+A derived `lt` would build an `Ordering` and immediately match on it, and `<`
+is far too hot an operator to allocate on. Defining it directly costs one extra
+definition per type, and that cost can be brought back down: `gt`, `le` and
+`ge` are all `lt` with the arguments swapped or the result negated, so they can
+be ordinary constrained functions rather than four more abstract names.
+
+```elm
+gt : a -> a -> Bool
+    where Basics.lt : a -> a -> Bool
+gt x y =
+    Basics.lt y x
+```
+
+One definition per type, no allocation, and all four operators follow.
+
+**This part is not implemented.** An `infix` that names an abstract rather
+than an ordinary function currently crashes the compiler instead of working or
+reporting anything useful, so the change to `Basics` is gated on fixing that
+first.
 
 
 ## What resolves and what does not
