@@ -340,7 +340,7 @@ unionOverloads (Overloads a1 i1 c1) (Overloads a2 i2 c2) =
   Overloads (Map.union a1 a2) (Map.unionWith Map.union i1 i2) (Map.union c1 c2)
 
 
--- A structural variant tag declaration: `variant Success a` becomes
+-- A structural variant tag declaration: `type tag Success a` becomes
 -- `TagDecl ["a"]`. The params double as the argument types, so the
 -- arity is the length of the list.
 newtype TagDecl = TagDecl [T.Var]

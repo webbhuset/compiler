@@ -359,3 +359,7 @@ moment. Widening an abstract remainder — turning a `[ r | Success Int ]` into 
 [structural-variants.md](structural-variants.md) is the reference: declaring
 tags, exhaustiveness, row subtraction, a worked pipeline example, the
 restrictions, and the runtime representation.
+
+[types-design.md](types-design.md) tells the same story from scratch, for
+someone new to Elm, against a proposed simplification in which a `type` always
+has exactly one constructor and every "one of these" is a row.

@@ -227,7 +227,7 @@ toReport source err =
           ,
             D.reflow $
               "Only tags declared with `type tag` can appear in [ ... ] types.\
-              \ Maybe you want to declare `variant " ++ N.toChars name ++ "` in some module?"
+              \ Maybe you want to declare `type tag " ++ N.toChars name ++ "` in some module?"
           )
 
     TagRowDuplicate region name ->
