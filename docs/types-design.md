@@ -323,10 +323,14 @@ Tags are declared on their own when you want more than one type to use them:
 ```elm
 type tag NotFound path
 type tag PermissionDenied path
+type tag DiskFull
 
 
 type ReadError =
     [ NotFound String, PermissionDenied String ]
+
+type WriteError =
+    [ NotFound String, PermissionDenied String, DiskFull ]
 ```
 
 A tag belongs to the module that declares it — your `NotFound` and someone
@@ -336,6 +340,7 @@ errors, where each function names only the failures it can actually produce:
 
 ```elm
 readFile : String -> Task [ r | NotFound String, PermissionDenied String ] Bytes
+writeFile : String -> Bytes -> Task [ r | NotFound String, PermissionDenied String, DiskFull ] ()
 ```
 
 and a caller that handles `NotFound` is left with a type that no longer
