@@ -511,13 +511,13 @@ dOverloads =
 
 
 eInstance :: Can.Instance -> E.Builder
-eInstance (Can.Instance name tipe) =
-  eOverloadName name <> eType tipe
+eInstance (Can.Instance name annotation) =
+  eOverloadName name <> eAnnotation annotation
 
 
 dInstance :: D.Decoder Can.Instance
 dInstance =
-  liftM2 Can.Instance dOverloadName dType
+  liftM2 Can.Instance dOverloadName dAnnotation
 
 
 eConstraint :: Can.Constraint -> E.Builder
