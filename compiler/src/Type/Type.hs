@@ -343,63 +343,93 @@ toAnnotation variable =
 
 variableToCanType :: Variable -> StateT NameState IO Can.Type
 variableToCanType variable =
-  do  (Descriptor content _ _ _) <- liftIO $ UF.get variable
-      case content of
-        Structure term ->
-            termToCanType term
+  variableToCanTypeHelp [] variable
 
-        FlexVar maybeName ->
-          case maybeName of
-            Just name ->
+
+-- The `aliasArgs` are the arguments of the type alias whose body we are
+-- currently converting. Any variable equivalent to one of them becomes a
+-- `Can.TVar` with the name of the alias parameter, so the body is emitted as
+-- `Can.Holey` and each argument is only converted once (in the argument list).
+--
+-- Converting the body as `Can.Filled` instead would re-convert every argument
+-- once per level of alias nesting, which is exponential for things like
+-- `type alias Parts = Part1 (Part2 (Part3 {}))` where each `PartN` is an
+-- extensible record. See https://github.com/elm/compiler/issues/1897
+--
+variableToCanTypeHelp :: [(Variable, Can.Type)] -> Variable -> StateT NameState IO Can.Type
+variableToCanTypeHelp aliasArgs variable =
+  do  maybeArg <- liftIO $ findAliasArg aliasArgs variable
+      case maybeArg of
+        Just argType ->
+          return argType
+
+        Nothing ->
+          do  (Descriptor content _ _ _) <- liftIO $ UF.get variable
+              contentToCanType aliasArgs variable content
+
+
+contentToCanType :: [(Variable, Can.Type)] -> Variable -> Content -> StateT NameState IO Can.Type
+contentToCanType aliasArgs variable content =
+  case content of
+    Structure term ->
+        termToCanType aliasArgs term
+
+    FlexVar maybeName ->
+      case maybeName of
+        Just name ->
+          return (Can.TVar name)
+
+        Nothing ->
+          do  name <- getFreshVarName
+              liftIO $ UF.modify variable (\desc -> desc { _content = FlexVar (Just name) })
               return (Can.TVar name)
 
-            Nothing ->
-              do  name <- getFreshVarName
-                  liftIO $ UF.modify variable (\desc -> desc { _content = FlexVar (Just name) })
-                  return (Can.TVar name)
+    FlexSuper super maybeName ->
+      case maybeName of
+        Just name ->
+          return (Can.TVar name)
 
-        FlexSuper super maybeName ->
-          case maybeName of
-            Just name ->
+        Nothing ->
+          do  name <- getFreshSuperName super
+              liftIO $ UF.modify variable (\desc -> desc { _content = FlexSuper super (Just name) })
               return (Can.TVar name)
 
-            Nothing ->
-              do  name <- getFreshSuperName super
-                  liftIO $ UF.modify variable (\desc -> desc { _content = FlexSuper super (Just name) })
-                  return (Can.TVar name)
+    RigidVar name ->
+        return (Can.TVar name)
 
-        RigidVar name ->
-            return (Can.TVar name)
+    RigidSuper _ name ->
+        return (Can.TVar name)
 
-        RigidSuper _ name ->
-            return (Can.TVar name)
+    Alias home name args realVariable ->
+        do  canArgs <- traverse (traverse (variableToCanTypeHelp aliasArgs)) args
+            let bodyArgs = map (\(argName, argVar) -> (argVar, Can.TVar argName)) args
+            canType <- variableToCanTypeHelp bodyArgs realVariable
+            return (Can.TAlias home name canArgs (Can.Holey canType))
 
-        Alias home name args realVariable ->
-            do  canArgs <- traverse (traverse variableToCanType) args
-                canType <- variableToCanType realVariable
-                return (Can.TAlias home name canArgs (Can.Filled canType))
-
-        Error ->
-            error "cannot handle Error types in variableToCanType"
+    Error ->
+        error "cannot handle Error types in variableToCanType"
 
 
-termToCanType :: FlatType -> StateT NameState IO Can.Type
-termToCanType term =
+termToCanType :: [(Variable, Can.Type)] -> FlatType -> StateT NameState IO Can.Type
+termToCanType aliasArgs term =
+  let
+    go = variableToCanTypeHelp aliasArgs
+  in
   case term of
     App1 home name args ->
-      Can.TType home name <$> traverse variableToCanType args
+      Can.TType home name <$> traverse go args
 
     Fun1 a b ->
       Can.TLambda
-        <$> variableToCanType a
-        <*> variableToCanType b
+        <$> go a
+        <*> go b
 
     EmptyRecord1 ->
       return $ Can.TRecord Map.empty Nothing
 
     Record1 fields extension ->
-      do  canFields <- traverse fieldToCanType fields
-          canExt <- Type.iteratedDealias <$> variableToCanType extension
+      do  canFields <- traverse (fieldToCanType aliasArgs) fields
+          canExt <- Type.iteratedDealias <$> go extension
           return $
               case canExt of
                 Can.TRecord subFields subExt ->
@@ -416,15 +446,32 @@ termToCanType term =
 
     Tuple1 a b maybeC ->
       Can.TTuple
-        <$> variableToCanType a
-        <*> variableToCanType b
-        <*> traverse variableToCanType maybeC
+        <$> go a
+        <*> go b
+        <*> traverse go maybeC
 
 
-fieldToCanType :: Variable -> StateT NameState IO Can.FieldType
-fieldToCanType variable =
-  do  tipe <- variableToCanType variable
+fieldToCanType :: [(Variable, Can.Type)] -> Variable -> StateT NameState IO Can.FieldType
+fieldToCanType aliasArgs variable =
+  do  tipe <- variableToCanTypeHelp aliasArgs variable
       return (Can.FieldType 0 tipe)
+
+
+
+-- FIND ALIAS ARGS
+
+
+findAliasArg :: [(Variable, a)] -> Variable -> IO (Maybe a)
+findAliasArg aliasArgs variable =
+  case aliasArgs of
+    [] ->
+      return Nothing
+
+    (argVar, arg) : rest ->
+      do  isArg <- UF.equivalent variable argVar
+          if isArg
+            then return (Just arg)
+            else findAliasArg rest variable
 
 
 
@@ -439,24 +486,40 @@ toErrorType variable =
 
 variableToErrorType :: Variable -> StateT NameState IO ET.Type
 variableToErrorType variable =
-  do  descriptor <- liftIO $ UF.get variable
-      let mark = _mark descriptor
-      if mark == occursMark
-        then
-          return ET.Infinite
-
-        else
-          do  liftIO $ UF.modify variable (\desc -> desc { _mark = occursMark })
-              errType <- contentToErrorType variable (_content descriptor)
-              liftIO $ UF.modify variable (\desc -> desc { _mark = mark })
-              return errType
+  variableToErrorTypeHelp [] variable
 
 
-contentToErrorType :: Variable -> Content -> StateT NameState IO ET.Type
-contentToErrorType variable content =
+-- The `aliasArgs` are the (already converted) arguments of the type alias
+-- whose body we are currently converting. Any variable equivalent to one of
+-- them reuses the converted argument rather than converting it again. This
+-- keeps the work linear in the size of the type, see `variableToCanTypeHelp`.
+--
+variableToErrorTypeHelp :: [(Variable, ET.Type)] -> Variable -> StateT NameState IO ET.Type
+variableToErrorTypeHelp aliasArgs variable =
+  do  maybeArg <- liftIO $ findAliasArg aliasArgs variable
+      case maybeArg of
+        Just argType ->
+          return argType
+
+        Nothing ->
+          do  descriptor <- liftIO $ UF.get variable
+              let mark = _mark descriptor
+              if mark == occursMark
+                then
+                  return ET.Infinite
+
+                else
+                  do  liftIO $ UF.modify variable (\desc -> desc { _mark = occursMark })
+                      errType <- contentToErrorType aliasArgs variable (_content descriptor)
+                      liftIO $ UF.modify variable (\desc -> desc { _mark = mark })
+                      return errType
+
+
+contentToErrorType :: [(Variable, ET.Type)] -> Variable -> Content -> StateT NameState IO ET.Type
+contentToErrorType aliasArgs variable content =
   case content of
     Structure term ->
-        termToErrorType term
+        termToErrorType aliasArgs term
 
     FlexVar maybeName ->
       case maybeName of
@@ -485,8 +548,9 @@ contentToErrorType variable content =
         return (ET.RigidSuper (superToSuper super) name)
 
     Alias home name args realVariable ->
-        do  errArgs <- traverse (traverse variableToErrorType) args
-            errType <- variableToErrorType realVariable
+        do  errArgs <- traverse (traverse (variableToErrorTypeHelp aliasArgs)) args
+            let bodyArgs = zip (map snd args) (map snd errArgs)
+            errType <- variableToErrorTypeHelp bodyArgs realVariable
             return (ET.Alias home name errArgs errType)
 
     Error ->
@@ -502,15 +566,18 @@ superToSuper super =
     CompAppend -> ET.CompAppend
 
 
-termToErrorType :: FlatType -> StateT NameState IO ET.Type
-termToErrorType term =
+termToErrorType :: [(Variable, ET.Type)] -> FlatType -> StateT NameState IO ET.Type
+termToErrorType aliasArgs term =
+  let
+    go = variableToErrorTypeHelp aliasArgs
+  in
   case term of
     App1 home name args ->
-      ET.Type home name <$> traverse variableToErrorType args
+      ET.Type home name <$> traverse go args
 
     Fun1 a b ->
-      do  arg <- variableToErrorType a
-          result <- variableToErrorType b
+      do  arg <- go a
+          result <- go b
           return $
             case result of
               ET.Lambda arg1 arg2 others ->
@@ -523,8 +590,8 @@ termToErrorType term =
       return $ ET.Record Map.empty ET.Closed
 
     Record1 fields extension ->
-      do  errFields <- traverse variableToErrorType fields
-          errExt <- ET.iteratedDealias <$> variableToErrorType extension
+      do  errFields <- traverse go fields
+          errExt <- ET.iteratedDealias <$> go extension
           return $
               case errExt of
                 ET.Record subFields subExt ->
@@ -544,9 +611,9 @@ termToErrorType term =
 
     Tuple1 a b maybeC ->
       ET.Tuple
-        <$> variableToErrorType a
-        <*> variableToErrorType b
-        <*> traverse variableToErrorType maybeC
+        <$> go a
+        <*> go b
+        <*> traverse go maybeC
 
 
 
