@@ -221,6 +221,7 @@ mimeTypeDict =
     , ".jpeg"    ==> "image/jpeg"
     , ".jpg"     ==> "image/jpeg"
     , ".js"      ==> "text/javascript"
+    , ".mjs"     ==> "text/javascript"
     , ".json"    ==> "application/json"
     , ".m3u"     ==> "audio/x-mpegurl"
     , ".mov"     ==> "video/quicktime"
