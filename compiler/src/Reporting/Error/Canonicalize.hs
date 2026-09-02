@@ -70,6 +70,7 @@ data Error
   | WhereDuplicate A.Region Module.Prefix N.Name T.Var
   | OverloadAbstractNotDispatching A.Region Module.Prefix N.Name
   | OverloadInstanceNotDispatching A.Region Module.Prefix N.Name
+  | OverloadDefinitionShape A.Region Module.Prefix N.Name Can.Type Can.Type
   | OverloadNotOwned A.Region Module.Prefix N.Name ModuleName.Canonical ModuleName.Canonical
   | OverloadDuplicate Module.Prefix N.Name T.Name A.Region A.Region
   | ImportOpenTag A.Region T.Name
@@ -356,6 +357,30 @@ toReport source err =
                   "A signature starting with a specific type has nothing to choose between,\
                   \ so it is really an ordinary definition. Drop the `abstract` and give it\
                   \ a body."
+              ]
+          )
+
+    OverloadDefinitionShape region qual name abstract expected ->
+      Report.Report "BAD OVERLOAD DEFINITION" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "This definition of `" ++ Module.prefixToChars qual ++ "." ++ N.toChars name
+              ++ "` does not have the shape it was declared with:"
+          ,
+            D.stack
+              [ D.reflow "It was declared as"
+              , D.indent 4 $ D.hang 4 $ D.sep $
+                  [ D.dullyellow (D.fromChars (Module.prefixToChars qual ++ "." ++ N.toChars name)), ":" ]
+                  ++ [ RT.canToDoc L.empty RT.None abstract ]
+              , D.reflow "so a definition for this type has to be"
+              , D.indent 4 $ D.hang 4 $ D.sep $
+                  [ D.dullyellow (D.fromChars (Module.prefixToChars qual ++ "." ++ N.toChars name)), ":" ]
+                  ++ [ RT.canToDoc L.empty RT.None expected ]
+              , D.reflow $
+                  "Only the type it is for can change. Everything else comes from the\
+                  \ declaration, since every use site is typed by that and not by any one\
+                  \ definition."
               ]
           )
 
