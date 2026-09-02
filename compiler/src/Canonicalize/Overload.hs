@@ -268,6 +268,100 @@ fieldTypes fields =
   [ tipe | Can.FieldType _ tipe <- Map.elems fields ]
 
 
+-- A definition has to be the abstract signature with the dispatch variable
+-- replaced by the type it is for, and every other variable replaced
+-- consistently. Where a clause has to be the signature *renamed* (see
+-- sameUpToRenaming), a definition may fill a variable with any type -- `List
+-- a` for the dispatch variable, say -- and may fill two variables with the
+-- same type. What it may not do is fill one variable two different ways, or
+-- change the shape around them: that is how `compare : Card -> Card -> Int`
+-- gets caught here rather than at some caller expecting an Order.
+instanceOf :: Can.Type -> Can.Type -> Bool
+instanceOf abstract definition =
+  Maybe.isJust (fill abstract definition Map.empty)
+
+
+fill :: Can.Type -> Can.Type -> Map.Map Name.Name Can.Type -> Maybe (Map.Map Name.Name Can.Type)
+fill abstract definition filled =
+  case ( Type.iteratedDealias abstract, Type.iteratedDealias definition ) of
+    ( Can.TVar x, actual ) ->
+      case Map.lookup x filled of
+        Nothing ->
+          Just (Map.insert x actual filled)
+
+        Just already ->
+          if Type.iteratedDealias already == actual then Just filled else Nothing
+
+    ( Can.TLambda a1 a2, Can.TLambda d1 d2 ) ->
+      fill a1 d1 filled >>= fill a2 d2
+
+    ( Can.TType h1 n1 as1, Can.TType h2 n2 as2 )
+      | h1 == h2 && n1 == n2 && length as1 == length as2 ->
+          fillAll (zip as1 as2) filled
+
+    ( Can.TUnit, Can.TUnit ) ->
+      Just filled
+
+    ( Can.TTuple a1 b1 c1, Can.TTuple a2 b2 c2 ) ->
+      fill a1 a2 filled >>= fill b1 b2 >>= fillThird c1 c2
+
+    ( Can.TRecord fs1 ext1, Can.TRecord fs2 ext2 )
+      | Map.keys fs1 == Map.keys fs2 && ext1 == ext2 ->
+          fillAll (zip (fieldTypes fs1) (fieldTypes fs2)) filled
+
+    ( Can.TTagRow ts1 ext1, Can.TTagRow ts2 ext2 )
+      | Map.keys ts1 == Map.keys ts2 && ext1 == ext2
+          && and (zipWith (\a b -> length a == length b) (Map.elems ts1) (Map.elems ts2)) ->
+          fillAll (zip (concat (Map.elems ts1)) (concat (Map.elems ts2))) filled
+
+    _ ->
+      Nothing
+
+
+fillAll :: [(Can.Type, Can.Type)] -> Map.Map Name.Name Can.Type -> Maybe (Map.Map Name.Name Can.Type)
+fillAll pairs filled =
+  case pairs of
+    []            -> Just filled
+    (a, d) : rest -> fill a d filled >>= fillAll rest
+
+
+fillThird :: Maybe Can.Type -> Maybe Can.Type -> Map.Map Name.Name Can.Type -> Maybe (Map.Map Name.Name Can.Type)
+fillThird a d filled =
+  case ( a, d ) of
+    ( Nothing, Nothing ) -> Just filled
+    ( Just x, Just y )   -> fill x y filled
+    _                    -> Nothing
+
+
+-- The abstract signature with its dispatch variable filled by the type a
+-- definition is for: the shape that definition has to have, for the message.
+expectedShape :: Can.Annotation -> Can.Type -> Can.Type
+expectedShape (Can.Forall _ tipe) dispatched =
+  case dispatchArgument tipe of
+    Just (Can.TVar declared) -> apply (Map.singleton declared dispatched) tipe
+    _                        -> tipe
+
+
+apply :: Map.Map Name.Name Can.Type -> Can.Type -> Can.Type
+apply subst tipe =
+  case tipe of
+    Can.TVar v            -> Map.findWithDefault tipe v subst
+    Can.TLambda a b       -> Can.TLambda (apply subst a) (apply subst b)
+    Can.TType h n as      -> Can.TType h n (map (apply subst) as)
+    Can.TRecord fs ext    -> Can.TRecord (Map.map (\(Can.FieldType i t) -> Can.FieldType i (apply subst t)) fs) ext
+    Can.TUnit             -> Can.TUnit
+    Can.TTuple a b c      -> Can.TTuple (apply subst a) (apply subst b) (fmap (apply subst) c)
+    Can.TAlias h n as t   -> Can.TAlias h n (map (fmap (apply subst)) as) (applyAlias subst t)
+    Can.TTagRow tags ext  -> Can.TTagRow (Map.map (map (apply subst)) tags) ext
+
+
+applyAlias :: Map.Map Name.Name Can.Type -> Can.AliasType -> Can.AliasType
+applyAlias subst aliasType =
+  case aliasType of
+    Can.Holey t  -> Can.Holey (apply subst t)
+    Can.Filled t -> Can.Filled (apply subst t)
+
+
 -- The abstract signature with its own dispatch variable renamed to the one
 -- this clause asks for: the shape a clause has to have, used for suggestions.
 substitute :: Name.Name -> Can.Annotation -> Can.Type
@@ -462,7 +556,7 @@ canonicalizeDefine env region qualRegion qual name srcType srcArgs srcBody =
     Nothing ->
       Result.throw (Error.OverloadNotDeclared qualRegion qual name)
 
-    Just (Env.Overload ovHome _) ->
+    Just (Env.Overload ovHome abstract) ->
       do  (Can.Forall freeVars tipe, clauses) <- canonicalizeSignature env srcType
           case dispatchArgument tipe of
             Nothing ->
@@ -475,7 +569,11 @@ canonicalizeDefine env region qualRegion qual name srcType srcArgs srcBody =
 
                 Just key@(typeHome, _) ->
                   let home = Env._home env in
-                  if home /= ovHome && home /= typeHome then
+                  if not (instanceOf (abstractType abstract) tipe) then
+                    Result.throw $
+                      Error.OverloadDefinitionShape region qual name
+                        (abstractType abstract) (expectedShape abstract dispatched)
+                  else if home /= ovHome && home /= typeHome then
                     Result.throw (Error.OverloadNotOwned region qual name ovHome typeHome)
                   else
                     do  def <- toDef (Env.withClauses clauses env) region (mangle ovHome name key) name freeVars tipe srcArgs srcBody
