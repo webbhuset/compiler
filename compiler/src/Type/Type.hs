@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Type.Type
   ( Constraint(..)
+  , Need(..)
+  , Clause(..)
   , exists
   , Variable
   , FlatType(..)
@@ -65,6 +67,31 @@ data Constraint
       , _headerCon :: Constraint
       , _bodyCon :: Constraint
       }
+  | CDispatch [Need] [Clause]
+
+
+-- An overloaded name used somewhere, with the solver variables standing for
+-- the type it is used at. Once the dispatch variable settles, the solver looks
+-- the definition up and unifies the rest of the clause with it, so that a type
+-- the definition determines -- the element type of a container, say -- is
+-- known before anything generalizes. See Type.Overload for the rest.
+data Need =
+  Need
+    { _need_region :: A.Region
+    , _need_name :: Can.OverloadName
+    , _need_dispatch :: Variable
+    , _need_type :: Can.Type                    -- the clause, or the abstract signature
+    , _need_vars :: Map.Map Name.Name Variable  -- its type variables, as instantiated here
+    }
+
+
+-- A `where` clause of the enclosing definition, over its rigid variables.
+data Clause =
+  Clause
+    { _clause :: Can.Constraint
+    , _clause_dispatch :: Variable
+    , _clause_vars :: Map.Map Name.Name Variable
+    }
 
 
 exists :: [Variable] -> Constraint -> Constraint

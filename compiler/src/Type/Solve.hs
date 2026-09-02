@@ -18,7 +18,9 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
 import qualified Reporting.Render.Type as RT
 import qualified Reporting.Render.Type.Localizer as L
+import qualified Type.Instantiate as Instantiate
 import qualified Type.Occurs as Occurs
+import qualified Type.Overload as Overload
 import Type.Type as Type
 import qualified Type.Error as ET
 import qualified Type.Unify as Unify
@@ -29,12 +31,13 @@ import qualified Type.UnionFind as UF
 -- RUN SOLVER
 
 
-run :: Constraint -> IO (Either (NE.List Error.Error) (Map.Map Name.Name Can.Annotation))
-run constraint =
+run :: Can.Overloads -> Constraint -> IO (Either (NE.List Error.Error) (Map.Map Name.Name Can.Annotation))
+run overloads constraint =
   do  pools <- MVector.replicate 8 []
 
-      (State env _ errors) <-
-        solve Map.empty outermostRank pools emptyState constraint
+      (State env _ errors _ _) <-
+        settlePending outermostRank pools =<<
+          solve Map.empty outermostRank pools (emptyState overloads) constraint
 
       case errors of
         [] ->
@@ -45,10 +48,9 @@ run constraint =
 
 
 
-{-# NOINLINE emptyState #-}
-emptyState :: State
-emptyState =
-  State Map.empty (nextMark noMark) []
+emptyState :: Can.Overloads -> State
+emptyState overloads =
+  State Map.empty (nextMark noMark) [] overloads []
 
 
 
@@ -68,6 +70,11 @@ data State =
     { _env :: Env
     , _mark :: Mark
     , _errors :: [Error.Error]
+    , _overloads :: Can.Overloads
+    -- Overload uses whose dispatch type has not settled yet, each with the
+    -- `where` clauses that were in scope. Looked at before a definition
+    -- generalizes; see settlePending.
+    , _pending :: [(Need, [Clause])]
     }
 
 
@@ -143,12 +150,15 @@ solve env rank pools state constraint =
     CAnd constraints ->
       foldM (solve env rank pools) state constraints
 
+    CDispatch needs clauses ->
+      return state { _pending = [ (need, clauses) | need <- needs ] ++ _pending state }
+
     CLet [] flexs _ headerCon CTrue ->
       do  introduce rank pools flexs
           solve env rank pools state headerCon
 
     CLet [] [] header headerCon subCon ->
-      do  state1 <- solve env rank pools state headerCon
+      do  state1 <- settlePending rank pools =<< solve env rank pools state headerCon
           locals <- traverse (A.traverse (typeToVariable rank pools)) header
           let newEnv = Map.union env (Map.map A.toValue locals)
           state2 <- solve newEnv rank pools state1 subCon
@@ -173,8 +183,9 @@ solve env rank pools state constraint =
 
           -- run solver in next pool
           locals <- traverse (A.traverse (typeToVariable nextRank nextPools)) header
-          (State savedEnv mark errors) <-
-            solve env nextRank nextPools state headerCon
+          (State savedEnv mark errors overloads pending) <-
+            settlePending nextRank nextPools =<<
+              solve env nextRank nextPools state headerCon
 
           let youngMark = mark
           let visitMark = nextMark youngMark
@@ -188,10 +199,120 @@ solve env rank pools state constraint =
           mapM_ isGeneric rigids
 
           let newEnv = Map.union env (Map.map A.toValue locals)
-          let tempState = State savedEnv finalMark errors
+          let tempState = State savedEnv finalMark errors overloads pending
           newState <- solve newEnv rank nextPools tempState subCon
 
           foldM occurs newState (Map.toList locals)
+
+
+-- SETTLING OVERLOAD USES
+--
+-- A `where` clause is invisible to the type checker, so on its own the
+-- checker cannot know that in `minimum : t -> Maybe item` the `item` is fixed
+-- by whichever definition `t` picks. Left alone it would generalize `item`,
+-- and `minimum "caf"` would come out as `Maybe a` while holding a Char.
+--
+-- So just before a definition generalizes, every overload use recorded inside
+-- it whose dispatch type has settled is looked up, and the rest of its clause
+-- is unified with the definition found. That pins `item` to `Char` while it
+-- still can be pinned. Uses that have not settled stay pending for an outer
+-- definition, and whatever is left at the end is reported by Type.Overload.
+
+
+settlePending :: Int -> Pools -> State -> IO State
+settlePending rank pools state =
+  do  (remaining, progressed, state1) <-
+        foldM (settleOne rank pools) ([], False, state) (_pending state)
+      let state2 = state1 { _pending = remaining }
+      -- pinning one variable can settle another use's dispatch type
+      if progressed then settlePending rank pools state2 else return state2
+
+
+settleOne
+  :: Int -> Pools
+  -> ([(Need, [Clause])], Bool, State)
+  -> (Need, [Clause])
+  -> IO ([(Need, [Clause])], Bool, State)
+settleOne rank pools (remaining, progressed, state) entry@(need, clauses) =
+  do  outcome <- trySettle rank pools (_overloads state) need clauses
+      case outcome of
+        Pending ->
+          return (entry : remaining, progressed, state)
+
+        Settled ->
+          return (remaining, True, state)
+
+        Clash err ->
+          return (remaining, True, addError state err)
+
+
+data Outcome
+  = Pending
+  | Settled
+  | Clash Error.Error
+
+
+trySettle :: Int -> Pools -> Can.Overloads -> Need -> [Clause] -> IO Outcome
+trySettle rank pools overloads (Need region ovName dispatchVar clauseType vars) clauses =
+  do  (Descriptor content _ _ _) <- UF.get dispatchVar
+      case content of
+        FlexVar _ ->
+          return Pending
+
+        FlexSuper _ _ ->
+          return Pending
+
+        -- a `where` clause of the enclosing definition, if there is one for
+        -- this name at this variable: the clause is the definition here
+        RigidVar _ ->
+          do  matches <- filterM (isClauseFor ovName dispatchVar) clauses
+              case matches of
+                Clause (Can.Constraint _ enclosingType) _ enclosingVars : _ ->
+                  do  enclosing <- typeToVariable rank pools =<< Instantiate.fromSrcType (Map.map VarN enclosingVars) enclosingType
+                      unifyClause rank pools region ovName clauseType vars enclosing
+
+                [] ->
+                  return Settled   -- no clause: Type.Overload reports it
+
+        RigidSuper _ _ ->
+          return Settled           -- comparable and friends: Type.Overload reports it
+
+        Error ->
+          return Settled
+
+        _ ->
+          do  Can.Forall _ dispatched <- Type.toAnnotation dispatchVar
+              case Overload.lookupDefinition overloads ovName dispatched of
+                Nothing ->
+                  return Settled   -- no definition: Type.Overload reports it
+
+                Just (Can.Forall declaredFree declared) ->
+                  do  definition <- srcTypeToVariable rank pools declaredFree declared
+                      unifyClause rank pools region ovName clauseType vars definition
+
+
+isClauseFor :: Can.OverloadName -> Variable -> Clause -> IO Bool
+isClauseFor ovName dispatchVar (Clause (Can.Constraint name _) clauseDispatch _) =
+  if name /= ovName then return False else UF.equivalent dispatchVar clauseDispatch
+
+
+-- The clause as instantiated at this use, against what actually provides it.
+-- Structurally these always agree, since both are the abstract signature with
+-- types filled in, so what this really does is copy the definition's choices
+-- into the use site's still-open variables.
+unifyClause :: Int -> Pools -> A.Region -> Can.OverloadName -> Can.Type -> Map.Map Name.Name Variable -> Variable -> IO Outcome
+unifyClause rank pools region (_, name) clauseType vars provider =
+  do  clause <- typeToVariable rank pools =<< Instantiate.fromSrcType (Map.map VarN vars) clauseType
+      answer <- Unify.unify clause provider
+      case answer of
+        Unify.Ok newVars ->
+          do  introduce rank pools newVars
+              return Settled
+
+        Unify.Err newVars actualType expectedType ->
+          do  introduce rank pools newVars
+              return $ Clash $
+                Error.BadExpr region (Error.Foreign name) actualType (Error.NoExpectation expectedType)
 
 
 -- Check that a variable has rank == noRank, meaning that it can be generalized.
@@ -244,8 +365,8 @@ patternExpectationToVariable rank pools expectation =
 
 
 addError :: State -> Error.Error -> State
-addError (State savedEnv rank errors) err =
-  State savedEnv rank (err:errors)
+addError state err =
+  state { _errors = err : _errors state }
 
 
 

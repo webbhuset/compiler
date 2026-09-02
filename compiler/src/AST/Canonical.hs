@@ -303,11 +303,13 @@ data Constraint =
   deriving (Eq)
 
 
--- A definition of an overload: what to call, and the type it is for. The type
--- is kept because it can be shaped, as in `Ord.compare : List a -> ...`, and
--- then resolving a use at `List Card` has to work out what `a` was.
+-- A definition of an overload: what to call, and its whole signature. The
+-- signature is kept because it can be shaped, as in `Ord.compare : List a ->
+-- ...`, and then resolving a use at `List Card` has to work out what `a` was;
+-- and because a use site unifies its clause with it, so that a type only the
+-- definition determines is known before the use site generalizes.
 data Instance =
-  Instance OverloadName Type
+  Instance OverloadName Annotation
   deriving (Eq)
 
 

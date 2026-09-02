@@ -7,6 +7,7 @@ module Canonicalize.Overload
   , dictName
   , dispatchVar
   , dispatchKey
+  , dispatchArgument
   , abstractVar
   , substitute
   )
@@ -395,7 +396,7 @@ canonicalizeInstances env (Can.Overloads abstracts instances constrained) overlo
 
 
 data Found =
-  Found A.Region Can.OverloadName Can.OverloadKey Can.Type [Can.Constraint]
+  Found A.Region Can.OverloadName Can.OverloadKey Can.Annotation [Can.Constraint]
 
 
 type Instance =
@@ -419,7 +420,7 @@ addInstances home seen table found =
     [] ->
       Result.ok table
 
-    (Found region ovName key@(_, typeName) dispatched _, def) : rest ->
+    (Found region ovName key@(_, typeName) annotation _, def) : rest ->
       case Map.lookup (ovName, key) seen of
         Just first ->
           Result.throw $
@@ -431,7 +432,7 @@ addInstances home seen table found =
           addInstances home
             (Map.insert (ovName, key) region seen)
             (Map.insert ovName
-              (Map.insert key (Can.Instance (home, defName def) dispatched) existing) table)
+              (Map.insert key (Can.Instance (home, defName def) annotation) existing) table)
             rest
 
 
@@ -478,7 +479,7 @@ canonicalizeDefine env region qualRegion qual name srcType srcArgs srcBody =
                     Result.throw (Error.OverloadNotOwned region qual name ovHome typeHome)
                   else
                     do  def <- toDef (Env.withClauses clauses env) region (mangle ovHome name key) name freeVars tipe srcArgs srcBody
-                        Result.ok (Found region (ovHome, name) key dispatched clauses, def)
+                        Result.ok (Found region (ovHome, name) key (Can.Forall freeVars tipe) clauses, def)
 
 
 toDef

@@ -71,8 +71,8 @@ canonicalize pkg ifaces modul =
 
 
 typeCheck :: Comparable.Info -> Src.Module -> Can.Module -> Either E.Error (Map.Map Name.Name Can.Annotation)
-typeCheck comparables modul canonical =
-  case unsafePerformIO (Comparable.register comparables >> (Type.run =<< Type.constrain canonical)) of
+typeCheck comparables modul canonical@(Can.Module _ _ _ _ _ _ _ overloads _ _) =
+  case unsafePerformIO (Comparable.register comparables >> (Type.run overloads =<< Type.constrain canonical)) of
     Right annotations ->
       Right annotations
 

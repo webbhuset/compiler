@@ -1,7 +1,7 @@
 module Type.Overload
-  ( Need(..)
-  , record
+  ( record
   , resolveModule
+  , lookupDefinition
   , Target(..)
   , lookupResolved
   )
@@ -19,7 +19,7 @@ import qualified Canonicalize.Overload as Overload
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Overload as Error
-import Type.Type (Variable)
+import Type.Type (Need(..), Clause(..))
 import qualified Type.Type as Solver
 
 
@@ -37,19 +37,14 @@ import qualified Type.Type as Solver
 -- modules compiled in parallel cannot collide, and both tables only ever grow.
 
 
--- One overload a use site needs, and the variable whose solved type says
--- which definition that is.
-data Need =
-  Need Can.OverloadName Variable
-
-
+-- A use site: what it needs, and the `where` clauses of the definition it is
+-- in. A need typed at one of those clauses' rigid variables takes the clause's
+-- parameter instead of a definition. Both types live in Type.Type, since the
+-- solver carries them too.
 data Site =
   Site
     { _needs :: [Need]
-    -- The `where` clauses of the definition this site is in, paired with the
-    -- rigid variable each one dispatches on. A site typed at one of those
-    -- variables takes the clause's parameter instead of a definition.
-    , _clauses :: [(Can.Constraint, Variable)]
+    , _clauses :: [Clause]
     }
 
 
@@ -71,7 +66,7 @@ resolvedRef =
   unsafePerformIO (newIORef Map.empty)
 
 
-record :: ModuleName.Canonical -> A.Region -> [Need] -> [(Can.Constraint, Variable)] -> IO ()
+record :: ModuleName.Canonical -> A.Region -> [Need] -> [Clause] -> IO ()
 record home region needs clauses =
   atomicModifyIORef' sitesRef $ \table ->
     ( Map.insertWith (++) home [(region, Site needs clauses)] table, () )
@@ -98,12 +93,12 @@ resolveSite home overloads (region, Site needs clauses) =
       -- type variable name only when they really are the same variable.
       types <-
         Solver.toRelatedTypes $
-          map (\(Need _ var) -> var) needs ++ map snd clauses
+          map _need_dispatch needs ++ map _clause_dispatch clauses
 
       let (needTypes, clauseTypes) = splitAt (length needs) types
       let inScope =
             [ (constraint, var)
-            | ((constraint, _), Can.TVar var) <- zip clauses clauseTypes
+            | (Clause constraint _ _, Can.TVar var) <- zip clauses clauseTypes
             ]
 
       case traverse (uncurry (resolve overloads inScope)) (zip needs needTypes) of
@@ -122,8 +117,8 @@ resolve
   -> Need
   -> Can.Type
   -> Either (A.Region -> Error.Error) Target
-resolve overloads inScope (Need ovName _) tipe =
-  resolveAt overloads inScope ovName (Just tipe)
+resolve overloads inScope need tipe =
+  resolveAt overloads inScope (_need_name need) (Just tipe)
 
 
 resolveAt
@@ -162,7 +157,7 @@ resolveAt overloads inScope ovName@(ovHome, name) rawDispatched =
             Nothing ->
               Left $ \region -> Error.NoDefinition region ovHome name dispatched
 
-            Just (Can.Instance target declared) ->
+            Just (Can.Instance target (Can.Forall _ declared)) ->
               -- The definition may itself need overloads, as one for `List a`
               -- does. Matching what it was declared for against what it is
               -- being used at says which types those are needed at.
@@ -171,7 +166,7 @@ resolveAt overloads inScope ovName@(ovHome, name) rawDispatched =
                   Right (Definition target [])
 
                 Just clauses ->
-                  let subst = match declared dispatched Map.empty in
+                  let subst = maybe Map.empty (\d -> match d dispatched Map.empty) (Overload.dispatchArgument declared) in
                   Definition target <$>
                     traverse
                       (\c@(Can.Constraint n _) ->
@@ -179,6 +174,16 @@ resolveAt overloads inScope ovName@(ovHome, name) rawDispatched =
                           (Map.lookup (Overload.dispatchVar c) subst))
                       clauses
 
+
+
+-- The definition a settled dispatch type picks, for the solver to unify the
+-- rest of a clause against. Nothing when the type picks none; the resolver
+-- reports that afterwards, with a better message than the solver could.
+lookupDefinition :: Can.Overloads -> Can.OverloadName -> Can.Type -> Maybe Can.Annotation
+lookupDefinition overloads ovName dispatched =
+  do  key <- dispatchKey (Type.iteratedDealias dispatched)
+      Can.Instance _ annotation <- Map.lookup key =<< Map.lookup ovName (Can._instances overloads)
+      Just annotation
 
 
 isSuper :: Name.Name -> Bool

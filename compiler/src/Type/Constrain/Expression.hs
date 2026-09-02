@@ -62,12 +62,16 @@ constrain rtv (A.At region expression) expected =
     Can.VarOverload dispatch ovName annotation@(Can.Forall freeVars srcType) ->
       do  freshVars <- traverse (\_ -> mkFlexVar) freeVars
           tipe <- Instantiate.fromSrcType (Map.map VarN freshVars) srcType
-          recordDispatch rtv dispatch
-            [ Overload.Need ovName (freshVars Map.! var)
-            | Just var <- [CanOverload.abstractVar annotation]
-            ]
+          dispatchCon <-
+            recordDispatch rtv dispatch
+              [ Need region ovName (freshVars Map.! var) srcType freshVars
+              | Just var <- [CanOverload.abstractVar annotation]
+              ]
           return $ exists (Map.elems freshVars) $
-            CEqual region (Foreign (snd ovName)) tipe expected
+            CAnd
+              [ CEqual region (Foreign (snd ovName)) tipe expected
+              , dispatchCon
+              ]
 
     -- A value whose signature has `where` clauses. Its type is instantiated
     -- here rather than by the solver so that the variables its clauses
@@ -76,12 +80,16 @@ constrain rtv (A.At region expression) expected =
     Can.VarConstrained dispatch _ name (Can.Forall freeVars srcType) constraints ->
       do  freshVars <- traverse (\_ -> mkFlexVar) freeVars
           valueType <- Instantiate.fromSrcType (Map.map VarN freshVars) srcType
-          recordDispatch rtv dispatch
-            [ Overload.Need ovName (freshVars Map.! CanOverload.dispatchVar c)
-            | c@(Can.Constraint ovName _) <- constraints
-            ]
+          dispatchCon <-
+            recordDispatch rtv dispatch
+              [ Need region ovName (freshVars Map.! CanOverload.dispatchVar c) clauseType freshVars
+              | c@(Can.Constraint ovName clauseType) <- constraints
+              ]
           return $ exists (Map.elems freshVars) $
-            CEqual region (Foreign name) valueType expected
+            CAnd
+              [ CEqual region (Foreign name) valueType expected
+              , dispatchCon
+              ]
 
     Can.VarCtor _ _ name _ annotation ->
       return $ CForeign region name annotation expected
@@ -197,13 +205,20 @@ constrain rtv (A.At region expression) expected =
 -- from a use at some unrelated type variable.
 
 
-recordDispatch :: RTV -> Can.Dispatch -> [Overload.Need] -> IO ()
+-- Recorded twice on purpose. The global table is what the resolver reads
+-- after solving to pick definitions and report what it could not; the
+-- constraint is what lets the solver unify a clause with its definition before
+-- the enclosing definition generalizes.
+recordDispatch :: RTV -> Can.Dispatch -> [Need] -> IO Constraint
 recordDispatch rtv (Can.Dispatch home region clauses) needs =
-  Overload.record home region needs
-    [ (c, var)
-    | c <- clauses
-    , Just (VarN var) <- [Map.lookup (CanOverload.dispatchVar c) rtv]
-    ]
+  do  let rigidVars = Map.mapMaybe (\t -> case t of { VarN v -> Just v; _ -> Nothing }) rtv
+      let inScope =
+            [ Clause c var rigidVars
+            | c <- clauses
+            , Just var <- [Map.lookup (CanOverload.dispatchVar c) rigidVars]
+            ]
+      Overload.record home region needs inScope
+      return (CDispatch needs inScope)
 
 
 

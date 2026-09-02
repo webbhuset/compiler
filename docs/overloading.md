@@ -464,9 +464,29 @@ their `where` clauses.
 
 ## What resolves and what does not
 
-Resolution happens after type inference, so the compiler dispatches on the type
-the solver actually settled on. Where that type is a variable with no clause
-for it, the error is the line to add:
+Resolution and inference work together. A use site's dispatch type is settled
+by ordinary inference, and as soon as it is, the definition it picks is unified
+with the rest of the clause — before the enclosing definition generalizes. So a
+type that only the definition determines is inferred rather than guessed:
+
+```elm
+abstract next : traversable -> Maybe ( item, traversable )
+
+minimum : t -> Maybe item
+    where Traverse.next : t -> Maybe ( item, t )
+    where Ord.compare : item -> item -> Ordering
+
+
+test =
+    minimum "caf"          -- : Maybe Char, with no annotation
+```
+
+The `String` definition of `next` yields a `Char`, so `item` is `Char`, and the
+`Ord.compare` clause then resolves at `Char`. Annotate `test : Maybe Int` and
+that is a type error, as it should be.
+
+Where the dispatch type is a variable with no clause for it, the error is the
+line to add:
 
 ```
 -- MISSING WHERE CLAUSE -------------------------------------------------------
