@@ -334,13 +334,15 @@ toReport source err =
               ++ "` has at `" ++ Name.toChars var ++ "`:"
           ,
             D.stack
-              [ D.reflow "It has to be written exactly like this:"
+              [ D.reflow "It has to have this shape:"
               , D.indent 4 $ D.hang 4 $ D.sep $
                   [ D.dullyellow (D.fromChars (Name.toChars qual ++ "." ++ Name.toChars name)), ":" ]
                   ++ [ RT.canToDoc L.empty RT.None expected ]
               , D.reflow $
-                  "A clause only says which type variable the overload is needed at, so\
-                  \ everything else about it comes from where it was declared."
+                  "You can call the type variables what you like, as long as you are\
+                  \ consistent. Everything else about the type comes from where the name\
+                  \ was declared, since a clause only says which type variable the overload\
+                  \ is needed at."
               ]
           )
 
