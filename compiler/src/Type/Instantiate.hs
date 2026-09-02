@@ -48,7 +48,16 @@ fromSrcType freeVars sourceType =
                 fromSrcType freeVars realType
 
               Can.Holey realType ->
-                fromSrcType (Map.fromList targs) realType
+                -- Refer to the alias arguments with PlaceHolder rather than
+                -- substituting the instantiated argument types directly. When
+                -- `typeToVar` later converts this to variables, PlaceHolder
+                -- resolves to the *same* variable as the argument, so the
+                -- structure is shared. Substituting the types directly would
+                -- duplicate the argument once per nesting level, giving
+                -- exponential time and memory for things like
+                -- `type alias Parts = Part1 (Part2 (Part3 {}))`
+                -- (see https://github.com/elm/compiler/issues/1897).
+                fromSrcType (Map.fromList (map toPlaceHolder targs)) realType
 
     Can.TTuple a b maybeC ->
       TupleN
@@ -74,3 +83,8 @@ fromSrcType freeVars sourceType =
 fromSrcFieldType :: Map.Map Name.Name Type -> Can.FieldType -> IO Type
 fromSrcFieldType freeVars (Can.FieldType _ tipe) =
   fromSrcType freeVars tipe
+
+
+toPlaceHolder :: (Name.Name, Type) -> (Name.Name, Type)
+toPlaceHolder (name, _) =
+  (name, PlaceHolder name)
