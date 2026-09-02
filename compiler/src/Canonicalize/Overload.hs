@@ -15,6 +15,7 @@ module Canonicalize.Overload
 
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import qualified Data.Maybe as Maybe
 
 import qualified Crash
 import qualified String as S
@@ -161,7 +162,7 @@ addClauses env freeVars seen srcClauses =
           do  tipe <- CanType.canonicalize env srcType
               case dispatchArgument tipe of
                 Just (Can.TVar var) | Map.member var freeVars ->
-                  if tipe /= substitute var abstract then
+                  if not (sameUpToRenaming (abstractType abstract) tipe) then
                     Result.throw $
                       Error.WhereWrongType region qual name var (substitute var abstract)
                   else
@@ -178,8 +179,98 @@ addClauses env freeVars seen srcClauses =
                     Error.WhereNotDispatching region qual name (Map.keys freeVars)
 
 
+abstractType :: Can.Annotation -> Can.Type
+abstractType (Can.Forall _ tipe) =
+  tipe
+
+
+-- A clause is the abstract signature with its type variables renamed, and only
+-- the renaming has to be consistent: one abstract variable is always written as
+-- the same clause variable, and two abstract variables are never written as
+-- one. Which names are used is the writer's business, so `next : t -> Maybe
+-- ( a, t )` and `next : t -> Maybe ( item, t )` are both fine for an abstract
+-- `next : traversable -> Maybe ( item, traversable )`.
+sameUpToRenaming :: Can.Type -> Can.Type -> Bool
+sameUpToRenaming abstract clause =
+  Maybe.isJust (matchUp abstract clause (Map.empty, Map.empty))
+
+
+-- Abstract name to clause name, and back, so both directions can be checked.
+type Renaming =
+  ( Map.Map T.Var T.Var, Map.Map T.Var T.Var )
+
+
+matchUp :: Can.Type -> Can.Type -> Renaming -> Maybe Renaming
+matchUp abstract clause renaming =
+  case ( Type.iteratedDealias abstract, Type.iteratedDealias clause ) of
+    ( Can.TVar x, Can.TVar y ) ->
+      matchVar x y renaming
+
+    ( Can.TLambda a1 a2, Can.TLambda c1 c2 ) ->
+      matchUp a1 c1 renaming >>= matchUp a2 c2
+
+    ( Can.TType h1 n1 as1, Can.TType h2 n2 as2 )
+      | h1 == h2 && n1 == n2 && length as1 == length as2 ->
+          matchAll (zip as1 as2) renaming
+
+    ( Can.TUnit, Can.TUnit ) ->
+      Just renaming
+
+    ( Can.TPair a1 b1, Can.TPair a2 b2 ) ->
+      matchUp a1 a2 renaming >>= matchUp b1 b2
+
+    ( Can.TTriple a1 b1 c1, Can.TTriple a2 b2 c2 ) ->
+      matchUp a1 a2 renaming >>= matchUp b1 b2 >>= matchUp c1 c2
+
+    ( Can.TRecord fs1 ext1, Can.TRecord fs2 ext2 )
+      | Map.keys fs1 == Map.keys fs2 ->
+          matchAll (zip (fieldTypes fs1) (fieldTypes fs2)) renaming >>= matchExt ext1 ext2
+
+    ( Can.TTagRow ts1 ext1, Can.TTagRow ts2 ext2 )
+      | Map.keys ts1 == Map.keys ts2
+          && and (zipWith (\a b -> length a == length b) (Map.elems ts1) (Map.elems ts2)) ->
+          matchAll (zip (concat (Map.elems ts1)) (concat (Map.elems ts2))) renaming
+            >>= matchExt ext1 ext2
+
+    _ ->
+      Nothing
+
+
+matchVar :: T.Var -> T.Var -> Renaming -> Maybe Renaming
+matchVar x y (fwd, bwd) =
+  case ( Map.lookup x fwd, Map.lookup y bwd ) of
+    ( Nothing, Nothing ) ->
+      Just (Map.insert x y fwd, Map.insert y x bwd)
+
+    ( Just y', Just x' ) | y' == y && x' == x ->
+      Just (fwd, bwd)
+
+    _ ->
+      Nothing
+
+
+matchAll :: [(Can.Type, Can.Type)] -> Renaming -> Maybe Renaming
+matchAll pairs renaming =
+  case pairs of
+    []               -> Just renaming
+    (a, c) : rest    -> matchUp a c renaming >>= matchAll rest
+
+
+matchExt :: Maybe T.Var -> Maybe T.Var -> Renaming -> Maybe Renaming
+matchExt a c renaming =
+  case ( a, c ) of
+    ( Nothing, Nothing ) -> Just renaming
+    ( Just x, Just y )   -> matchVar x y renaming
+    _                    -> Nothing
+
+
+fieldTypes :: Map.Map N.Name Can.FieldType -> [Can.Type]
+fieldTypes fields =
+  [ tipe | Can.FieldType _ tipe <- Map.elems fields ]
+
+
 -- The abstract signature with its own dispatch variable renamed to the one
--- this clause asks for, which is exactly what the clause has to say.
+-- this clause asks for: the shape a clause has to have, used for suggestions.
 substitute :: T.Var -> Can.Annotation -> Can.Type
 substitute var (Can.Forall _ tipe) =
   case dispatchArgument tipe of
