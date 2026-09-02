@@ -127,6 +127,12 @@ Its first argument names the type it is for. That has to be a named type, a
 tuple, or a closed row carrying one tag; a type variable or a record has no
 name to dispatch on.
 
+The rest of the signature has to be the declaration's, with that type filled
+in. `Ord.compare : Card -> Card -> Int` is rejected where it is written: every
+use site is typed by the declaration, not by any one definition, so a
+definition that disagreed with it would hand callers something other than what
+their type says.
+
 Definitions can use the overload themselves, including on their own type:
 
 ```elm
