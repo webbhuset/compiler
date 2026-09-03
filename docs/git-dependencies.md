@@ -50,11 +50,17 @@ in `"git-dependencies"`.
 
 `elm init` generates a project already set up this way: the patched forks
 are pinned to their fork versions with `"git-dependencies"` entries —
-elm/core and elm/browser from
-`gitlab.webbhuset.com:webbhuset/internal/frontend/elm-{core,browser}.git`
-and elm/virtual-dom from `github.com:webbhuset/virtual-dom.git` — so task
-ports, comparable newtypes, `Css.vars`, and `Browser.Worker` work out of
-the box in new projects.
+elm/core from `git@github.com:webbhuset/core.git`, elm/browser from
+`git@github.com:webbhuset/elm-browser.git` and elm/virtual-dom from
+`git@github.com:webbhuset/virtual-dom.git` — so task ports, comparable
+newtypes, `Css.vars`, and `Browser.Worker` work out of the box in new
+projects.
+
+Those three repositories are public, but the URLs are written in the SSH
+form, and it matters which form a project uses: the cache records the URL
+it cloned a version from and rejects a project that maps the same package
+and version to a different one, the `https://` form of the same
+repository included. Stick to the URLs `elm init` writes.
 
 ## How versions work
 
@@ -108,11 +114,11 @@ fields are 16-bit, so the scheme holds until upstream reaches patch 655.
 
 The forks this compiler expects (the versions `elm init` pins):
 
-| package | upstream | fork | patches |
-| --- | --- | --- | --- |
-| elm/core | 1.0.5 | 1.100.503 | comparable newtypes, task ports, `Task.await`, `widen` |
-| elm/browser | 1.0.2 | 1.100.201 | `Browser.Worker` |
-| elm/virtual-dom | 1.0.5 | 1.100.501 | custom properties |
+| package | upstream | fork | repository | patches |
+| --- | --- | --- | --- | --- |
+| elm/core | 1.0.5 | 1.100.503 | `webbhuset/core` | comparable newtypes, task ports, `Task.await`, `widen` |
+| elm/browser | 1.0.2 | 1.100.201 | `webbhuset/elm-browser` | `Browser.Worker` |
+| elm/virtual-dom | 1.0.5 | 1.100.501 | `webbhuset/virtual-dom` | custom properties |
 
 ## Kernel code in git dependencies
 

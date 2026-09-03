@@ -81,7 +81,7 @@ dependency](git-dependencies.md):
     "direct": { "elm/core": "1.100.503", ... }
 },
 "git-dependencies": {
-    "elm/core": "git@gitlab.example.com:mirrors/elm-core.git"
+    "elm/core": "git@github.com:webbhuset/core.git"
 }
 ```
 
