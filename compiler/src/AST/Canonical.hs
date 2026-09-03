@@ -107,6 +107,7 @@ data Expr_
   | Float EF.Float
   | List [Expr]
   | Negate Expr
+  | Widen Expr -- Basics.widen applied directly: a variant row coercion
   | Binop Name ModuleName.Canonical Name Annotation Expr Expr -- CACHE real name for optimization
   | Lambda [Pattern] Expr
   | Call Expr [Expr]

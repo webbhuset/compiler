@@ -110,7 +110,7 @@ canonicalize env (A.At region expression) =
           return (Can.Lambda args cbody, freeLocals)
 
     Src.Call func args ->
-      Can.Call
+      toCall
         <$> canonicalize env func
         <*> traverse (canonicalize env) args
 
@@ -696,6 +696,29 @@ delayedUsage (Result.Result k) =
           let delayedLocals = Map.map delayUse newFreeLocals in
           good (Map.unionWith combineUses freeLocals delayedLocals) ws value
       )
+
+
+
+-- CALLS
+
+
+-- A direct application of `Basics.widen` becomes a row coercion node with its
+-- own typing rule (see Type.Constrain.Expression). Used any other way, widen
+-- is the plain identity function it is declared as in elm/core.
+toCall :: Can.Expr -> [Can.Expr] -> Can.Expr_
+toCall func@(A.At funcRegion funcExpr) args =
+  case (funcExpr, args) of
+    (Can.VarForeign home "widen" _, arg : rest) | home == ModuleName.basics ->
+      case rest of
+        [] ->
+          Can.Widen arg
+
+        _ ->
+          let region = A.mergeRegions funcRegion (A.toRegion arg) in
+          Can.Call (A.At region (Can.Widen arg)) rest
+
+    _ ->
+      Can.Call func args
 
 
 

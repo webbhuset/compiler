@@ -102,6 +102,10 @@ optimize cycle (A.At region expression) =
     Can.VarDebug home name _ ->
       Names.registerDebug name home region
 
+    Can.Widen inner ->
+      -- a coercion: the runtime value is untouched
+      optimize cycle inner
+
     Can.VarOperator _ home name _ ->
       Names.registerGlobal home name
 

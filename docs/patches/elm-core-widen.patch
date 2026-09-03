@@ -1,0 +1,54 @@
+diff --git a/elm.json b/elm.json
+index 9638f4b..cc2699d 100644
+--- a/elm.json
++++ b/elm.json
+@@ -3,7 +3,7 @@
+     "name": "elm/core",
+     "summary": "Elm's standard libraries",
+     "license": "BSD-3-Clause",
+-    "version": "1.0.7",
++    "version": "1.0.8",
+     "exposed-modules": {
+         "Primitives": [
+             "Basics",
+diff --git a/src/Basics.elm b/src/Basics.elm
+index fa05e40..6b31fcc 100644
+--- a/src/Basics.elm
++++ b/src/Basics.elm
+@@ -12,6 +12,7 @@ module Basics exposing
+   , toPolar, fromPolar
+   , isNaN, isInfinite
+   , identity, always, (<|), (|>), (<<), (>>), Never, never
++  , widen
+   )
+ 
+ {-| Tons of useful functions that get imported by default.
+@@ -914,6 +915,28 @@ identity x =
+   x
+ 
+ 
++{-| Use a structural variant at a wider variant type. A value tagged
++`Loading` is already a valid member of every union that contains `Loading`,
++but the type checker only equates rows, so a value stored at
++`[ Loading, Success Int ]` cannot flow into a function that also handles
++`Failure` without help:
++
++    report : [ Loading, Success Int, Failure String ] -> String
++
++    view model =
++        report (widen model.status)
++
++The compiler checks that every tag of the argument's row appears in the
++target row with the same payload, and that the two rows agree on their
++remainder. At runtime `widen` is the identity function and compiles to
++nothing. Used as a plain value rather than applied directly (for example
++`List.map widen`) it is just `identity`.
++-}
++widen : a -> a
++widen x =
++  x
++
++
+ {-| Create a function that *always* returns the same value. Useful with
+ functions like `map`:
+ 

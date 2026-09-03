@@ -135,6 +135,19 @@ constrain rtv (A.At region expression) expected =
     Can.Call func args ->
       constrainCall rtv region func args expected
 
+    -- `widen e` has whatever variant type the context wants, provided the
+    -- row of `e` is included in it. The inclusion is a deferred check in the
+    -- solver, not a unification, so it is recorded as its own constraint.
+    Can.Widen inner ->
+      do  sourceVar <- mkFlexVar
+          let sourceType = VarN sourceVar
+          innerCon <- constrain rtv inner (NoExpectation sourceType)
+          return $ exists [sourceVar] $
+            CAnd
+              [ innerCon
+              , CWiden region sourceType (expectedToType expected)
+              ]
+
     Can.If branches finally ->
       constrainIf rtv region branches finally expected
 
@@ -553,6 +566,14 @@ constrainArg rtv region maybeName index arg =
       let argType = VarN argVar
       argCon <- constrain rtv arg (FromContext region (CallArg maybeName index) argType)
       return (argVar, argType, argCon)
+
+
+expectedToType :: Expected Type -> Type
+expectedToType expected =
+  case expected of
+    NoExpectation tipe -> tipe
+    FromContext _ _ tipe -> tipe
+    FromAnnotation _ _ _ tipe -> tipe
 
 
 getName :: Can.Expr -> MaybeName

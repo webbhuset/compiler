@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Type
   ( Error(..)
+  , WidenProblem(..)
   -- expectations
   , Expected(..)
   , Context(..)
@@ -42,6 +43,18 @@ data Error
   = BadExpr A.Region Category T.Type (Expected T.Type)
   | BadPattern A.Region PCategory T.Type (PExpected T.Type)
   | InfiniteType A.Region Name.Name T.Type
+  | BadWiden A.Region WidenProblem T.Type T.Type
+
+
+-- Why `widen e` was rejected: what is wrong when going from the source row
+-- (the type of e) to the target row (what the context expects).
+data WidenProblem
+  = WidenSourceNotVariant
+  | WidenTargetNotVariant
+  | WidenMissingTags [Name.Name]
+  | WidenPayload Name.Name T.Type T.Type
+  | WidenRemainders
+  | WidenMismatch
 
 
 
@@ -178,6 +191,99 @@ toReport source localizer err =
 
     InfiniteType region name overallType ->
       toInfiniteReport source localizer region name overallType
+
+    BadWiden region problem sourceType targetType ->
+      toWidenReport source localizer region problem sourceType targetType
+
+
+
+-- TO WIDEN REPORT
+
+
+toWidenReport :: Code.Source -> L.Localizer -> A.Region -> WidenProblem -> T.Type -> T.Type -> Report.Report
+toWidenReport source localizer region problem sourceType targetType =
+  let
+    sourceDoc = D.indent 4 (D.dullyellow (T.toDoc localizer RT.None sourceType))
+    targetDoc = D.indent 4 (D.dullyellow (T.toDoc localizer RT.None targetType))
+
+    rows explanation =
+      D.stack
+        [ "The value being widened is a:"
+        , sourceDoc
+        , "But the context expects:"
+        , targetDoc
+        , explanation
+        ]
+  in
+  Report.Report "CANNOT WIDEN" region [] $
+    Code.toSnippet source region Nothing $
+      case problem of
+        WidenSourceNotVariant ->
+          ( D.reflow "I can only widen structural variants, but this value is not one:"
+          , D.stack
+              [ sourceDoc
+              , D.reflow $
+                  "`widen` moves a value into a variant type with more tags. It does\
+                  \ nothing for records, custom types, or other values."
+              ]
+          )
+
+        WidenTargetNotVariant ->
+          ( D.reflow "I can only widen into a structural variant type, but this context wants:"
+          , D.stack
+              [ targetDoc
+              , D.reflow "The value being widened is a:"
+              , sourceDoc
+              ]
+          )
+
+        WidenMissingTags tags ->
+          ( D.reflow "This value cannot be widened into the type the context expects:"
+          , rows $
+              D.fillSep $
+                [ "The", "target", "does", "not", "have", "the" ]
+                ++ D.commaSep "and" D.green (map D.fromName tags)
+                ++ ( case tags of
+                       [_] -> [ "tag,", "so", "a", "value", "with", "that", "tag" ]
+                       _   -> [ "tags,", "so", "a", "value", "with", "one", "of", "those", "tags" ]
+                   )
+                ++ [ "would", "have", "nowhere", "to", "go.", "Widening", "can"
+                   , "only", "add", "tags,", "never", "drop", "them."
+                   ]
+          )
+
+        WidenPayload tag actualPayload expectedPayload ->
+          ( D.reflow $ "The `" ++ Name.toChars tag ++ "` tag carries a different payload in the two types:"
+          , rows $
+              D.stack
+                [ D.reflow $ "In the value it is:"
+                , D.indent 4 (D.dullyellow (T.toDoc localizer RT.None actualPayload))
+                , D.reflow $ "But the context expects:"
+                , D.indent 4 (D.dullyellow (T.toDoc localizer RT.None expectedPayload))
+                , D.reflow $
+                    "Widening only adds tags; the payload of a shared tag has to stay\
+                    \ exactly the same."
+                ]
+          )
+
+        WidenRemainders ->
+          ( D.reflow "This value cannot be widened into the type the context expects:"
+          , rows $
+              D.reflow $
+                "The two rows end in different type variables. Widening a value whose\
+                \ row has an abstract remainder is only safe when the target keeps the\
+                \ same remainder, since I cannot know which other tags the remainder\
+                \ stands for. Either give both rows the same variable, or widen a value\
+                \ whose row is closed."
+          )
+
+        WidenMismatch ->
+          ( D.reflow "This value cannot be widened into the type the context expects:"
+          , rows $
+              D.reflow $
+                "The row of the value is not yet known here, so I tried to unify the\
+                \ two types directly, and they do not match."
+          )
 
 
 

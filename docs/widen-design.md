@@ -1,8 +1,10 @@
 # Widen — Design Proposal
 
-**Status: proposed, not implemented. Estimated effort 3–5 days, mostly in
-the deferred solver check and error rendering. Builds on structural
-variants and row subtraction (see [structural-variants.md](structural-variants.md)).**
+**Status: implemented on the `widen` branch, as designed below with the
+`Basics.widen` surface. Needs the forked elm/core 1.0.8
+([patch](patches/elm-core-widen.patch)). User-facing docs are in
+[structural-variants.md](structural-variants.md#widening); this document
+keeps the rationale and the alternatives considered.**
 
 Structural variants can *shrink* along a pipeline: a `case` subtracts the
 tags it handles, and `removeLoading : r -> [ r | Loading ] -> r` is

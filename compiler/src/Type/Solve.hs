@@ -35,9 +35,10 @@ run :: Can.Overloads -> Constraint -> IO (Either (NE.List Error.Error) (Map.Map 
 run overloads constraint =
   do  pools <- MVector.replicate 8 []
 
-      (State env _ errors _ _) <-
-        settlePending outermostRank pools =<<
-          solve Map.empty outermostRank pools (emptyState overloads) constraint
+      (State env _ errors _ _ _) <-
+        settleWidens outermostRank pools =<<
+          settlePending outermostRank pools =<<
+            solve Map.empty outermostRank pools (emptyState overloads) constraint
 
       case errors of
         [] ->
@@ -50,7 +51,7 @@ run overloads constraint =
 
 emptyState :: Can.Overloads -> State
 emptyState overloads =
-  State Map.empty (nextMark noMark) [] overloads []
+  State Map.empty (nextMark noMark) [] overloads [] []
 
 
 
@@ -75,7 +76,16 @@ data State =
     -- `where` clauses that were in scope. Looked at before a definition
     -- generalizes; see settlePending.
     , _pending :: [(Need, [Clause])]
+    -- `widen` sites whose row inclusion is still to be checked, most recent
+    -- first. Settled before a definition generalizes; see settleWidens.
+    , _widens :: [Widen]
     }
+
+
+-- The source row (type of the widened expression) and the target row (what
+-- the context expects) of one `widen` site.
+data Widen =
+  Widen A.Region Variable Variable
 
 
 solve :: Env -> Int -> Pools -> State -> Constraint -> IO State
@@ -153,12 +163,17 @@ solve env rank pools state constraint =
     CDispatch needs clauses ->
       return state { _pending = [ (need, clauses) | need <- needs ] ++ _pending state }
 
+    CWiden region sourceType targetType ->
+      do  source <- typeToVariable rank pools sourceType
+          target <- typeToVariable rank pools targetType
+          return state { _widens = Widen region source target : _widens state }
+
     CLet [] flexs _ headerCon CTrue ->
       do  introduce rank pools flexs
           solve env rank pools state headerCon
 
     CLet [] [] header headerCon subCon ->
-      do  state1 <- settlePending rank pools =<< solve env rank pools state headerCon
+      do  state1 <- settleWidens rank pools =<< settlePending rank pools =<< solve env rank pools state headerCon
           locals <- traverse (A.traverse (typeToVariable rank pools)) header
           let newEnv = Map.union env (Map.map A.toValue locals)
           state2 <- solve newEnv rank pools state1 subCon
@@ -183,9 +198,10 @@ solve env rank pools state constraint =
 
           -- run solver in next pool
           locals <- traverse (A.traverse (typeToVariable nextRank nextPools)) header
-          (State savedEnv mark errors overloads pending) <-
-            settlePending nextRank nextPools =<<
-              solve env nextRank nextPools state headerCon
+          (State savedEnv mark errors overloads pending widens) <-
+            settleWidens nextRank nextPools =<<
+              settlePending nextRank nextPools =<<
+                solve env nextRank nextPools state headerCon
 
           let youngMark = mark
           let visitMark = nextMark youngMark
@@ -199,10 +215,211 @@ solve env rank pools state constraint =
           mapM_ isGeneric rigids
 
           let newEnv = Map.union env (Map.map A.toValue locals)
-          let tempState = State savedEnv finalMark errors overloads pending
+          let tempState = State savedEnv finalMark errors overloads pending widens
           newState <- solve newEnv rank nextPools tempState subCon
 
           foldM occurs newState (Map.toList locals)
+
+
+-- SETTLING WIDEN SITES
+--
+-- `widen e` is sound when every tag of e's row is in the target row with the
+-- same payload, and the rows agree on their remainder: the source is closed,
+-- or both end in the same variable. That is an inclusion, not an equation,
+-- so it cannot be a unification. It is checked here, just before the
+-- enclosing definition generalizes, once both rows are as solved as they
+-- will get. Inclusion is stable under instantiation (the same tail variable
+-- stays the same variable in every copy), so checking once is enough.
+--
+-- A source whose tail is still an unconstrained flex variable is widened by
+-- plain unification instead: nothing constrained it, so `widen` should behave
+-- as if it were not there rather than fail as ambiguous.
+
+
+settleWidens :: Int -> Pools -> State -> IO State
+settleWidens rank pools state =
+  do  state1 <- foldM (settleWiden rank pools) state (reverse (_widens state))
+      return state1 { _widens = [] }
+
+
+settleWiden :: Int -> Pools -> State -> Widen -> IO State
+settleWiden rank pools state (Widen region source target) =
+  do  sourceRow <- gatherRow source
+      targetRow <- gatherRow target
+      case (sourceRow, targetRow) of
+        (RowFlex, _) ->
+          widenByUnification rank pools state region source target
+
+        (_, RowFlex) ->
+          widenByUnification rank pools state region source target
+
+        (RowNotVariant, _) ->
+          widenError state region Error.WidenSourceNotVariant source target
+
+        (_, RowNotVariant) ->
+          widenError state region Error.WidenTargetNotVariant source target
+
+        (Row sourceTags sourceTail, Row targetTags targetTail) ->
+          do  tailOk <- checkTails rank pools sourceTail targetTail
+              case tailOk of
+                TailsFlex ->
+                  widenByUnification rank pools state region source target
+
+                TailsDiffer ->
+                  widenError state region Error.WidenRemainders source target
+
+                TailsAgree ->
+                  let
+                    missing =
+                      Map.keys (Map.difference sourceTags targetTags)
+                  in
+                  case missing of
+                    _ : _ ->
+                      widenError state region (Error.WidenMissingTags (map snd missing)) source target
+
+                    [] ->
+                      do  -- render the rows now: a failing payload unification
+                          -- would otherwise turn them into error types
+                          sourceType <- Type.toErrorType source
+                          targetType <- Type.toErrorType target
+                          foldM (checkPayload rank pools region sourceType targetType targetTags) state (Map.toList sourceTags)
+
+
+data RowInfo
+  = Row (Map.Map Can.TagKey [Variable]) Variable
+  | RowFlex
+  | RowNotVariant
+
+
+-- Flatten a variant row the way Type.Unify does before comparing rows: walk
+-- the chain of TagRow1 extensions and aliases, collecting tags until the tail.
+gatherRow :: Variable -> IO RowInfo
+gatherRow variable =
+  gatherRowHelp Map.empty variable
+
+
+gatherRowHelp :: Map.Map Can.TagKey [Variable] -> Variable -> IO RowInfo
+gatherRowHelp tags variable =
+  do  (Descriptor content _ _ _) <- UF.get variable
+      case content of
+        Structure (TagRow1 subTags subExt) ->
+          gatherRowHelp (Map.union tags subTags) subExt
+
+        Structure EmptyTagRow1 ->
+          return (Row tags variable)
+
+        Alias _ _ _ realVar ->
+          gatherRowHelp tags realVar
+
+        FlexVar _ ->
+          if Map.null tags then return RowFlex else return (Row tags variable)
+
+        RigidVar _ ->
+          return (Row tags variable)
+
+        FlexSuper _ _ ->
+          return RowNotVariant
+
+        RigidSuper _ _ ->
+          return RowNotVariant
+
+        Structure _ ->
+          return RowNotVariant
+
+        Error ->
+          return RowNotVariant
+
+
+data Tails
+  = TailsAgree
+  | TailsFlex
+  | TailsDiffer
+
+
+-- A closed source fits under any remainder. Otherwise the tails must be the
+-- same variable; a flex target tail is bound to the source tail to make it
+-- so, and a flex source tail means the whole site is better handled by
+-- unification.
+checkTails :: Int -> Pools -> Variable -> Variable -> IO Tails
+checkTails rank pools sourceTail targetTail =
+  do  (Descriptor sourceContent _ _ _) <- UF.get sourceTail
+      case sourceContent of
+        Structure EmptyTagRow1 ->
+          return TailsAgree
+
+        FlexVar _ ->
+          return TailsFlex
+
+        _ ->
+          do  same <- UF.equivalent sourceTail targetTail
+              if same
+                then return TailsAgree
+                else
+                  do  (Descriptor targetContent _ _ _) <- UF.get targetTail
+                      case targetContent of
+                        FlexVar _ ->
+                          do  answer <- Unify.unify sourceTail targetTail
+                              case answer of
+                                Unify.Ok vars ->
+                                  do  introduce rank pools vars
+                                      return TailsAgree
+
+                                Unify.Err vars _ _ ->
+                                  do  introduce rank pools vars
+                                      return TailsDiffer
+
+                        _ ->
+                          return TailsDiffer
+
+
+checkPayload :: Int -> Pools -> A.Region -> ET.Type -> ET.Type -> Map.Map Can.TagKey [Variable] -> State -> (Can.TagKey, [Variable]) -> IO State
+checkPayload rank pools region sourceType targetType targetTags state (key@(_, tagName), sourceArgs) =
+  case Map.lookup key targetTags of
+    Nothing ->
+      return state  -- already reported as missing
+
+    Just targetArgs ->
+      if length sourceArgs /= length targetArgs then
+        return $ addError state $
+          Error.BadWiden region (Error.WidenMissingTags [tagName]) sourceType targetType
+      else
+        foldM (checkPayloadArg rank pools region tagName sourceType targetType) state (zip sourceArgs targetArgs)
+
+
+checkPayloadArg :: Int -> Pools -> A.Region -> Name.Name -> ET.Type -> ET.Type -> State -> (Variable, Variable) -> IO State
+checkPayloadArg rank pools region tagName sourceType targetType state (sourceArg, targetArg) =
+  do  answer <- Unify.unify sourceArg targetArg
+      case answer of
+        Unify.Ok vars ->
+          do  introduce rank pools vars
+              return state
+
+        Unify.Err vars actualType expectedType ->
+          do  introduce rank pools vars
+              return $ addError state $
+                Error.BadWiden region (Error.WidenPayload tagName actualType expectedType) sourceType targetType
+
+
+widenByUnification :: Int -> Pools -> State -> A.Region -> Variable -> Variable -> IO State
+widenByUnification rank pools state region source target =
+  do  answer <- Unify.unify source target
+      case answer of
+        Unify.Ok vars ->
+          do  introduce rank pools vars
+              return state
+
+        Unify.Err vars actualType expectedType ->
+          do  introduce rank pools vars
+              return $ addError state $
+                Error.BadWiden region Error.WidenMismatch actualType expectedType
+
+
+widenError :: State -> A.Region -> Error.WidenProblem -> Variable -> Variable -> IO State
+widenError state region problem source target =
+  do  sourceType <- Type.toErrorType source
+      targetType <- Type.toErrorType target
+      return $ addError state (Error.BadWiden region problem sourceType targetType)
+
 
 
 -- SETTLING OVERLOAD USES
