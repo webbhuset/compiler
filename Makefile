@@ -9,16 +9,11 @@ build: gen/BuildCount.hs
 	cabal build exe:elm
 	ln -sf $$(realpath --relative-to=. $$(cabal list-bin exe:elm)) whelm
 
-# Rewritten only when the count changes, so unchanged builds stay warm.
+# Rewritten only when the count changes, so unchanged builds stay warm. The
+# release workflow runs the same script, so both stamp identically.
 .PHONY: gen/BuildCount.hs
 gen/BuildCount.hs:
-	@mkdir -p gen
-	@count=$$(git rev-list --count HEAD 2>/dev/null || echo unknown); \
-	printf 'module BuildCount (count) where\n\n\ncount :: String\ncount =\n  "%s"\n' "$$count" > gen/BuildCount.hs.tmp; \
-	if cmp -s gen/BuildCount.hs.tmp gen/BuildCount.hs; \
-	  then rm gen/BuildCount.hs.tmp; \
-	  else mv gen/BuildCount.hs.tmp gen/BuildCount.hs; echo "Stamped build $$count"; \
-	fi
+	@sh installers/stamp-build-count.sh
 
 clean:
 	cabal clean
