@@ -103,6 +103,10 @@ init =
 -- The packages every new project starts with. The patched forks (see
 -- CHANGELOG.md) are pinned to their fork versions and fetched as git
 -- dependencies; everything else comes from the registry as usual.
+--
+-- Fork versions are numbered so they can never collide with a version
+-- the upstream author publishes: minor = 100 + upstream minor, patch =
+-- 100 * upstream patch + fork revision. See docs/git-dependencies.md.
 
 
 directDefaults :: Set.Set Pkg.Name
@@ -125,17 +129,17 @@ forkDefaults :: Map.Map Pkg.Name (V.Version, String)
 forkDefaults =
   Map.fromList
     [ ( Pkg.core
-      , ( V.Version 1 0 7
+      , ( V.Version 1 100 503
         , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-core.git"
         )
       )
     , ( Pkg.browser
-      , ( V.Version 1 0 3
+      , ( V.Version 1 100 201
         , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-browser.git"
         )
       )
     , ( Pkg.virtualDom
-      , ( V.Version 1 0 6
+      , ( V.Version 1 100 501
         , "git@github.com:webbhuset/virtual-dom.git"
         )
       )

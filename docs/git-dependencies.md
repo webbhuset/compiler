@@ -78,6 +78,42 @@ Since the cache key is `(name, version)`, tags should be treated as
 immutable. If you move a tag, delete the corresponding directory from
 `~/.elm` (and the package's `artifacts.dat`) to force a fresh clone.
 
+### Numbering a fork of a published package
+
+A fork keeps the upstream *name*, so its versions share one namespace —
+and one cache directory — with the versions the upstream author
+publishes. Taking the next number up (elm/core `1.0.6` on top of the
+published `1.0.5`) collides the day upstream publishes it: the git
+dependency then stops with a cache-origin error, and a project that
+resolves the same version from the registry silently reuses the fork's
+sources instead. So forks are numbered in a range upstream will never
+reach:
+
+    major = upstream major
+    minor = 100 + upstream minor
+    patch = 100 * upstream patch + fork revision
+
+elm/core `1.0.5` patched three times is `1.100.503`; a fourth revision
+is `1.100.504`. Rebasing those patches onto an upstream `1.0.6` gives
+`1.100.601`, and onto an upstream `1.1.0` gives `1.101.1` — the patch
+number is arithmetic, never zero-padded, since a version field may not
+have a leading zero. Fork revision 0 means pristine upstream sources.
+
+The major must stay the upstream major, because published packages
+constrain their dependencies as `1.0.0 <= v < 2.0.0` and the fork has to
+satisfy that. Everything below the major is free: for a package listed in
+`"git-dependencies"` the solver replaces the registry's version list
+outright, so fork numbers are never compared with published ones. Version
+fields are 16-bit, so the scheme holds until upstream reaches patch 655.
+
+The forks this compiler expects (the versions `elm init` pins):
+
+| package | upstream | fork | patches |
+| --- | --- | --- | --- |
+| elm/core | 1.0.5 | 1.100.503 | comparable newtypes, task ports, `Task.await`, `widen` |
+| elm/browser | 1.0.2 | 1.100.201 | `Browser.Worker` |
+| elm/virtual-dom | 1.0.5 | 1.100.501 | custom properties |
+
 ## Kernel code in git dependencies
 
 Packages fetched through `"git-dependencies"` are **trusted like the

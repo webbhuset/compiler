@@ -71,12 +71,14 @@ JavaScript promise itself is not aborted.
 The compiler generates calls to `_Platform_taskPort`, which lives in
 `elm/core`'s kernel code, so task ports need a **patched elm/core**. Apply
 [patches/elm-core-task-ports.patch](patches/elm-core-task-ports.patch) to a
-fork of elm/core, tag it (e.g. `1.0.6`), and point your project at the fork
-with a [git dependency](git-dependencies.md):
+fork of elm/core, tag it with a [fork
+version](git-dependencies.md#numbering-a-fork-of-a-published-package), and
+point your project at the fork with a [git
+dependency](git-dependencies.md):
 
 ```json
 "dependencies": {
-    "direct": { "elm/core": "1.0.6", ... }
+    "direct": { "elm/core": "1.100.503", ... }
 },
 "git-dependencies": {
     "elm/core": "git@gitlab.example.com:mirrors/elm-core.git"

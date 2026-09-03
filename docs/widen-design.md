@@ -1,7 +1,7 @@
 # Widen — Design Proposal
 
 **Status: implemented on the `widen` branch, as designed below with the
-`Basics.widen` surface. Needs the forked elm/core 1.0.8
+`Basics.widen` surface. Needs the forked elm/core 1.100.503
 ([patch](patches/elm-core-widen.patch)). User-facing docs are in
 [structural-variants.md](structural-variants.md#widening); this document
 keeps the rationale and the alternatives considered.**
