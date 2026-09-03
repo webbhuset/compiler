@@ -51,7 +51,7 @@ intro =
         ,P.green "Webbhuset"
         ,P.green "Elm"
         ,P.green (P.text (V.toChars V.compiler))
-        ,P.text ("(build " ++ BuildCount.count ++ ")")
+        ,P.text ("(build " ++ BuildCount.count ++ ", " ++ BuildCount.commit ++ ")")
         ]
     , ""
     , P.black "-------------------------------------------------------------------------------"
