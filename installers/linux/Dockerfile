@@ -34,6 +34,9 @@ COPY compiler compiler
 COPY reactor reactor
 COPY terminal terminal
 COPY src src
+# Stamped on the host by installers/stamp-build-count.sh; the container has no
+# git history to derive it from.
+COPY gen gen
 
 RUN cabal build elm --enable-executable-static --ghc-option=-split-sections
 RUN cp $(cabal list-bin elm) /usr/local/bin/elm

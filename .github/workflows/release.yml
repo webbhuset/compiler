@@ -26,6 +26,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The build number is the commit count of HEAD, so the default
+          # shallow checkout would stamp every release as build 1.
+          fetch-depth: 0
+
+      - name: Stamp build count
+        shell: bash
+        run: sh installers/stamp-build-count.sh
 
       - name: Build static binary with Docker
         run: |
@@ -63,6 +71,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The build number is the commit count of HEAD, so the default
+          # shallow checkout would stamp every release as build 1.
+          fetch-depth: 0
+
+      - name: Stamp build count
+        shell: bash
+        run: sh installers/stamp-build-count.sh
 
       - name: Set up GHC and cabal
         uses: haskell-actions/setup@v2
@@ -96,6 +112,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The build number is the commit count of HEAD, so the default
+          # shallow checkout would stamp every release as build 1.
+          fetch-depth: 0
+
+      - name: Stamp build count
+        shell: bash
+        run: sh installers/stamp-build-count.sh
 
       - name: Set up GHC and cabal
         uses: haskell-actions/setup@v2
