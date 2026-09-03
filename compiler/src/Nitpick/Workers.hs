@@ -101,6 +101,7 @@ checkExpr (A.At region expression) errors =
     Can.VarCtor _ _ _ _ _ -> errors
     Can.VarTag _ _ _ -> errors
     Can.VarDebug _ _ _ -> errors
+    Can.Widen inner -> checkExpr inner errors
     Can.VarOperator _ _ _ _ -> errors
     Can.Chr _ -> errors
     Can.Str _ -> errors

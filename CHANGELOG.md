@@ -284,6 +284,13 @@ describe s =
   `removeLoading : r -> [ r | Loading ] -> r` works — and instantiating `r`
   derives row-changing functions like
   `[ f | Failure String, Loading ] -> [ f | Failure String ]`.
+- Widening: `widen e` (a `Basics` function in the
+  [patched elm/core](docs/patches/elm-core-widen.patch), identity at
+  runtime) uses a variant at any row that includes its own — same tags with
+  the same payloads, and a closed or identical remainder. A closed model
+  field can flow into a consumer handling more tags, and a narrowed
+  catch-all can be passed through into a wider result row. Checked before
+  the enclosing definition generalizes; erased before code generation.
 - Tags are canonical (module + name): same-spelled tags from different
   modules are distinct and can coexist in one union. Export and import
   them like constructors.

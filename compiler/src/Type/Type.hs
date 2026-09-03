@@ -65,6 +65,7 @@ data Constraint
   | CForeign A.Region N.Name Can.Annotation (E.Expected Type)
   | COperator A.Region Op.Name Can.Annotation (E.Expected Type)
   | CPattern A.Region E.PCategory Type (E.PExpected Type)
+  | CWiden A.Region Type Type -- source row, target row: checked by Type.Solve
   | CAnd [Constraint]
   | CLet
       { _rigidVars :: [Variable]

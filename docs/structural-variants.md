@@ -174,12 +174,82 @@ Two rules govern what gets subtracted:
 - The catch-all must be the **final** branch, with only tag patterns before
   it. A `_` wildcard binds nothing, so nothing is narrowed there.
 
-The reverse direction — *adding* tags to an abstract remainder, as in
-`[ r | Success Int ] -> [ r | Success Int, Loading ]` with a pass-through
-branch — is not expressible; it would need an explicit `widen` coercion
-(proposed in [widen-design.md](widen-design.md), not implemented). Adding
-tags to freshly constructed values needs nothing: construction is always
-open.
+The reverse direction — using a value at a row with *more* tags — is not
+something unification can do on its own; that is what `widen` is for.
+
+
+## Widening
+
+Rows widen implicitly only for freshly constructed values, whose rows are
+open. A value whose type has a *closed* or *rigid* row — anything stored in a
+record field, or passed through an annotation — does not unify with a larger
+row, because unification is symmetric:
+
+```elm
+type alias Model =
+    { status : [ Loading, Success Int ] }          -- necessarily closed
+
+
+report : [ Loading, Success Int, Failure String ] -> String
+
+
+view model =
+    report model.status            -- TYPE MISMATCH: [ Loading, Success Int ]
+                                   -- is not [ Loading, Success Int, Failure String ]
+```
+
+`widen` (in `Basics`, so always in scope) is a checked coercion into any row
+that includes the value's row:
+
+```elm
+view model =
+    report (widen model.status)
+```
+
+At runtime it is the identity function and compiles to nothing: a value
+tagged `Success` is already a valid member of every union containing
+`Success`. The check happens at compile time, just before the enclosing
+definition is generalized:
+
+- every tag of the value's row must appear in the target row, with the
+  **same payload**;
+- the value's row must be **closed**, or end in the **same type variable**
+  as the target (two different abstract remainders are rejected, since the
+  value's remainder could hold tags the target lacks);
+- if the value's row is still completely unknown at that point, `widen`
+  simply unifies the two types, so it never fails where plain code would
+  have succeeded.
+
+With row subtraction this completes the algebra: subtract on the way in,
+widen on the way out. This is how a pass-through branch adds a tag to an
+abstract remainder:
+
+```elm
+loadingIfZero : [ r | Success Int ] -> [ r | Success Int, Loading ]
+loadingIfZero status =
+    case status of
+        Success code ->
+            if code == 0 then Loading else Success code
+
+        tail ->
+            widen tail          -- tail : r, widened into [ r | Success Int, Loading ]
+```
+
+and how values from two different closed unions meet in one:
+
+```elm
+pick : Bool -> [ NotAsked, Loading ]
+pick eager =
+    if eager then widen cachedLoading else widen cachedNotAsked
+```
+
+Used as a plain value rather than applied directly — `List.map widen`,
+`f widen` — it is just `identity`: only a direct application gets the
+coercion typing. Widening is shallow (it does not reach into payloads) and
+applies to variants only; records cannot be widened, because their extra
+fields would still be visible to `(==)`. Requires the forked elm/core with
+`Basics.widen` ([patch](patches/elm-core-widen.patch)). The design
+rationale is in [widen-design.md](widen-design.md).
 
 
 ## Why this is useful
