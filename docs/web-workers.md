@@ -137,7 +137,7 @@ an unpublished version number, like the elm/core patches for task ports:
     "direct": { "elm/browser": "1.100.201", ... }
 },
 "git-dependencies": {
-    "elm/browser": "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-browser.git"
+    "elm/browser": "git@github.com:webbhuset/elm-browser.git"
 }
 ```
 

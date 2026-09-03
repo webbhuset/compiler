@@ -107,6 +107,11 @@ init =
 -- Fork versions are numbered so they can never collide with a version
 -- the upstream author publishes: minor = 100 + upstream minor, patch =
 -- 100 * upstream patch + fork revision. See docs/git-dependencies.md.
+--
+-- The URLs are the canonical SSH form. Since the package cache keys on
+-- (name, version) and records the URL it cloned from, a project reaching
+-- the same fork version through a different URL -- the https form of the
+-- same repository included -- is rejected as a cache conflict.
 
 
 directDefaults :: Set.Set Pkg.Name
@@ -130,12 +135,12 @@ forkDefaults =
   Map.fromList
     [ ( Pkg.core
       , ( V.Version 1 100 503
-        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-core.git"
+        , "git@github.com:webbhuset/core.git"
         )
       )
     , ( Pkg.browser
       , ( V.Version 1 100 201
-        , "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-browser.git"
+        , "git@github.com:webbhuset/elm-browser.git"
         )
       )
     , ( Pkg.virtualDom
