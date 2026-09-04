@@ -2157,7 +2157,7 @@ data Reactor
   | ReactorBadDetails Details
   | ReactorBadBuild BuildProblem
   | ReactorBadGenerate Generate
-  | ReactorForeignWorker ModuleName.Raw
+  | ReactorWorkerUnservable ModuleName.Raw
 
 
 reactorToReport :: Reactor -> Help.Report
@@ -2176,13 +2176,15 @@ reactorToReport problem =
     ReactorBadBuild buildProblem ->
       toBuildProblemReport buildProblem
 
-    ReactorForeignWorker name ->
-      Help.report "WORKER IN A PACKAGE" Nothing
-        ("This program spawns the worker `" ++ ModuleName.toChars name ++ "`, which lives in a package:")
+    ReactorWorkerUnservable name ->
+      Help.report "CANNOT SERVE WORKER" Nothing
+        ("This program spawns the worker `" ++ ModuleName.toChars name ++ "`, whose source I cannot serve:")
         [ D.reflow $
             "elm reactor serves each worker from its own source file, as\
-            \ `<path>.elm.mjs`, and a package's sources are not under this project.\
-            \ Build with `elm make --output=main.mjs` to get the worker as a file\
+            \ `<path>.elm.mjs`, and only files under the directory it was started\
+            \ in. This worker either lives in a package or under a source directory\
+            \ outside that. Start the reactor from a directory that contains it, or\
+            \ build with `elm make --output=main.mjs` to get the worker as a file\
             \ next to the bundle instead."
         ]
 
