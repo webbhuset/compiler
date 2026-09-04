@@ -93,10 +93,10 @@ A worker program can also be compiled on its own. `elm make src/Counter.elm
 reactor serves one.
 
 The classic `.js` and `.html` outputs cannot host workers (no `import.meta`),
-and compiling a worker-spawning program to them is an error. In `elm reactor`,
-load the program as a module from a page of your own — see
-[reactor.md](reactor.md), which serves each worker from its own source path
-rather than as a hashed sibling. Workers can spawn workers; a spawn *cycle* is
+and compiling a worker-spawning program to them is an error. `elm reactor`
+hosts them: its page for the program loads it as a module, and each worker is
+served from its own source path rather than as a hashed sibling — see
+[reactor.md](reactor.md). Workers can spawn workers; a spawn *cycle* is
 a compile error.
 
 ## Messages and the boundary
