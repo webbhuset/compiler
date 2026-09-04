@@ -118,7 +118,7 @@ The forks this compiler expects (the versions `elm init` pins):
 | --- | --- | --- | --- | --- |
 | elm/core | 1.0.5 | 1.100.503 | `webbhuset/core` | comparable newtypes, task ports, `Task.await`, `widen` |
 | elm/browser | 1.0.2 | 1.100.201 | `webbhuset/elm-browser` | `Browser.Worker` |
-| elm/virtual-dom | 1.0.5 | 1.100.501 | `webbhuset/virtual-dom` | custom properties |
+| elm/virtual-dom | 1.0.5 | 1.100.502 | `webbhuset/virtual-dom` | custom properties, HTML to string |
 
 ## Kernel code in git dependencies
 

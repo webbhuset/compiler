@@ -187,7 +187,7 @@ browsers require `style.setProperty` for `--custom` properties). Apply
 [patches/elm-virtual-dom-custom-properties.patch](patches/elm-virtual-dom-custom-properties.patch)
 to a fork of elm/virtual-dom, tag it with a [fork
 version](git-dependencies.md#numbering-a-fork-of-a-published-package)
-(`1.100.501` for the fork this compiler expects), and consume it as a git
+(`1.100.502` for the fork this compiler expects), and consume it as a git
 dependency, like the elm/core patches for task ports. Everything except
 `Css.vars` works with the stock virtual-dom. Note that `setProperty` only
 accepts hyphenated names, so camelCase keys in `Html.Attributes.style`

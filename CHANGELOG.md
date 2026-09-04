@@ -472,6 +472,42 @@ Ord.compare (Card a) (Card b) =
   exact line to add. Clauses are not inferred, only suggested, and a `let`
   definition cannot have them yet. `comparable` and friends are untouched.
 
+## HTML to string
+
+*[docs](docs/html-to-string.md) · runtime in a
+[patched elm/virtual-dom](docs/patches/elm-virtual-dom-to-string.patch)*
+
+`VirtualDom.toString` renders a node as HTML text, for serving a page from a
+server instead of building it in a browser. The `Int` is the indentation
+width, where `0` adds no whitespace at all — the only setting that cannot
+change what the page means:
+
+```elm
+V.toString 0 (Html.p [] [ Html.text "Hello!" ])
+--> "<p>Hello!</p>"
+```
+
+Two node kinds go with it, `V.comment` and `V.doctype`, so a whole document
+can be written from Elm. A comment is a real comment node in a browser and
+diffs like any other node; `virtualize` keeps the comments in
+server-rendered markup, so an app taking over a pre-rendered page sees them
+in place. A doctype has no DOM node it could be and renders as an empty
+text node there.
+
+The output is the tree as written: a `script` tag stays a script tag and an
+`on*` attribute keeps its name. Those two rewrites are defenses against
+injecting into *this* document, so they moved from where a node is built to
+`_VirtualDom_render` and `_VirtualDom_applyAttrs`. The browser is defended
+exactly as before, but an attribute name built from user input now reaches
+your server output, where it used to be neutralized for you. Text and
+attribute values are escaped. `Html.Attributes.href`, `src` and `action`
+still refuse a `javascript:` URI, since elm/html checks that where the
+attribute is built.
+
+Event handlers, custom nodes and `innerHTML` cannot be written down and are
+left out. Properties are translated to attributes (`className` to `class`,
+`htmlFor` to `for`, booleans to HTML boolean attributes).
+
 ## Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
