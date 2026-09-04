@@ -144,7 +144,7 @@ forkDefaults =
         )
       )
     , ( Pkg.virtualDom
-      , ( V.Version 1 100 501
+      , ( V.Version 1 100 502
         , "git@github.com:webbhuset/virtual-dom.git"
         )
       )

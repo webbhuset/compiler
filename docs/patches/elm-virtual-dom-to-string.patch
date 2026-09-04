@@ -1,0 +1,628 @@
+diff --git a/src/Elm/Kernel/VirtualDom.js b/src/Elm/Kernel/VirtualDom.js
+index 5ab1cd8..08406b1 100644
+--- a/src/Elm/Kernel/VirtualDom.js
++++ b/src/Elm/Kernel/VirtualDom.js
+@@ -61,6 +61,37 @@ function _VirtualDom_text(string)
+ 
+ 
+ 
++// COMMENT
++
++
++function _VirtualDom_comment(string)
++{
++	return {
++		$: __2_COMMENT,
++		__text: string
++	};
++}
++
++
++
++// DOCTYPE
++//
++// A document type declaration is only meaningful when a whole document is
++// rendered to a string. It has no DOM representation a node can hold, so it
++// renders as an empty text node in the browser: one vNode still stands for
++// one DOM node, which the differ's index arithmetic relies on.
++
++
++function _VirtualDom_doctype(string)
++{
++	return {
++		$: __2_DOCTYPE,
++		__text: string
++	};
++}
++
++
++
+ // NODE
+ 
+ 
+@@ -441,6 +472,16 @@ function _VirtualDom_render(vNode, eventNode)
+ 		return _VirtualDom_doc.createTextNode(vNode.__text);
+ 	}
+ 
++	if (tag === __2_COMMENT)
++	{
++		return _VirtualDom_doc.createComment(vNode.__text);
++	}
++
++	if (tag === __2_DOCTYPE)
++	{
++		return _VirtualDom_doc.createTextNode('');
++	}
++
+ 	if (tag === __2_TAGGER)
+ 	{
+ 		var subNode = vNode.__node;
+@@ -470,9 +511,14 @@ function _VirtualDom_render(vNode, eventNode)
+ 
+ 	// at this point `tag` must be __2_NODE or __2_KEYED_NODE
+ 
++	// The tag is kept as written so that toString can render it. Rewriting
++	// <script> is a defense against injecting into this document, so it
++	// happens here, on the way into the DOM, and not at construction.
++	var tag_ = _VirtualDom_noScript(vNode.__tag);
++
+ 	var domNode = vNode.__namespace
+-		? _VirtualDom_doc.createElementNS(vNode.__namespace, vNode.__tag)
+-		: _VirtualDom_doc.createElement(vNode.__tag);
++		? _VirtualDom_doc.createElementNS(vNode.__namespace, tag_)
++		: _VirtualDom_doc.createElement(tag_);
+ 
+ 	if (_VirtualDom_divertHrefToApp && vNode.__tag == 'a')
+ 	{
+@@ -540,10 +586,14 @@ function _VirtualDom_applyAttrs(domNode, attrs)
+ {
+ 	for (var key in attrs)
+ 	{
++		// as with the tag in _VirtualDom_render, an `on*` or `formAction`
++		// key is rewritten here rather than at construction, so that
++		// toString still sees what was written
++		var safeKey = _VirtualDom_noOnOrFormAction(key);
+ 		var value = attrs[key];
+ 		typeof value !== 'undefined'
+-			? domNode.setAttribute(key, value)
+-			: domNode.removeAttribute(key);
++			? domNode.setAttribute(safeKey, value)
++			: domNode.removeAttribute(safeKey);
+ 	}
+ }
+ 
+@@ -559,10 +609,11 @@ function _VirtualDom_applyAttrsNS(domNode, nsAttrs)
+ 		var pair = nsAttrs[key];
+ 		var namespace = pair.__namespace;
+ 		var value = pair.__value;
++		var safeKey = _VirtualDom_noOnOrFormAction(key);
+ 
+ 		typeof value !== 'undefined'
+-			? domNode.setAttributeNS(namespace, key, value)
+-			: domNode.removeAttributeNS(namespace, key);
++			? domNode.setAttributeNS(namespace, safeKey, value)
++			: domNode.removeAttributeNS(namespace, safeKey);
+ 	}
+ }
+ 
+@@ -818,12 +869,18 @@ function _VirtualDom_diffHelp(x, y, patches, index)
+ 			return;
+ 
+ 		case __2_TEXT:
++		case __2_COMMENT:
+ 			if (x.__text !== y.__text)
+ 			{
++				// a comment node is CharacterData too, so __3_TEXT patches it
+ 				_VirtualDom_pushPatch(patches, __3_TEXT, index, y.__text);
+ 			}
+ 			return;
+ 
++		case __2_DOCTYPE:
++			// renders as an empty text node either way, so nothing to patch
++			return;
++
+ 		case __2_NODE:
+ 			_VirtualDom_diffNodes(x, y, patches, index, _VirtualDom_diffKids);
+ 			return;
+@@ -1537,6 +1594,14 @@ function _VirtualDom_virtualize(node)
+ 	}
+ 
+ 
++	// COMMENT NODES
++
++	if (node.nodeType === 8)
++	{
++		return _VirtualDom_comment(node.textContent);
++	}
++
++
+ 	// WEIRD NODES
+ 
+ 	if (node.nodeType !== 1)
+@@ -1587,3 +1652,305 @@ function _VirtualDom_dekey(keyedNode)
+ 		__descendantsCount: keyedNode.__descendantsCount
+ 	};
+ }
++
++
++
++// TO STRING
++//
++// Renders a vNode as HTML text, for serving a page from a server instead of
++// building it in a browser. Nothing is rewritten on the way out: a <script>
++// tag stays a script tag and an `on*` attribute keeps its name, because the
++// output is markup, not this document's DOM. Event handlers hold decoders
++// and functions, so they cannot be written down and are dropped.
++
++
++var _VirtualDom_RE_amp = /&/g;
++var _VirtualDom_RE_lt = /</g;
++var _VirtualDom_RE_gt = />/g;
++var _VirtualDom_RE_quot = /"/g;
++var _VirtualDom_RE_commentClose = /--!?>/g;
++var _VirtualDom_RE_commentOpen = /^(>|->)/;
++var _VirtualDom_RE_angle = /[<>]/g;
++
++
++// Elements that have no closing tag.
++var _VirtualDom_voidTags = {
++	area: 1, base: 1, br: 1, col: 1, embed: 1, hr: 1, img: 1, input: 1,
++	link: 1, meta: 1, param: 1, source: 1, track: 1, wbr: 1
++};
++
++
++// Elements whose text content is markup-free and must not be escaped.
++var _VirtualDom_rawTextTags = { script: 1, style: 1 };
++
++
++// Elements where added whitespace would change what the page means.
++var _VirtualDom_tightTags = { pre: 1, textarea: 1, script: 1, style: 1 };
++
++
++// Properties whose attribute is spelled differently. Anything missing here
++// is used as written, which is right for `id`, `src`, `title` and the rest
++// of the properties that match their attribute.
++var _VirtualDom_propToAttr = {
++	acceptCharset: 'accept-charset',
++	accessKey: 'accesskey',
++	allowFullScreen: 'allowfullscreen',
++	className: 'class',
++	colSpan: 'colspan',
++	contentEditable: 'contenteditable',
++	dateTime: 'datetime',
++	defaultValue: 'value',
++	formAction: 'formaction',
++	htmlFor: 'for',
++	inputMode: 'inputmode',
++	isMap: 'ismap',
++	maxLength: 'maxlength',
++	minLength: 'minlength',
++	noValidate: 'novalidate',
++	readOnly: 'readonly',
++	referrerPolicy: 'referrerpolicy',
++	rowSpan: 'rowspan',
++	srcSet: 'srcset',
++	tabIndex: 'tabindex',
++	useMap: 'usemap'
++};
++
++
++// Properties that set markup rather than an attribute. Writing them out as
++// attributes would be meaningless, and writing their content out as markup
++// would make every one of them an injection site, so they are dropped.
++var _VirtualDom_skippedProps = { innerHTML: 1, outerHTML: 1, innerText: 1, textContent: 1 };
++
++
++function _VirtualDom_escapeText(string)
++{
++	return string
++		.replace(_VirtualDom_RE_amp, '&amp;')
++		.replace(_VirtualDom_RE_lt, '&lt;')
++		.replace(_VirtualDom_RE_gt, '&gt;');
++}
++
++
++function _VirtualDom_escapeAttr(string)
++{
++	return _VirtualDom_escapeText(string).replace(_VirtualDom_RE_quot, '&quot;');
++}
++
++
++// Comments are not escaped -- there is no entity syntax inside one -- so the
++// sequences that would end the comment early are opened up instead.
++function _VirtualDom_escapeComment(string)
++{
++	var text = string
++		.replace(_VirtualDom_RE_commentClose, '-- >')
++		.replace(_VirtualDom_RE_commentOpen, ' $1');
++
++	return text.charAt(text.length - 1) === '-' ? text + ' ' : text;
++}
++
++
++function _VirtualDom_indent(width)
++{
++	return '\n' + new Array(width + 1).join(' ');
++}
++
++
++var _VirtualDom_toString = F2(function(step, vNode)
++{
++	var parts = [];
++	_VirtualDom_toStringHelp(parts, vNode, step > 0 ? step : 0, 0, false, false);
++	return parts.join('');
++});
++
++
++// `tight` suppresses the whitespace that indenting would add, `raw` the
++// escaping of text. Both are inherited by everything below the element that
++// asked for them.
++function _VirtualDom_toStringHelp(parts, vNode, step, depth, tight, raw)
++{
++	var tag = vNode.$;
++
++	if (tag === __2_THUNK)
++	{
++		return _VirtualDom_toStringHelp(
++			parts, vNode.__node || (vNode.__node = vNode.__thunk()), step, depth, tight, raw
++		);
++	}
++
++	if (tag === __2_TAGGER)
++	{
++		return _VirtualDom_toStringHelp(parts, vNode.__node, step, depth, tight, raw);
++	}
++
++	if (tag === __2_TEXT)
++	{
++		parts.push(raw ? vNode.__text : _VirtualDom_escapeText(vNode.__text));
++		return;
++	}
++
++	if (tag === __2_COMMENT)
++	{
++		parts.push('<!--', _VirtualDom_escapeComment(vNode.__text), '-->');
++		return;
++	}
++
++	if (tag === __2_DOCTYPE)
++	{
++		parts.push('<!DOCTYPE ', vNode.__text.replace(_VirtualDom_RE_angle, ''), '>');
++		return;
++	}
++
++	if (tag === __2_CUSTOM)
++	{
++		// a custom node renders itself into a real DOM node, which there is
++		// no way to ask for here
++		return;
++	}
++
++	// at this point `tag` must be __2_NODE or __2_KEYED_NODE
++
++	var name = vNode.__tag;
++	var lower = name.toLowerCase();
++
++	parts.push('<', name);
++	// An HTML attribute name is case-insensitive and is written lowercase,
++	// which is what elm/html's `tabindex` (set as `tabIndex`) needs. Inside
++	// a namespace the case is meaningful -- `viewBox` is not `viewbox` -- so
++	// there it is left alone.
++	_VirtualDom_factsToString(parts, vNode.__facts, !vNode.__namespace);
++
++	if (_VirtualDom_voidTags[lower] === 1)
++	{
++		parts.push('>');
++		return;
++	}
++
++	parts.push('>');
++
++	var kids = vNode.__kids;
++	var keyed = tag === __2_KEYED_NODE;
++	var kidTight = tight || step === 0 || _VirtualDom_tightTags[lower] === 1;
++	var kidRaw = raw || _VirtualDom_rawTextTags[lower] === 1;
++
++	// One text or comment child stays on the line it started on, so that
++	// <title>Hello</title> does not grow whitespace it did not ask for.
++	var inline = kidTight || kids.length === 0 ||
++		(kids.length === 1 && _VirtualDom_isFlat(keyed ? kids[0].b : kids[0]));
++
++	for (var i = 0; i < kids.length; i++)
++	{
++		if (!inline)
++		{
++			parts.push(_VirtualDom_indent(step * (depth + 1)));
++		}
++		_VirtualDom_toStringHelp(parts, keyed ? kids[i].b : kids[i], step, depth + 1, kidTight, kidRaw);
++	}
++
++	if (!inline)
++	{
++		parts.push(_VirtualDom_indent(step * depth));
++	}
++
++	parts.push('</', name, '>');
++}
++
++
++function _VirtualDom_isFlat(vNode)
++{
++	var tag = vNode.$;
++	return tag === __2_TEXT || tag === __2_COMMENT || tag === __2_DOCTYPE;
++}
++
++
++function _VirtualDom_factsToString(parts, facts, htmlCase)
++{
++	// A class can arrive as the `class` attribute or as the `className`
++	// property, and organizeFacts merges each of those with itself but not
++	// with the other, so they are collected and written once here.
++	var classes;
++	var styles;
++	var attrs = [];
++
++	for (var key in facts)
++	{
++		var value = facts[key];
++
++		if (key === 'a__1_STYLE')
++		{
++			styles = value;
++		}
++		else if (key === 'a__1_EVENT')
++		{
++			// a handler is a decoder; there is nothing to write
++		}
++		else if (key === 'a__1_ATTR')
++		{
++			for (var attrKey in value)
++			{
++				var attrValue = value[attrKey];
++				if (typeof attrValue === 'undefined')
++				{
++					continue;
++				}
++				if (attrKey === 'class')
++				{
++					classes = classes ? classes + ' ' + attrValue : attrValue;
++					continue;
++				}
++				attrs.push(htmlCase ? attrKey.toLowerCase() : attrKey, attrValue);
++			}
++		}
++		else if (key === 'a__1_ATTR_NS')
++		{
++			for (var nsKey in value)
++			{
++				var pair = value[nsKey];
++				if (typeof pair.__value !== 'undefined')
++				{
++					attrs.push(nsKey, pair.__value);
++				}
++			}
++		}
++		else if (_VirtualDom_skippedProps[key] !== 1)
++		{
++			// anything else is a property, stored flat on `facts`
++			var propName = _VirtualDom_propToAttr[key] || (htmlCase ? key.toLowerCase() : key);
++
++			if (typeof value === 'boolean')
++			{
++				// an HTML boolean attribute is its own value, or absent
++				value && attrs.push(propName, '');
++			}
++			else if (typeof value === 'string' || typeof value === 'number')
++			{
++				propName === 'class'
++					? (classes = classes ? classes + ' ' + value : String(value))
++					: attrs.push(propName, String(value));
++			}
++			// null, objects and arrays have no attribute spelling
++		}
++	}
++
++	if (typeof classes === 'string')
++	{
++		attrs.push('class', classes);
++	}
++
++	for (var i = 0; i < attrs.length; i += 2)
++	{
++		parts.push(' ', attrs[i], '="', _VirtualDom_escapeAttr(attrs[i + 1]), '"');
++	}
++
++	if (styles)
++	{
++		var declarations = [];
++		for (var styleKey in styles)
++		{
++			declarations.push(styleKey + ': ' + styles[styleKey]);
++		}
++		if (declarations.length > 0)
++		{
++			parts.push(' style="', _VirtualDom_escapeAttr(declarations.join('; ')), '"');
++		}
++	}
++}
+diff --git a/src/VirtualDom.elm b/src/VirtualDom.elm
+index 10e8501..3bfb6bb 100644
+--- a/src/VirtualDom.elm
++++ b/src/VirtualDom.elm
+@@ -1,18 +1,20 @@
+ module VirtualDom exposing
+   ( Node
+   , text, node, nodeNS
++  , comment, doctype
+   , Attribute, style, property, attribute, attributeNS
+   , on, Handler(..)
+   , map, mapAttribute
+   , keyedNode, keyedNodeNS
+   , lazy, lazy2, lazy3, lazy4, lazy5, lazy6, lazy7, lazy8
++  , toString
+   )
+ 
+ {-| API to the core diffing algorithm. Can serve as a foundation for libraries
+ that expose more helper functions for HTML or SVG.
+ 
+ # Create
+-@docs Node, text, node, nodeNS
++@docs Node, text, node, nodeNS, comment, doctype
+ 
+ # Attributes
+ @docs Attribute, style, property, attribute, attributeNS
+@@ -29,6 +31,9 @@ that expose more helper functions for HTML or SVG.
+ # Lazy Nodes
+ @docs lazy, lazy2, lazy3, lazy4, lazy5, lazy6, lazy7, lazy8
+ 
++# Rendering to Text
++@docs toString
++
+ -}
+ 
+ import Elm.Kernel.VirtualDom
+@@ -55,10 +60,15 @@ a list of child nodes.
+       node "div"
+         [ property "id" (Json.string "greeting") ]
+         [ text "Hello!" ]
++
++**Note:** A `script` tag becomes a `p` tag on the way into the DOM, and an
++`on*` or `formAction` attribute is renamed to `data-*`, so neither can
++inject code into the page Elm is running. The node itself keeps what you
++wrote, which is what [`toString`](#toString) renders.
+ -}
+ node : String -> List (Attribute msg) -> List (Node msg) -> Node msg
+ node tag =
+-  Elm.Kernel.VirtualDom.node (Elm.Kernel.VirtualDom.noScript tag)
++  Elm.Kernel.VirtualDom.node tag
+ 
+ 
+ {-| Create a namespaced DOM node. For example, an SVG `<path>` node could be
+@@ -70,7 +80,7 @@ defined like this:
+ -}
+ nodeNS : String -> String -> List (Attribute msg) -> List (Node msg) -> Node msg
+ nodeNS namespace tag =
+-  Elm.Kernel.VirtualDom.nodeNS namespace (Elm.Kernel.VirtualDom.noScript tag)
++  Elm.Kernel.VirtualDom.nodeNS namespace tag
+ 
+ 
+ {-| Just put plain text in the DOM. It will escape the string so that it appears
+@@ -83,6 +93,46 @@ text =
+   Elm.Kernel.VirtualDom.text
+ 
+ 
++{-| An HTML comment.
++
++    comment " page rendered by whserver "
++
++In a browser this is a real comment node, so it survives a diff like any
++other node. Rendered with [`toString`](#toString) it comes out as
++`<!-- page rendered by whserver -->`. The text is not escaped, since there
++is no entity syntax inside a comment; a `-->` in it is opened up to `-- >`
++so that the comment cannot end early.
++-}
++comment : String -> Node msg
++comment =
++  Elm.Kernel.VirtualDom.comment
++
++
++{-| A document type declaration, for a page rendered with
++[`toString`](#toString).
++
++    doctype "html"
++
++comes out as `<!DOCTYPE html>`. A document is a doctype followed by an
++`<html>` element, which is two nodes, so render them one after the other:
++
++    page : Node msg
++    page =
++      node "html" [] [ head, body ]
++
++    String.concat
++      [ toString 0 (doctype "html")
++      , toString 0 page
++      ]
++
++A doctype has no DOM node it could become, so in a browser it renders as an
++empty text node and never patches.
++-}
++doctype : String -> Node msg
++doctype =
++  Elm.Kernel.VirtualDom.doctype
++
++
+ {-| This function is useful when nesting components with [the Elm
+ Architecture](https://github.com/evancz/elm-architecture-tutorial/). It lets
+ you transform the messages produced by a subtree.
+@@ -181,7 +231,7 @@ be in HTML, not `htmlFor` as it would appear in JS.
+ attribute : String -> String -> Attribute msg
+ attribute key value =
+   Elm.Kernel.VirtualDom.attribute
+-    (Elm.Kernel.VirtualDom.noOnOrFormAction key)
++    key
+     (Elm.Kernel.VirtualDom.noJavaScriptOrHtmlUri value)
+ 
+ 
+@@ -199,7 +249,7 @@ attributeNS : String -> String -> String -> Attribute msg
+ attributeNS namespace key value =
+   Elm.Kernel.VirtualDom.attributeNS
+     namespace
+-    (Elm.Kernel.VirtualDom.noOnOrFormAction key)
++    key
+     (Elm.Kernel.VirtualDom.noJavaScriptOrHtmlUri value)
+ 
+ 
+@@ -353,7 +403,7 @@ the DOM modifications more efficient.
+ -}
+ keyedNode : String -> List (Attribute msg) -> List ( String, Node msg ) -> Node msg
+ keyedNode tag =
+-  Elm.Kernel.VirtualDom.keyedNode (Elm.Kernel.VirtualDom.noScript tag)
++  Elm.Kernel.VirtualDom.keyedNode tag
+ 
+ 
+ {-| Create a keyed and namespaced DOM node. For example, an SVG `<g>` node
+@@ -365,7 +415,43 @@ could be defined like this:
+ -}
+ keyedNodeNS : String -> String -> List (Attribute msg) -> List ( String, Node msg ) -> Node msg
+ keyedNodeNS namespace tag =
+-  Elm.Kernel.VirtualDom.keyedNodeNS namespace (Elm.Kernel.VirtualDom.noScript tag)
++  Elm.Kernel.VirtualDom.keyedNodeNS namespace tag
++
++
++
++-- TO STRING
++
++
++{-| Render a node as HTML text, for serving a page from a server instead of
++building it in a browser.
++
++    toString 0 (node "p" [] [ text "Hello!" ])
++    -- "<p>Hello!</p>"
++
++    toString 2 (node "p" [] [ node "b" [] [ text "Hi" ], text "!" ])
++    -- "<p>\n  <b>Hi</b>\n  !\n</p>"
++
++The `Int` is how many spaces each level of nesting is indented by. **Zero
++means no added whitespace at all**, which is the only setting that cannot
++change what the page means: whitespace between inline elements is text the
++browser renders. Indenting is for reading the output while developing, and
++even then the content of `pre`, `textarea`, `script` and `style` is left
++exactly as written, as is an element whose only child is text.
++
++What comes out is the tree as written, not as a browser would be allowed to
++see it. A `script` tag stays a script tag and an `on*` attribute keeps its
++name, because the output is markup for some other page, not this document's
++DOM. Note that `Html.Attributes.href`, `src` and `action` still neutralize a
++`javascript:` URI, because `elm/html` does that where the attribute is
++built, before this ever sees it.
++
++Two kinds of node cannot be written down and are skipped: event handlers,
++which hold decoders and functions, and custom nodes, which build a real DOM
++node to render. `lazy` and `map` render straight through.
++-}
++toString : Int -> Node msg -> String
++toString =
++  Elm.Kernel.VirtualDom.toString
+ 
+ 
+ 
