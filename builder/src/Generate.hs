@@ -110,7 +110,7 @@ toBundles format mode graph mains =
             Task.throw Exit.GenerateWorkerNeedsOneMain
           else
             case format of
-              Iife -> Task.throw Exit.GenerateWorkersRequireEsm
+              Iife -> Task.throw Exit.GenerateWorkerNotAProgram
               Esm  -> return (Bundles (JS.generateWorkerBundle mode graph (Opt.Global home N._main)) Nothing workers False)
 
         Nothing ->

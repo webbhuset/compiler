@@ -2039,6 +2039,7 @@ data Generate
   | GenerateWorkersRequireEsm
   | GenerateWorkerCycle [String]
   | GenerateWorkerNeedsOneMain
+  | GenerateWorkerNotAProgram
   | GenerateScriptNeedsOneMain
   | GenerateScriptBadOutput
 
@@ -2076,6 +2077,17 @@ toGenerateReport problem =
             \ modules can know their own URL (via import.meta). The classic .js and\
             \ .html outputs cannot host workers; in elm reactor, load the program as\
             \ `Main.elm.mjs` from your own HTML page."
+        ]
+
+    GenerateWorkerNotAProgram ->
+      Help.report "THIS IS A WORKER" Nothing
+        "This is a worker program, so it cannot be a web page or a classic .js file:"
+        [ D.reflow $
+            "A worker runs inside whatever spawns it, so on its own it has nothing\
+            \ to show. Compile it to a module for a spawner to load:"
+        , D.indent 4 $ D.dullyellow "elm make src/Counter.elm --output=counter.mjs"
+        , D.reflow $
+            "In elm reactor, open the program that spawns it instead."
         ]
 
     GenerateWorkerNeedsOneMain ->

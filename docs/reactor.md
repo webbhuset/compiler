@@ -2,8 +2,8 @@
 
 `elm reactor` turns a `.elm` file into a page: `/src/Main.elm` compiles the
 module and wraps the result in HTML. That page is the reactor's, not yours. You
-cannot give it a `<meta name="viewport">`, wire up ports, or load the program as
-a module, and a program that spawns workers cannot be shown at all.
+cannot give it a `<meta name="viewport">`, wire up ports, or add a script of
+your own.
 
 So the reactor also serves the compiled program in pieces, at the names
 `elm make` would have written:
@@ -49,6 +49,12 @@ URL:
 ```html
 <script type="module" src="/src/Main.elm.mjs"></script>
 ```
+
+The reactor's own page does this for you: opening `/src/Main.elm` for a program
+that spawns workers gives a page that imports the module from `Main.elm.mjs`
+rather than inlining it, so the dashboard works for these programs too. Opening
+a *worker* module's page, like `/src/Counter.elm`, is an error saying it is a
+worker: on its own it has nothing to show.
 
 Instead of the hashed sibling files `elm make` writes, the reactor points each
 spawn at the worker module's own URL. A `Worker.spawn Counter.main` in

@@ -164,8 +164,11 @@ compile path =
           Generate.Bundles _ _ _ True ->
             Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
-          Generate.Bundles _ _ (_:_) _ ->
-            Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
+          -- spawns workers: only a module knows its own URL, so the page
+          -- loads the program from the .mjs endpoint instead of inlining it
+          Generate.Bundles _ css (_:_) _ ->
+            do  let (NE.List name _) = Build.getRootNames artifacts
+                return $ Html.sandwichModule name css (B.stringUtf8 ('/' : path ++ ".mjs"))
 
           Generate.Bundles javascript css [] _ ->
             do  let (NE.List name _) = Build.getRootNames artifacts

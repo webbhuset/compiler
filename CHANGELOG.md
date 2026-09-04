@@ -268,10 +268,11 @@ written, so a hand-written HTML page can pull in exactly what it needs:
 - `Main.elm.js`, `Main.elm.css` and `Main.elm.mjs` compile `Main.elm` on
   request. Your page keeps its own `<meta viewport>`, ports and flags,
   which the reactor's generated page cannot offer.
-- Workers work in the reactor. Each spawn points at the worker module's own
-  URL — `Counter.elm.mjs` compiles `Counter.elm` as a worker program — so
-  there are no hashed sibling files to keep in sync, and compiled responses
-  are sent `Cache-Control: no-store`.
+- Workers work in the reactor, from the dashboard page too: it loads a
+  worker-spawning program as a module. Each spawn points at the worker
+  module's own URL — `Counter.elm.mjs` compiles `Counter.elm` as a worker
+  program — so there are no hashed sibling files to keep in sync, and
+  compiled responses are sent `Cache-Control: no-store`.
 - A worker program can be compiled on its own:
   `elm make src/Counter.elm --output=counter.mjs`.
 - A failed build served as a script is a 500 whose body logs the compiler's
