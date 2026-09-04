@@ -88,9 +88,16 @@ program, named by content hash. The files must stay siblings — worker URLs
 resolve relative to the bundle (`import.meta.url`), so copy them together.
 Old hashes are not deleted; clean stale `main.*.mjs` files when deploying.
 
-The classic `.js` and `.html` outputs and `elm reactor` cannot host workers
-(no `import.meta`); compiling a worker-spawning program to them is an
-error. Workers can spawn workers; a spawn *cycle* is a compile error.
+A worker program can also be compiled on its own. `elm make src/Counter.elm
+--output=counter.mjs` writes just that worker's bundle, which is how the
+reactor serves one.
+
+The classic `.js` and `.html` outputs cannot host workers (no `import.meta`),
+and compiling a worker-spawning program to them is an error. In `elm reactor`,
+load the program as a module from a page of your own — see
+[reactor.md](reactor.md), which serves each worker from its own source path
+rather than as a hashed sibling. Workers can spawn workers; a spawn *cycle* is
+a compile error.
 
 ## Messages and the boundary
 

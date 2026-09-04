@@ -157,6 +157,7 @@ data Main
       , _decoder :: Expr
       }
   | Script
+  | Worker  -- a `Worker.Program` root: compiled to a worker bundle of its own
 
 
 data Node
@@ -456,6 +457,7 @@ eMain main =
     Static      -> E.u8# 0#Word8
     Dynamic t e -> E.u8# 1#Word8 <> I.eType t <> eExpr e
     Script      -> E.u8# 2#Word8
+    Worker      -> E.u8# 3#Word8
 
 
 dMain :: D.Decoder Main
@@ -465,6 +467,7 @@ dMain =
           0 -> return Static
           1 -> liftM2 Dynamic I.dType dExpr
           2 -> return Script
+          3 -> return Worker
           _ -> D.expecting "Main"
 
 

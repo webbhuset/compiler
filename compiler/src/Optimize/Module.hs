@@ -303,15 +303,14 @@ addDefHelp region annotations home name args body graph@(Opt.LocalGraph _ nodes 
         Result.throw (E.BadType region tipe)
 
       Nothing ->
-        addProgramMain region tipe addMain home name args body graph
+        addProgramMain region tipe addMain
 
 
 addProgramMain
   :: A.Region -> Can.Type
   -> ((Set.Set Opt.Global, Map.Map N.Name Int, Opt.Main) -> Opt.LocalGraph)
-  -> ModuleName.Canonical -> N.Name -> [Can.Pattern] -> Can.Expr -> Opt.LocalGraph
   -> Result i w Opt.LocalGraph
-addProgramMain region tipe addMain home name args body graph =
+addProgramMain region tipe addMain =
     case Type.deepDealias tipe of
       Can.TType hm nm [_] | hm == ModuleName.virtualDom && nm == T.node ->
           Result.ok $ addMain $ Names.run $
@@ -326,10 +325,13 @@ addProgramMain region tipe addMain home name args body graph =
             Left (subType, invalidPayload) ->
               Result.throw (E.BadFlags region subType invalidPayload)
 
-      -- a worker program's main is an ordinary definition, not a program
-      -- root; it is compiled into a bundle of its own when spawned
+      -- A worker program. Spawners reach it as an ordinary global; compiled as
+      -- a root it becomes a worker bundle of its own, which is what lets
+      -- `elm make src/Counter.elm --output=counter.mjs` and the reactor's
+      -- `Counter.elm.mjs` serve one.
       Can.TType hm nm [_, _, _, _] | hm == ModuleName.workers && nm == T.program ->
-          Result.ok (addDefNode home name args body Set.empty graph)
+          Result.ok $ addMain $ Names.run $
+            Names.registerKernel Module.kernel_worker Opt.Worker
 
 
       _ ->

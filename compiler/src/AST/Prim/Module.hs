@@ -36,7 +36,7 @@ module AST.Prim.Module
   , platform, platform_cmd, platform_sub
   , prefix_cmd, prefix_sub
   , kernel_debug, kernel_debugger, kernel_list
-  , kernel_utils, kernel_platform, kernel_vdom, kernel_system
+  , kernel_utils, kernel_platform, kernel_vdom, kernel_system, kernel_worker
   , jsArray, virtualDom, css, browser_worker, system
   , json_decode, json_encode
   , webgl, webgl_texture
@@ -275,6 +275,7 @@ kernel_utils    :: Kernel; kernel_utils    = Kernel [ascii|Utils|]
 kernel_platform :: Kernel; kernel_platform = Kernel [ascii|Platform|]
 kernel_vdom     :: Kernel; kernel_vdom     = Kernel [ascii|VirtualDom|]
 kernel_system   :: Kernel; kernel_system   = Kernel [ascii|System|]
+kernel_worker   :: Kernel; kernel_worker   = Kernel [ascii|Worker|]
 
 jsArray       :: Name; jsArray       = Name [ascii|JsArray|]
 virtualDom    :: Name; virtualDom    = Name [ascii|VirtualDom|]

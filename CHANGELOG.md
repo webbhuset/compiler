@@ -252,6 +252,31 @@ Worker.spawn Counter.main
   code plus an effect manager), consumed as a git dependency. No elm/core
   or virtual-dom patches needed.
 
+## Compiled pieces in elm reactor
+
+*[docs](docs/reactor.md)*
+
+The reactor serves a program in pieces, at the names `elm make` would have
+written, so a hand-written HTML page can pull in exactly what it needs:
+
+```html
+<link rel="stylesheet" href="/src/Main.elm.css">
+<script src="/src/Main.elm.js"></script>
+<script type="module" src="/src/Workers/Main.elm.mjs"></script>
+```
+
+- `Main.elm.js`, `Main.elm.css` and `Main.elm.mjs` compile `Main.elm` on
+  request. Your page keeps its own `<meta viewport>`, ports and flags,
+  which the reactor's generated page cannot offer.
+- Workers work in the reactor. Each spawn points at the worker module's own
+  URL — `Counter.elm.mjs` compiles `Counter.elm` as a worker program — so
+  there are no hashed sibling files to keep in sync, and compiled responses
+  are sent `Cache-Control: no-store`.
+- A worker program can be compiled on its own:
+  `elm make src/Counter.elm --output=counter.mjs`.
+- A failed build served as a script is a 500 whose body logs the compiler's
+  report with `console.error`.
+
 ## Structural variants
 
 *[docs](docs/structural-variants.md) · [type system](docs/types-design.md)*

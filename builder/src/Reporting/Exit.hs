@@ -2045,6 +2045,7 @@ data Generate
   | GenerateCannotOptimizeDebugValues Module.Name [Module.Name]
   | GenerateWorkersRequireEsm
   | GenerateWorkerCycle [String]
+  | GenerateWorkerNeedsOneMain
   | GenerateScriptNeedsOneMain
   | GenerateScriptBadOutput
 
@@ -2075,12 +2076,21 @@ toGenerateReport problem =
 
     GenerateWorkersRequireEsm ->
       Help.report "WORKERS NEED ES MODULES" Nothing
-        "This program spawns web workers, so it must be compiled to an ES module:"
+        "This program involves web workers, so it must be compiled to an ES module:"
         [ D.indent 4 $ D.dullyellow "elm make src/Main.elm --output=main.mjs"
         , D.reflow $
             "Worker files are loaded relative to the compiled bundle, and only ES\
             \ modules can know their own URL (via import.meta). The classic .js and\
-            \ .html outputs and elm reactor cannot host workers."
+            \ .html outputs cannot host workers; in elm reactor, load the program as\
+            \ `Main.elm.mjs` from your own HTML page."
+        ]
+
+    GenerateWorkerNeedsOneMain ->
+      Help.report "TOO MANY MAINS" Nothing
+        "This is a worker program, so it must be the only program compiled:"
+        [ D.reflow $
+            "A worker bundle runs itself when a spawner loads it, so it cannot also\
+            \ export other programs for a page to start. Compile the worker on its own."
         ]
 
     GenerateWorkerCycle names ->
@@ -2142,6 +2152,7 @@ data Reactor
   | ReactorBadDetails Details
   | ReactorBadBuild BuildProblem
   | ReactorBadGenerate Generate
+  | ReactorForeignWorker Module.Name
 
 
 reactorToReport :: Reactor -> Help.Report
@@ -2159,6 +2170,16 @@ reactorToReport problem =
 
     ReactorBadBuild buildProblem ->
       toBuildProblemReport buildProblem
+
+    ReactorForeignWorker name ->
+      Help.report "WORKER IN A PACKAGE" Nothing
+        ("This program spawns the worker `" ++ Module.toChars name ++ "`, which lives in a package:")
+        [ D.reflow $
+            "elm reactor serves each worker from its own source file, as\
+            \ `<path>.elm.mjs`, and a package's sources are not under this project.\
+            \ Build with `elm make --output=main.mjs` to get the worker as a file\
+            \ next to the bundle instead."
+        ]
 
     ReactorBadGenerate generate ->
       toGenerateReport generate
