@@ -4,6 +4,7 @@ module Generate
   , Bundles(..)
   , WorkerBundle(..)
   , finalize
+  , finalizeWith
   , debug
   , dev
   , prod
@@ -98,13 +99,35 @@ toBundles format mode graph mains =
 
     Right workerRoots ->
       let
-        (js, css) = generateWith format mode graph mains workerRoots
         workers = map (\g -> WorkerBundle g (JS.generateWorkerBundle mode graph g)) workerRoots
-        isScript = JS.hasScriptMain mains
       in
-      if isScript && Map.size mains > 1
-        then Task.throw Exit.GenerateScriptNeedsOneMain
-        else return (Bundles js css workers isScript)
+      case workerHome mains of
+        -- A worker program compiled as the root: the main bundle IS a worker
+        -- bundle, with any workers it spawns in turn alongside. It has no page
+        -- to style and nothing to export, and a worker can only be a module.
+        Just home ->
+          if Map.size mains > 1 then
+            Task.throw Exit.GenerateWorkerNeedsOneMain
+          else
+            case format of
+              Iife -> Task.throw Exit.GenerateWorkersRequireEsm
+              Esm  -> return (Bundles (JS.generateWorkerBundle mode graph (Opt.Global home N._main)) Nothing workers False)
+
+        Nothing ->
+          let
+            (js, css) = generateWith format mode graph mains workerRoots
+            isScript = JS.hasScriptMain mains
+          in
+          if isScript && Map.size mains > 1
+            then Task.throw Exit.GenerateScriptNeedsOneMain
+            else return (Bundles js css workers isScript)
+
+
+workerHome :: Map.Map ModuleName.Canonical Opt.Main -> Maybe ModuleName.Canonical
+workerHome mains =
+  case [ home | (home, Opt.Worker) <- Map.toList mains ] of
+    home : _ -> Just home
+    []       -> Nothing
 
 
 debug :: Format -> FilePath -> Details.Details -> Build.Artifacts -> Task Bundles
@@ -164,6 +187,21 @@ finalize base (Bundles js css workers _) =
   , substitute finalTable (render js)
   , fmap render css
   )
+
+
+-- Like finalize, but the caller names the worker files. The reactor serves
+-- each worker at its own module's URL rather than as a hashed sibling, so
+-- only the main bundle is rendered here; a worker's own request renders it.
+-- Left is a worker the caller could not name.
+finalizeWith :: (Opt.Global -> Maybe String) -> Bundles -> Either Opt.Global (BS.ByteString, Maybe BS.ByteString)
+finalizeWith nameOf (Bundles js css workers _) =
+  do  table <- traverse toEntry workers
+      return (substitute table (render js), fmap render css)
+  where
+    toEntry (WorkerBundle global _) =
+      case nameOf global of
+        Just name -> Right (Workers.token global, BS_UTF8.fromString name)
+        Nothing   -> Left global
 
 
 render :: B.Builder -> BS.ByteString

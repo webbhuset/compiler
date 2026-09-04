@@ -11,7 +11,10 @@ import Control.Monad (guard)
 import Control.Monad.Trans (MonadIO(liftIO))
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.HashMap.Strict as HashMap
+import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.NonEmptyList as NE
 import qualified System.Directory as Dir
 import System.FilePath as FP
@@ -19,9 +22,12 @@ import Snap.Core hiding (path)
 import Snap.Http.Server
 import Snap.Util.FileServe
 
+import qualified AST.Optimized as Opt
 import qualified BackgroundWriter as BW
 import qualified Build
 import qualified Elm.Details as Details
+import qualified Elm.ModuleName as ModuleName
+import qualified Json.Encode as Json
 import qualified Develop.Generate.Help as Help
 import qualified Develop.Generate.Index as Index
 import qualified Develop.StaticFiles as StaticFiles
@@ -29,6 +35,7 @@ import qualified Generate.Html as Html
 import qualified Generate
 import qualified Reporting
 import qualified Reporting.Exit as Exit
+import qualified Reporting.Exit.Help as ExitHelp
 import qualified Reporting.Task as Task
 import qualified Stuff
 
@@ -48,7 +55,8 @@ run () (Flags maybePort) =
   do  let port = maybe 8000 id maybePort
       putStrLn $ "Go to http://localhost:" ++ show port ++ " to see your project dashboard."
       httpServe (config port) $
-        serveFiles
+        serveCompiled
+        <|> serveFiles
         <|> serveDirectoryWith directoryConfig "."
         <|> serveAssets
         <|> error404
@@ -150,6 +158,24 @@ serveElm path =
 
 compile :: FilePath -> IO (Either Exit.Reactor B.Builder)
 compile path =
+  build path $ \root details artifacts ->
+    do  bundles <- generate Generate.Iife root details artifacts
+        case bundles of
+          Generate.Bundles _ _ _ True ->
+            Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+
+          Generate.Bundles _ _ (_:_) _ ->
+            Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
+
+          Generate.Bundles javascript css [] _ ->
+            do  let (NE.List name _) = Build.getRootNames artifacts
+                return $ Html.sandwich name css javascript
+
+
+-- Load the project and build one file, then hand the result to whatever
+-- wants to generate from it.
+build :: FilePath -> (FilePath -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor a) -> IO (Either Exit.Reactor a)
+build path continue =
   do  maybeRoot <- Stuff.findRoot
       case maybeRoot of
         Nothing ->
@@ -159,17 +185,129 @@ compile path =
           BW.withScope $ \scope -> Stuff.withRootLock root $ Task.run $
             do  details <- Task.eio Exit.ReactorBadDetails $ Details.load Reporting.silent scope root
                 artifacts <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths Reporting.silent root details (NE.List path [])
-                bundles <- Task.mapError Exit.ReactorBadGenerate $ Generate.dev Generate.Iife root details artifacts
-                case bundles of
-                  Generate.Bundles _ _ _ True ->
-                    Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+                continue root details artifacts
 
-                  Generate.Bundles _ _ (_:_) _ ->
-                    Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-                  Generate.Bundles javascript css [] _ ->
-                    do  let (NE.List name _) = Build.getRootNames artifacts
-                        return $ Html.sandwich name css javascript
+generate :: Generate.Format -> FilePath -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor Generate.Bundles
+generate format root details artifacts =
+  Task.mapError Exit.ReactorBadGenerate $ Generate.dev format root details artifacts
+
+
+
+-- SERVE COMPILED PIECES
+--
+-- `Main.elm.js`, `Main.elm.css` and `Main.elm.mjs` compile `Main.elm` on
+-- request and serve one piece of the result, so a hand-written HTML page can
+-- pull in exactly what `elm make` would have written -- its own <meta
+-- viewport>, its own ports, a module bundle that spawns workers. Each worker
+-- is served at its own module's URL, so `Counter.elm.mjs` compiles the worker
+-- program in `Counter.elm`; no hashed sibling files are involved.
+
+
+data Piece
+  = Js
+  | Css
+  | Mjs
+
+
+serveCompiled :: Snap ()
+serveCompiled =
+  do  path <- getSafePath
+      case compiledRequest path of
+        Nothing ->
+          pass
+
+        Just (elmPath, piece) ->
+          do  guard =<< liftIO (Dir.doesFileExist elmPath)
+              result <- liftIO (compilePiece piece elmPath)
+              -- a worker's URL is stable, which is exactly what a browser would
+              -- otherwise cache across edits
+              modifyResponse (setHeader "Cache-Control" "no-store")
+              case result of
+                Right bytes ->
+                  do  modifyResponse (setContentType (pieceMime piece))
+                      writeBS bytes
+
+                Left exit ->
+                  do  modifyResponse (setResponseStatus 500 "Internal Server Error")
+                      modifyResponse (setContentType (pieceMime piece))
+                      case piece of
+                        Css -> return ()          -- nowhere to put words in a stylesheet
+                        _   -> writeBuilder (errorScript exit)
+
+
+compiledRequest :: FilePath -> Maybe (FilePath, Piece)
+compiledRequest path =
+  stripSuffix ".elm.mjs" Mjs <|> stripSuffix ".elm.css" Css <|> stripSuffix ".elm.js" Js
+  where
+    stripSuffix suffix piece =
+      if suffix `List.isSuffixOf` path
+        then Just (take (length path - length suffix) path ++ ".elm", piece)
+        else Nothing
+
+
+pieceMime :: Piece -> BS.ByteString
+pieceMime piece =
+  case piece of
+    Js  -> "text/javascript;charset=utf-8"
+    Mjs -> "text/javascript;charset=utf-8"
+    Css -> "text/css;charset=utf-8"
+
+
+-- A failed build served as a script logs the compiler's report where the
+-- developer is already looking, instead of arriving as a silent HTML page.
+errorScript :: Exit.Reactor -> B.Builder
+errorScript exit =
+  "console.error("
+    <> Json.encodeUgly (Json.chars (ExitHelp.toString (ExitHelp.reportToDoc (Exit.reactorToReport exit))))
+    <> ");\n"
+
+
+compilePiece :: Piece -> FilePath -> IO (Either Exit.Reactor BS.ByteString)
+compilePiece piece path =
+  build path $ \root details artifacts ->
+    case piece of
+      Js ->
+        do  bundles <- generate Generate.Iife root details artifacts
+            case bundles of
+              Generate.Bundles _ _ _ True ->
+                Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+
+              Generate.Bundles _ _ (_:_) _ ->
+                Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
+
+              Generate.Bundles javascript _ [] _ ->
+                return (toBytes javascript)
+
+      Css ->
+        do  Generate.Bundles _ css _ _ <- generate Generate.Iife root details artifacts
+            return (maybe BS.empty toBytes css)
+
+      Mjs ->
+        do  bundles <- generate Generate.Esm root details artifacts
+            if Generate._isScript bundles
+              then Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+              else
+                case Generate.finalizeWith (workerUrl details) bundles of
+                  Left (Opt.Global home _) ->
+                    Task.throw (Exit.ReactorForeignWorker (ModuleName._module home))
+
+                  Right (javascript, _) ->
+                    return javascript
+
+
+-- Each worker is served at its own module's URL, as an absolute path so it
+-- resolves against the origin whatever directory the spawner sits in. Source
+-- paths are relative to the project root, which is where the reactor runs.
+workerUrl :: Details.Details -> Opt.Global -> Maybe String
+workerUrl details (Opt.Global home _) =
+  do  Details.Local path _ _ _ _ _ <- Map.lookup (ModuleName._module home) (Details._locals details)
+      Just ('/' : path ++ ".mjs")
+
+
+toBytes :: B.Builder -> BS.ByteString
+toBytes =
+  LBS.toStrict . B.toLazyByteString
 
 
 

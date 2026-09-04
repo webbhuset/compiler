@@ -95,6 +95,7 @@ isScript main =
     Opt.Script    -> True
     Opt.Static    -> False
     Opt.Dynamic{} -> False
+    Opt.Worker    -> False
 
 
 shebang :: B.Builder

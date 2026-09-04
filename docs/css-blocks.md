@@ -136,7 +136,7 @@ The CSS text is never embedded in the JavaScript bundle:
 | `--output=bundle.js`  | `bundle.js.css` sidecar             |
 | `--output=bundle.mjs` | `bundle.mjs.css` sidecar            |
 | `--output=index.html` | inlined `<style>` in the page       |
-| `elm reactor`         | inlined `<style>` in the page       |
+| `elm reactor`         | inlined in the `.elm` page, or a `Main.elm.css` sidecar for [your own page](reactor.md) |
 
 Link the sidecar yourself:
 `<link rel="stylesheet" href="bundle.mjs.css">`. It contains exactly the

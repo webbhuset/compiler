@@ -149,6 +149,7 @@ data Main
       , _decoder :: Expr
       }
   | Script
+  | Worker  -- a `Worker.Program` root: compiled to a worker bundle of its own
 
 
 data Node
@@ -404,6 +405,7 @@ instance Binary Main where
       Static      -> putWord8 0
       Dynamic a b -> putWord8 1 >> put a >> put b
       Script      -> putWord8 2
+      Worker      -> putWord8 3
 
   get =
     do  word <- getWord8
@@ -411,6 +413,7 @@ instance Binary Main where
           0 -> return Static
           1 -> liftM2 Dynamic get get
           2 -> return Script
+          3 -> return Worker
           _ -> fail "problem getting Opt.Main binary"
 
 
