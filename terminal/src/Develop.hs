@@ -7,7 +7,7 @@ module Develop
 
 
 import Control.Applicative ((<|>))
-import Control.Monad (guard)
+import Control.Monad (filterM, guard)
 import Control.Monad.Trans (MonadIO(liftIO))
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString as BS
@@ -160,7 +160,7 @@ serveElm path =
 
 compile :: FilePath -> IO (Either Exit.Reactor B.Builder)
 compile path =
-  build path $ \stuff details artifacts ->
+  build path $ \_ stuff details artifacts ->
     do  bundles <- generate Generate.Iife stuff details artifacts
         case bundles of
           Generate.Bundles _ _ _ True ->
@@ -179,7 +179,7 @@ compile path =
 
 -- Load the project and build one file, then hand the result to whatever
 -- wants to generate from it.
-build :: FilePath -> (R.Stuff -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor a) -> IO (Either Exit.Reactor a)
+build :: FilePath -> (R.Root -> R.Stuff -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor a) -> IO (Either Exit.Reactor a)
 build path continue =
   do  maybeRoot <- R.findRoot
       case maybeRoot of
@@ -191,7 +191,7 @@ build path continue =
           Task.run $
             do  details <- Task.eio Exit.ReactorBadDetails $ Details.load writer Reporting.silent root stuff
                 artifacts <- Task.eio Exit.ReactorBadBuild $ Build.fromPaths writer Reporting.silent root stuff details (NE.List path [])
-                continue stuff details artifacts
+                continue root stuff details artifacts
 
 
 generate :: Generate.Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor Generate.Bundles
@@ -271,44 +271,77 @@ errorScript exit =
 
 compilePiece :: Piece -> FilePath -> IO (Either Exit.Reactor BS.ByteString)
 compilePiece piece path =
-  build path $ \stuff details artifacts ->
-    case piece of
-      Js ->
-        do  bundles <- generate Generate.Iife stuff details artifacts
-            case bundles of
-              Generate.Bundles _ _ _ True ->
-                Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+  do  served <- Dir.canonicalizePath =<< Dir.getCurrentDirectory
+      build path $ \root stuff details artifacts -> compilePieceIn served root stuff details artifacts piece
 
-              Generate.Bundles _ _ (_:_) _ ->
-                Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-              Generate.Bundles javascript _ [] _ ->
-                return (toBytes javascript)
+compilePieceIn :: FilePath -> R.Root -> R.Stuff -> Details.Details -> Build.Artifacts -> Piece -> Task.Task Exit.Reactor BS.ByteString
+compilePieceIn served root stuff details artifacts piece =
+  case piece of
+    Js ->
+      do  bundles <- generate Generate.Iife stuff details artifacts
+          case bundles of
+            Generate.Bundles _ _ _ True ->
+              Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
-      Css ->
-        do  Generate.Bundles _ css _ _ <- generate Generate.Iife stuff details artifacts
-            return (maybe BS.empty toBytes css)
+            Generate.Bundles _ _ (_:_) _ ->
+              Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-      Mjs ->
-        do  bundles <- generate Generate.Esm stuff details artifacts
-            if Generate._isScript bundles
-              then Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
-              else
-                case Generate.finalizeWith (workerUrl details) bundles of
-                  Left (Opt.Global home _) ->
-                    Task.throw (Exit.ReactorForeignWorker (ModuleName._module home))
+            Generate.Bundles javascript _ [] _ ->
+              return (toBytes javascript)
 
-                  Right (javascript, _) ->
-                    return javascript
+    Css ->
+      do  Generate.Bundles _ css _ _ <- generate Generate.Iife stuff details artifacts
+          return (maybe BS.empty toBytes css)
+
+    Mjs ->
+      do  bundles <- generate Generate.Esm stuff details artifacts
+          if Generate._isScript bundles
+            then Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
+            else
+              do  let workers = [ global | Generate.WorkerBundle global _ <- Generate._workerBundles bundles ]
+                  urls <- Task.io (workerUrls served root details workers)
+                  case Generate.finalizeWith (\global -> Map.findWithDefault Nothing global urls) bundles of
+                    Left (Opt.Global home _) ->
+                      Task.throw (Exit.ReactorWorkerUnservable (ModuleName._module home))
+
+                    Right (javascript, _) ->
+                      return javascript
 
 
 -- Each worker is served at its own module's URL, as an absolute path so it
--- resolves against the origin whatever directory the spawner sits in. Source
--- paths are relative to the project root, which is where the reactor runs.
-workerUrl :: Details.Details -> Opt.Global -> Maybe String
-workerUrl details (Opt.Global home _) =
-  do  Details.Local path _ _ _ _ _ <- Map.lookup (ModuleName._module home) (Details._locals details)
-      Just ('/' : path ++ ".mjs")
+-- resolves against the origin whatever directory the spawner sits in. The
+-- module is found the way the builder finds it, by looking for its file under
+-- each source directory; the cached module table cannot be used for this,
+-- since it is read before the build and so knows nothing of a fresh elm-stuff.
+-- The reactor serves the directory it was started in, so the URL is the path
+-- relative to that; a worker outside it, in a package or under a source
+-- directory elsewhere, cannot be served, and makeRelative leaves it absolute.
+workerUrls :: FilePath -> R.Root -> Details.Details -> [Opt.Global] -> IO (Map.Map Opt.Global (Maybe String))
+workerUrls served root details globals =
+  do  dirs <- traverse (Dir.canonicalizePath . R.toAbsolutePath root) (sourceDirs details)
+      Map.fromList <$> traverse (\global -> (,) global <$> workerUrl served dirs global) globals
+
+
+workerUrl :: FilePath -> [FilePath] -> Opt.Global -> IO (Maybe String)
+workerUrl served dirs (Opt.Global home _) =
+  do  let file = Module.toFilePath (ModuleName._module home) <.> "elm"
+      hits <- filterM (\folder -> Dir.doesFileExist (folder </> file)) dirs
+      return $
+        case hits of
+          folder : _ ->
+            let relative = FP.makeRelative served (folder </> file) in
+            if FP.isAbsolute relative then Nothing else Just ('/' : relative ++ ".mjs")
+
+          [] ->
+            Nothing
+
+
+sourceDirs :: Details.Details -> [R.Path]
+sourceDirs details =
+  case Details._outline details of
+    Details.ValidApp dirs -> NE.toList dirs
+    Details.ValidPkg _ _ _ -> [R.Relative "src"]
 
 
 toBytes :: B.Builder -> BS.ByteString
