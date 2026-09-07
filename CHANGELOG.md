@@ -127,9 +127,9 @@ Elm.Main.init({ node: ... });
 *[docs](docs/comparable-newtypes.md) · requires a
 [patched elm/core](docs/patches/elm-core-comparable-newtypes.patch)*
 
-Custom types with exactly one constructor wrapping exactly one concrete
-comparable value satisfy `comparable`, so they work as `Dict` keys, in
-`Set`s, with `List.sort`, `compare`, and friends:
+Custom types with exactly one constructor wrapping exactly one comparable
+value satisfy `comparable`, so they work as `Dict` keys, in `Set`s, with
+`List.sort`, `compare`, and friends:
 
 ```elm
 type Id
@@ -145,8 +145,12 @@ users : Dict Id User
 - Ordering is the payload's ordering. In `--optimize` builds these types
   are already unboxed, so comparison is unchanged there; dev builds
   unwrap at runtime (the elm/core patch).
-- Multi-constructor types, records, functions, and parameterized types
-  (`type Box a = Box a`) are unchanged: still not comparable.
+- Type parameters follow the `List a` rule: `type Box a = Box a` is
+  comparable exactly when `a` is, and a phantom parameter the payload never
+  mentions does not matter, so `type Id t = Id String` is comparable for
+  every `t`.
+- Multi-constructor types, records, and functions are unchanged: still not
+  comparable.
 - `elm diff` does not detect that changing a payload to something
   non-comparable breaks downstream `Dict` users; treat it as a major
   change yourself.

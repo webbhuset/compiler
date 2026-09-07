@@ -14,6 +14,7 @@ module Type.Error
   , isString
   , isChar
   , isList
+  , comparablePositions
   )
   where
 
@@ -466,7 +467,7 @@ isSuper super tipe =
     Type h n args ->
       case super of
         Number     -> isInt h n || isFloat h n
-        Comparable -> isInt h n || isFloat h n || isString h n || isChar h n || isList h n && isSuper super (head args) || Comparable.isComparableAtom h n
+        Comparable -> isInt h n || isFloat h n || isString h n || isChar h n || isList h n && isSuper super (head args) || isComparableNewtype h n args
         Appendable -> isString h n || isList h n
         CompAppend -> isString h n || isList h n && isSuper Comparable (head args)
 
@@ -486,6 +487,24 @@ isSuper super tipe =
 
     _ ->
       False
+
+
+-- a comparable newtype, with the arguments its payload mentions comparable
+isComparableNewtype :: ModuleName.Canonical -> T.Name -> [Type] -> Bool
+isComparableNewtype home name args =
+  case comparablePositions home name of
+    Nothing ->
+      False
+
+    Just positions ->
+      and [ isSuper Comparable arg | (i, arg) <- zip [0..] args, i `elem` positions ]
+
+
+
+-- The argument positions a comparable newtype needs comparable, if it is one.
+comparablePositions :: ModuleName.Canonical -> T.Name -> Maybe [Int]
+comparablePositions =
+  Comparable.comparablePositions
 
 
 

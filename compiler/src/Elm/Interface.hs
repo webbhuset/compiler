@@ -54,9 +54,10 @@ data Interface =
     , _aliases :: Map.Map T.Name Alias
     , _tags    :: Map.Map N.Name Can.TagDecl
     , _binops  :: Map.Map Op.Name Binop
-    , _comparables :: Set.Set (ModuleName.Canonical, T.Name)
+    , _comparables :: Map.Map (ModuleName.Canonical, T.Name) [Int]
       -- all comparable newtypes visible from this module, including the
-      -- ones inherited from its imports (see Type.Comparable)
+      -- ones inherited from its imports, each with the positions of the
+      -- type arguments that must be comparable too (see Type.Comparable)
     , _overloads :: Can.Overloads
       -- every abstract overload name and definition visible from this
       -- module, its imports included, so a use site consults one table
@@ -91,7 +92,7 @@ data Binop =
 -- FROM MODULE
 
 
-fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Set.Set (ModuleName.Canonical, T.Name) -> Interface
+fromModule :: Pkg.Name -> Can.Module -> Map.Map N.Name Can.Annotation -> Map.Map (ModuleName.Canonical, T.Name) [Int] -> Interface
 fromModule pkg (Can.Module home exports _ _ unions aliases tags overloads binops _) annotations comparables =
   Interface
     { _home    = pkg
@@ -269,7 +270,7 @@ eInterface (Interface h vs us as ts bs cs os) =
   <> E.dict32 T.encode eAlias as
   <> E.dict32 N.encode eTagDecl ts
   <> E.dict32 Op.encode eBinop bs
-  <> E.set32 (\(home, name) -> ModuleName.eCanonical home <> T.encode name) cs
+  <> E.dict32 (\(home, name) -> ModuleName.eCanonical home <> T.encode name) (E.list32 E.int) cs
   <> eOverloads os
 
 
@@ -282,7 +283,7 @@ dInterface =
     <*> D.dict32 T.decode dAlias
     <*> D.dict32 N.decode dTagDecl
     <*> D.dict32 Op.decode dBinop
-    <*> D.set32 (liftM2 (,) ModuleName.dCanonical T.decode)
+    <*> D.dict32 (liftM2 (,) ModuleName.dCanonical T.decode) (D.list32 D.int)
     <*> dOverloads
 
 
