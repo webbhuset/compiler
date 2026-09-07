@@ -61,7 +61,17 @@ prepublishDir root =
 
 compilerVersion :: FilePath
 compilerVersion =
-  V.toChars V.compiler
+  V.toChars V.compiler ++ "-wh." ++ show cacheFormatVersion
+
+
+-- The cache directory is named after V.compiler, which this fork shares with
+-- the official Elm release of the same number. Their on-disk formats differ,
+-- so the "-wh." tag keeps the two from colliding in one elm-stuff tree. Bump
+-- cacheFormatVersion whenever the fork changes the .elmi/.elmo/.dat format, to
+-- retire stale fork caches cleanly instead of hitting the "Corrupt File" path.
+cacheFormatVersion :: Int
+cacheFormatVersion =
+  1
 
 
 
