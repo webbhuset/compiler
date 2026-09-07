@@ -761,15 +761,28 @@ badFlexSuper direction super tipe =
               \ Check out" "comparing-records" "for ideas on how to proceed."
           ]
 
-        T.Type _ name _ ->
-          [ D.toSimpleHint $
-              "I do not know how to compare `" ++ Name.toChars name ++ "` values. I can only\
-              \ compare ints, floats, chars, strings, lists of comparable values, tuples\
-              \ of comparable values, and custom types with exactly one constructor\
-              \ wrapping exactly one comparable value."
-          , D.reflowLink
-              "Check out" "comparing-custom-types" "for ideas on how to proceed."
-          ]
+        T.Type home name args ->
+          case T.comparablePositions home name of
+            -- a comparable newtype like (type Box a = Box a), so the problem
+            -- is what it holds, not the type itself
+            Just positions | not (null positions) && not (null args) ->
+              [ D.toSimpleHint $
+                  "`" ++ Name.toChars name ++ "` values can be compared only when the values\
+                  \ inside them can, and here they cannot. I can only compare ints, floats,\
+                  \ chars, strings, lists of comparable values, tuples of comparable values,\
+                  \ and custom types with exactly one constructor wrapping exactly one\
+                  \ comparable value."
+              ]
+
+            _ ->
+              [ D.toSimpleHint $
+                  "I do not know how to compare `" ++ Name.toChars name ++ "` values. I can only\
+                  \ compare ints, floats, chars, strings, lists of comparable values, tuples\
+                  \ of comparable values, and custom types with exactly one constructor\
+                  \ wrapping exactly one comparable value."
+              , D.reflowLink
+                  "Check out" "comparing-custom-types" "for ideas on how to proceed."
+              ]
 
         _ ->
           [ D.toSimpleHint $

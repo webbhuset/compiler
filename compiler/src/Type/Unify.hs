@@ -355,7 +355,7 @@ atomMatchesSuper super home name =
       isNumber home name
       || Error.isString home name
       || Error.isChar home name
-      || Comparable.isComparableAtom home name
+      || Comparable.comparablePositions home name == Just []
 
     Appendable ->
       Error.isString home name
@@ -417,6 +417,18 @@ unifyFlexSuperStructure context super flatType =
 
         CompAppend ->
             mismatch
+
+    -- a comparable newtype with type parameters, like (type Box a = Box a),
+    -- is comparable when the arguments its payload mentions are
+    App1 home name args | super == Comparable ->
+      case Comparable.comparablePositions home name of
+        Nothing ->
+          mismatch
+
+        Just positions ->
+          do  comparableOccursCheck context
+              mapM_ unifyComparableRecursive [ arg | (i, arg) <- zip [0..] args, i `elem` positions ]
+              merge context (Structure flatType)
 
     _ ->
       mismatch

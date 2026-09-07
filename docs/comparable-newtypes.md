@@ -17,17 +17,52 @@ lookup id users =
 ## What qualifies
 
 A custom type is comparable when it has a single constructor with a single
-argument, no type parameters, and the argument's type is itself comparable:
+argument, and the argument's type is itself comparable:
 
 - `Int`, `Float`, `Char`, `String`
 - tuples and `List`s of comparable values
 - other comparable newtypes (transitively, across modules and packages),
   e.g. `type UserId = UserId Id`
+- a type parameter, as long as it is comparable where the type is used
 
 This works whether or not the constructor is exported — opaque types are
 the intended use case. Everything else is unchanged: multi-constructor
-types, records, functions, and parameterized types like
-`type Box a = Box a` are still not comparable.
+types, records, and functions are still not comparable.
+
+### Type parameters
+
+A parameter matters only if the payload mentions it. That makes a phantom
+type comparable for every argument, since the argument never reaches a
+value:
+
+```elm
+type Id t
+    = Id String
+
+
+users : Dict (Id User) User
+orders : Dict (Id Order) Order
+```
+
+When the payload does mention a parameter, the type is comparable exactly
+when that argument is, the same rule as `List a`:
+
+```elm
+type Box a
+    = Box a
+
+
+Dict (Box Int) v            -- fine
+Dict (Box (Int -> Int)) v   -- not comparable, same as List (Int -> Int)
+
+
+sortBoxes : List (Box comparable) -> List (Box comparable)
+sortBoxes =
+    List.sort
+```
+
+With several parameters each is judged on its own: `type Pair a b = Pair
+( a, Int )` needs `a` comparable and ignores `b`.
 
 ## Semantics
 

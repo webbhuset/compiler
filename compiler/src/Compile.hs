@@ -9,7 +9,6 @@ module Compile
 import qualified Data.Map as Map
 import qualified Data.Name as Name
 import qualified Data.NonEmptyList as NE
-import qualified Data.Set as Set
 
 import qualified AST.Source as Src
 import qualified AST.Canonical as Can
@@ -41,7 +40,7 @@ data Artifacts =
     { _modul :: Can.Module
     , _types :: Map.Map Name.Name Can.Annotation
     , _graph :: Opt.LocalGraph
-    , _comparables :: Set.Set Comparable.Atom
+    , _comparables :: Map.Map Comparable.Atom Comparable.Positions
     }
 
 

@@ -43,9 +43,10 @@ data Interface =
     , _aliases :: Map.Map Name.Name Alias
     , _tags    :: Map.Map Name.Name Can.TagDecl
     , _binops  :: Map.Map Name.Name Binop
-    , _comparables :: Set.Set (ModuleName.Canonical, Name.Name)
+    , _comparables :: Map.Map (ModuleName.Canonical, Name.Name) [Int]
       -- all comparable newtypes visible from this module, including the
-      -- ones inherited from its imports (see Type.Comparable)
+      -- ones inherited from its imports, each with the positions of the
+      -- type arguments that must be comparable too (see Type.Comparable)
     , _overloads :: Can.Overloads
       -- every abstract overload name and definition visible from this
       -- module, its imports included, so a use site consults one table
@@ -80,7 +81,7 @@ data Binop =
 -- FROM MODULE
 
 
-fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Set.Set (ModuleName.Canonical, Name.Name) -> Interface
+fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Map.Map (ModuleName.Canonical, Name.Name) [Int] -> Interface
 fromModule pkg (Can.Module home exports _ _ unions aliases tags overloads binops _) annotations comparables =
   Interface
     { _home = pkg
