@@ -15,13 +15,15 @@ import qualified Data.Index as Index
 import qualified Data.Name as Name
 import qualified Elm.ModuleName as ModuleName
 import qualified Elm.Package as Pkg
+import qualified Nitpick.Workers as Workers
+import qualified Reporting.Annotation as A
 import qualified Type.Portable as Portable
 
 
 
 main :: IO ()
 main =
-  do  let outcomes = map runCase cases ++ computeCases
+  do  let outcomes = map runCase cases ++ computeCases ++ boundaryCases
       mapM_ report outcomes
       unless (all snd outcomes) exitFailure
 
@@ -203,5 +205,49 @@ computeCases =
     )
   , ( "imported verdicts are carried through"
     , Set.member importedAtom (nonportablesOf (Set.singleton importedAtom) False home noUnions)
+    )
+  ]
+
+
+
+-- BOUNDARY CHECK (Nitpick.Workers)
+
+
+prog :: Can.Type -> Can.Type -> Can.Type -> Can.Annotation
+prog args toParent msg =
+  Can.Forall Map.empty (Can.TType ModuleName.workers "Program" [args, toParent, msg, int])
+
+
+runBoundary :: [(A.Region, Name.Name, Can.Annotation)] -> [Maybe (Workers.BoundaryParam, Portable.Problem)]
+runBoundary values =
+  map classify (Workers.boundaryProblems noInfo home noUnions values)
+
+
+classify :: Workers.Error -> Maybe (Workers.BoundaryParam, Portable.Problem)
+classify err =
+  case err of
+    Workers.NonPortableBoundary _ _ param problem -> Just (param, problem)
+    _                                             -> Nothing
+
+
+boundaryCases :: [(String, Bool)]
+boundaryCases =
+  [ ( "a portable worker program has no boundary errors"
+    , runBoundary [ (A.zero, "main", prog int string int) ] == []
+    )
+  , ( "a function message type is reported"
+    , runBoundary [ (A.zero, "main", prog int int lambda) ]
+        == [ Just (Workers.MsgParam, Portable.PFunction) ]
+    )
+  , ( "a non-portable args and msg are both reported, args first"
+    , runBoundary [ (A.zero, "main", prog lambda int lambda) ]
+        == [ Just (Workers.ArgsParam, Portable.PFunction), Just (Workers.MsgParam, Portable.PFunction) ]
+    )
+  , ( "a value that is not a worker program is ignored"
+    , runBoundary [ (A.zero, "helper", Can.Forall Map.empty int) ] == []
+    )
+  , ( "a type variable in a boundary type is reported"
+    , runBoundary [ (A.zero, "main", prog (Can.TVar "a") int int) ]
+        == [ Just (Workers.ArgsParam, Portable.PTypeVar "a") ]
     )
   ]

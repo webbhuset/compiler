@@ -50,9 +50,10 @@ compile pkg ifaces modul =
   do  canonical   <- canonicalize pkg ifaces modul
       let comparables = Comparable.compute ifaces canonical
       annotations <- typeCheck comparables modul canonical
-      ()          <- nitpick canonical
+      let portables = portableAtoms ifaces modul canonical
+      ()          <- nitpick (Portable.Info portables) annotations canonical
       objects     <- optimize modul annotations canonical
-      return (Artifacts canonical annotations objects (Comparable._atoms comparables) (portableAtoms ifaces modul canonical))
+      return (Artifacts canonical annotations objects (Comparable._atoms comparables) portables)
 
 
 
@@ -105,12 +106,12 @@ typeCheck comparables modul canonical =
       Left (E.BadTypes (Localizer.fromModule modul) errors)
 
 
-nitpick :: Can.Module -> Either E.Error ()
-nitpick canonical =
+nitpick :: Portable.Info -> Map.Map Name.Name Can.Annotation -> Can.Module -> Either E.Error ()
+nitpick portables annotations canonical =
   do  case PatternMatches.check canonical of
         Right () -> Right ()
         Left errors -> Left (E.BadPatterns errors)
-      case Workers.check canonical of
+      case Workers.check portables annotations canonical of
         Right () -> Right ()
         Left errors -> Left (E.BadWorkers errors)
 

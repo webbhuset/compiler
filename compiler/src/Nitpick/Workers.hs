@@ -2,46 +2,149 @@
 module Nitpick.Workers
   ( check
   , Error(..)
+  , BoundaryParam(..)
+  , boundaryProblems
   , toReport
   )
   where
 
 
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Name as Name
 import qualified Data.NonEmptyList as NE
 
 import qualified AST.Canonical as Can
+import qualified AST.Utils.Type as Type
 import qualified Elm.ModuleName as ModuleName
 import qualified Reporting.Annotation as A
 import qualified Reporting.Doc as D
 import qualified Reporting.Render.Code as Code
 import qualified Reporting.Report as Report
+import qualified Type.Portable as Portable
 
 
 
 -- CHECK
 --
--- Browser.Worker.spawn compiles the referenced worker program into a
--- separate bundle, so the compiler must see, at every use, which top-level
--- value is being spawned. This pass rejects any use of spawn that is not a
--- direct, fully applied call whose first argument is a direct reference to
--- a top-level value, e.g. `Worker.spawn Counter.main args handlers`.
+-- Two things about Browser.Worker programs:
+--
+--   1. Browser.Worker.spawn compiles the referenced worker program into a
+--      separate bundle, so every use must be a direct, fully applied call
+--      whose first argument names a top-level value.
+--
+--   2. The values that cross the worker boundary -- a program's args,
+--      toParent, and msg -- are passed as structured clones, so their types
+--      must be portable (no functions, no kernel/effect types). This is
+--      checked at every top-level value whose type is a Worker.Program, so
+--      the error lands on the worker's own definition.
 
 
 data Error
   = NotCalledDirectly A.Region
   | BadProgramArg A.Region
+  | NonPortableBoundary A.Region Name.Name BoundaryParam Portable.Problem
 
 
-check :: Can.Module -> Either (NE.List Error) ()
-check (Can.Module _ _ _ decls _ _ _ _ _) =
-  case checkDecls decls [] of
+data BoundaryParam
+  = ArgsParam
+  | ToParentParam
+  | MsgParam
+  deriving (Eq, Show)
+
+
+check :: Portable.Info -> Map.Map Name.Name Can.Annotation -> Can.Module -> Either (NE.List Error) ()
+check info annotations (Can.Module home _ _ decls unions _ _ _ _) =
+  let
+    boundary = boundaryProblems info home unions (topLevelTyped annotations decls)
+  in
+  case checkDecls decls boundary of
     [] ->
       Right ()
 
     e:es ->
       Left (NE.List e es)
+
+
+
+-- BOUNDARY PORTABILITY
+
+
+boundaryProblems
+  :: Portable.Info
+  -> ModuleName.Canonical
+  -> Map.Map Name.Name Can.Union
+  -> [(A.Region, Name.Name, Can.Annotation)]
+  -> [Error]
+boundaryProblems info home unions typedValues =
+  concatMap perValue typedValues
+  where
+    perValue (region, name, Can.Forall _ tipe) =
+      case programArgs tipe of
+        Nothing ->
+          []
+
+        Just (args, toParent, msg) ->
+          concat
+            [ perParam region name ArgsParam args
+            , perParam region name ToParentParam toParent
+            , perParam region name MsgParam msg
+            ]
+
+    perParam region name param tipe =
+      case Portable.checkPortable info home unions tipe of
+        Nothing      -> []
+        Just problem -> [NonPortableBoundary region name param problem]
+
+
+-- The three boundary arguments of a Worker.Program annotation (args,
+-- toParent, msg), or Nothing if the type is not a worker program. The
+-- fourth parameter (model) never crosses, so it is ignored.
+programArgs :: Can.Type -> Maybe (Can.Type, Can.Type, Can.Type)
+programArgs tipe =
+  case tipe of
+    Can.TAlias _ _ args aliased ->
+      programArgs (Type.dealias args aliased)
+
+    Can.TType home name [args, toParent, msg, _model]
+      | home == ModuleName.workers && name == "Program" ->
+          Just (args, toParent, msg)
+
+    _ ->
+      Nothing
+
+
+topLevelTyped :: Map.Map Name.Name Can.Annotation -> Can.Decls -> [(A.Region, Name.Name, Can.Annotation)]
+topLevelTyped annotations decls =
+  [ (region, name, annotation)
+  | def <- topLevelDefs decls
+  , let (region, name) = defRegionName def
+  , annotation <- Maybe.maybeToList (Map.lookup name annotations)
+  ]
+
+
+topLevelDefs :: Can.Decls -> [Can.Def]
+topLevelDefs decls =
+  case decls of
+    Can.Declare def rest ->
+      def : topLevelDefs rest
+
+    Can.DeclareRec def defs rest ->
+      def : defs ++ topLevelDefs rest
+
+    Can.SaveTheEnvironment ->
+      []
+
+
+defRegionName :: Can.Def -> (A.Region, Name.Name)
+defRegionName def =
+  case def of
+    Can.Def (A.At region name) _ _        -> (region, name)
+    Can.TypedDef (A.At region name) _ _ _ _ -> (region, name)
+
+
+
+-- SPAWN IS CALLED DIRECTLY
 
 
 checkDecls :: Can.Decls -> [Error] -> [Error]
@@ -175,3 +278,51 @@ toReport source err =
                   \ it from a data structure does not work."
               ]
           )
+
+    NonPortableBoundary region valueName param problem ->
+      Report.Report "NON-PORTABLE WORKER MESSAGE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "The " ++ paramDescription param ++ " of the worker program `"
+              ++ Name.toChars valueName ++ "` cannot cross the worker boundary:"
+          ,
+            D.stack
+              [ problemDoc problem
+              , D.reflow $
+                  "Values crossing to or from a worker are copied by structured clone,\
+                  \ so they must not contain functions or kernel types like Cmd, Task,\
+                  \ or Json.Decode.Decoder."
+              ]
+          )
+
+
+paramDescription :: BoundaryParam -> String
+paramDescription param =
+  case param of
+    ArgsParam     -> "argument type (args)"
+    ToParentParam -> "toParent type"
+    MsgParam      -> "message type (msg)"
+
+
+problemDoc :: Portable.Problem -> D.Doc
+problemDoc problem =
+  case problem of
+    Portable.PFunction ->
+      D.reflow "It contains a function, and functions cannot be structured-cloned."
+
+    Portable.PBadAtom (_, name) ->
+      D.reflow $
+        "It contains `" ++ Name.toChars name ++ "`, which cannot cross the worker\
+        \ boundary -- it is defined in a module with kernel code, so the compiler\
+        \ cannot guarantee it survives a structured clone."
+
+    Portable.PTypeVar name ->
+      D.reflow $
+        "It is not concrete: the type variable `" ++ Name.toChars name ++ "` could be\
+        \ anything, including a function. Give the worker program a concrete type\
+        \ annotation."
+
+    Portable.PExtensibleRecord ->
+      D.reflow
+        "It has an open record type. Only closed records can cross the worker boundary."
