@@ -24,6 +24,7 @@ import qualified Reporting.Error as E
 import qualified Reporting.Result as R
 import qualified Reporting.Render.Type.Localizer as Localizer
 import qualified Type.Comparable as Comparable
+import qualified Type.Portable as Portable
 import qualified Type.Constrain.Module as Type
 import qualified Type.Solve as Type
 
@@ -40,6 +41,7 @@ data Artifacts =
     , _types :: Map.Map Name.Name Can.Annotation
     , _graph :: Opt.LocalGraph
     , _comparables :: Set.Set Comparable.Atom
+    , _portables :: Set.Set Portable.Atom
     }
 
 
@@ -50,7 +52,33 @@ compile pkg ifaces modul =
       annotations <- typeCheck comparables modul canonical
       ()          <- nitpick canonical
       objects     <- optimize modul annotations canonical
-      return (Artifacts canonical annotations objects (Comparable._atoms comparables))
+      return (Artifacts canonical annotations objects (Comparable._atoms comparables) (portableAtoms ifaces modul canonical))
+
+
+
+-- PORTABILITY VERDICTS
+--
+-- The set of non-portable atoms visible from this module: what its imports
+-- recorded, plus its own non-portable unions. Stored in the interface so a
+-- later module inherits it without unfolding across module boundaries. A
+-- module that imports kernel code taints its own unions (see Type.Portable).
+
+
+portableAtoms :: Map.Map ModuleName.Raw I.Interface -> Src.Module -> Can.Module -> Set.Set Portable.Atom
+portableAtoms ifaces modul (Can.Module home _ _ _ unions _ _ _ _) =
+  let
+    imported =
+      Set.unions (map I._nonportables (Map.elems ifaces))
+
+    usesKernel =
+      any (Name.isKernel . Src.getImportName) (srcImports modul)
+  in
+  Portable._nonportables (Portable.computeLocals imported usesKernel home unions)
+
+
+srcImports :: Src.Module -> [Src.Import]
+srcImports (Src.Module _ _ _ imports _ _ _ _ _ _) =
+  imports
 
 
 

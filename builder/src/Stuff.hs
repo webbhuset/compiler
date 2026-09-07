@@ -71,7 +71,7 @@ compilerVersion =
 -- retire stale fork caches cleanly instead of hitting the "Corrupt File" path.
 cacheFormatVersion :: Int
 cacheFormatVersion =
-  1
+  2
 
 
 
