@@ -16,6 +16,7 @@ module Elm.Package
   , dummyName, kernel, core
   , browser, virtualDom, html
   , json, http, url
+  , bytes, time
   , webgl, linearAlgebra
   , css, system
   --
@@ -200,6 +201,18 @@ url =
   toName elm "url"
 
 
+{-# NOINLINE bytes #-}
+bytes :: Name
+bytes =
+  toName elm "bytes"
+
+
+{-# NOINLINE time #-}
+time :: Name
+time =
+  toName elm "time"
+
+
 {-# NOINLINE webgl #-}
 webgl :: Name
 webgl =
@@ -250,7 +263,6 @@ suggestions :: Map.Map Name.Name Name
 suggestions =
   let
     random = toName elm "random"
-    time = toName elm "time"
     file = toName elm "file"
   in
   Map.fromList

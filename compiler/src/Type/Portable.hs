@@ -4,6 +4,7 @@ module Type.Portable
   , Info(..)
   , Problem(..)
   , checkPortable
+  , computeLocals
   )
   where
 
@@ -28,8 +29,8 @@ import qualified Elm.Package as Pkg
 -- (Cmd, Sub, Task, Decoder, Worker, Channel, ...) that wrap functions or
 -- otherwise resist cloning. The judgment is a fail-closed whitelist: a type
 -- is portable only if it is a scalar, a structural container of portable
--- arguments, plain user data whose fields are portable, or a foreign type
--- its defining module judged portable. See docs/web-workers.md.
+-- arguments, plain user data whose fields are portable, or a named type its
+-- defining module judged portable. See docs/web-workers.md.
 
 
 type Atom =
@@ -55,9 +56,9 @@ data Problem
 
 
 
--- CHECK
+-- USE-SITE CHECK
 --
--- `Nothing` means portable. The two knobs threaded through the walk:
+-- `Nothing` means portable. Two knobs are threaded through the walk:
 --
 --   * `assumed` — a union's own type parameters, treated as portable while
 --     its body is judged. Every use site independently checks the actual
@@ -69,83 +70,144 @@ data Problem
 --     `type Tree = Node (List Tree)` clones fine, cycles included).
 
 
+data Env =
+  Env
+    { _envNonportables :: Set.Set Atom
+    , _envHome :: ModuleName.Canonical
+    , _envUnions :: Map.Map Name.Name Can.Union
+    }
+
+
 checkPortable
   :: Info
   -> ModuleName.Canonical            -- home module (to unfold local unions)
   -> Map.Map Name.Name Can.Union     -- the home module's unions
   -> Can.Type
   -> Maybe Problem
-checkPortable info home unions =
-  go Set.empty Set.empty
-  where
-    nonportables =
-      _nonportables info
+checkPortable (Info nonportables) home unions =
+  go (Env nonportables home unions) Set.empty Set.empty
 
-    go assumed seen tipe =
-      case tipe of
-        Can.TLambda _ _ ->
-          Just PFunction
 
-        Can.TVar name ->
-          if Set.member name assumed then Nothing else Just (PTypeVar name)
+go :: Env -> Set.Set Name.Name -> Set.Set Name.Name -> Can.Type -> Maybe Problem
+go env assumed seen tipe =
+  case tipe of
+    Can.TLambda _ _ ->
+      Just PFunction
 
-        Can.TUnit ->
-          Nothing
+    Can.TVar name ->
+      if Set.member name assumed then Nothing else Just (PTypeVar name)
 
-        Can.TTuple a b maybeC ->
-          asum (go assumed seen a : go assumed seen b : map (go assumed seen) (maybeToList maybeC))
+    Can.TUnit ->
+      Nothing
 
-        Can.TAlias _ _ args aliased ->
-          go assumed seen (Type.dealias args aliased)
+    Can.TTuple a b maybeC ->
+      asum (go env assumed seen a : go env assumed seen b : map (go env assumed seen) (maybeToList maybeC))
 
-        Can.TRecord fields ext ->
-          row assumed seen ext [ ft | Can.FieldType _ ft <- Map.elems fields ]
+    Can.TAlias _ _ args aliased ->
+      go env assumed seen (Type.dealias args aliased)
 
-        Can.TTagRow tags ext ->
-          row assumed seen ext (concat (Map.elems tags))
+    Can.TRecord fields ext ->
+      row env assumed seen ext [ ft | Can.FieldType _ ft <- Map.elems fields ]
 
-        Can.TType tipeHome name args ->
-          goType assumed seen tipeHome name args
+    Can.TTagRow tags ext ->
+      row env assumed seen ext (concat (Map.elems tags))
 
-    row assumed seen ext payloads =
-      case ext of
-        Just _  -> Just PExtensibleRecord
-        Nothing -> asum (map (go assumed seen) payloads)
+    Can.TType tipeHome name args ->
+      goType env assumed seen tipeHome name args
 
-    goType assumed seen tipeHome name args
-      | isScalar tipeHome name =
-          Nothing
 
-      | isContainer tipeHome name =
-          asum (map (go assumed seen) args)
+row :: Env -> Set.Set Name.Name -> Set.Set Name.Name -> Maybe Name.Name -> [Can.Type] -> Maybe Problem
+row env assumed seen ext payloads =
+  case ext of
+    Just _  -> Just PExtensibleRecord
+    Nothing -> asum (map (go env assumed seen) payloads)
 
-      | tipeHome == home =
-          -- a local union: judge its body parametrically, then check the
-          -- actual arguments at this use site
-          asum (localUnion seen name : map (go assumed seen) args)
 
-      | Set.member (tipeHome, name) nonportables =
-          Just (PBadAtom (tipeHome, name))
+goType :: Env -> Set.Set Name.Name -> Set.Set Name.Name -> ModuleName.Canonical -> Name.Name -> [Can.Type] -> Maybe Problem
+goType env assumed seen tipeHome name args
+  | isScalar tipeHome name =
+      Nothing
 
-      | otherwise =
-          -- a foreign type its own module judged portable-given-arguments
-          asum (map (go assumed seen) args)
+  | isContainer tipeHome name =
+      asum (map (go env assumed seen) args)
 
-    localUnion seen name
-      | Set.member name seen =
-          Nothing
+  | tipeHome == _envHome env =
+      -- a local union: judge its body parametrically, then check the actual
+      -- arguments at this use site
+      asum (localUnion env seen name : map (go env assumed seen) args)
 
-      | otherwise =
-          case Map.lookup name unions of
-            Nothing ->
-              Just (PBadAtom (home, name))
+  | Set.member (tipeHome, name) (_envNonportables env) =
+      Just (PBadAtom (tipeHome, name))
 
-            Just (Can.Union vars ctors _ _) ->
-              asum
-                [ go (Set.fromList vars) (Set.insert name seen) payload
-                | Can.Ctor _ _ _ payloads <- ctors
-                , payload <- payloads
-                ]
+  | otherwise =
+      -- a foreign type its own module judged portable-given-arguments
+      asum (map (go env assumed seen) args)
+
+
+localUnion :: Env -> Set.Set Name.Name -> Name.Name -> Maybe Problem
+localUnion env seen name
+  | Set.member name seen =
+      Nothing
+
+  | otherwise =
+      case Map.lookup name (_envUnions env) of
+        Nothing ->
+          Just (PBadAtom (_envHome env, name))
+
+        Just union ->
+          judgeUnion env seen name union
+
+
+judgeUnion :: Env -> Set.Set Name.Name -> Name.Name -> Can.Union -> Maybe Problem
+judgeUnion env seen name (Can.Union vars ctors _ _) =
+  asum
+    [ go env (Set.fromList vars) (Set.insert name seen) payload
+    | Can.Ctor _ _ _ payloads <- ctors
+    , payload <- payloads
+    ]
+
+
+
+-- DEFINITION-SITE VERDICTS
+--
+-- When a module is compiled it judges each of its own unions and produces
+-- the set of non-portable atoms visible from it: the verdicts inherited
+-- from its imports, plus its own local unions that are non-portable. That
+-- closure means a later module reading this one's interface never has to
+-- unfold across module boundaries -- every reachable atom already carries a
+-- verdict (the same trick as Type.Comparable).
+--
+-- The kernel rule is the fail-closed core: a union defined in a module that
+-- imports kernel code is non-portable unless it is on the allow-list, so a
+-- phantom kernel type (Cmd, Worker, a user git-dep kernel type) that would
+-- structurally look portable is still rejected.
+
+
+computeLocals :: Set.Set Atom -> Bool -> ModuleName.Canonical -> Map.Map Name.Name Can.Union -> Info
+computeLocals imported usesKernel home unions =
+  let
+    env =
+      Env imported home unions
+
+    localBad =
+      Set.fromList
+        [ (home, name)
+        | (name, union) <- Map.toList unions
+        , isLocalNonPortable usesKernel home name (judgeUnion env Set.empty name union)
+        ]
+  in
+  Info (Set.union imported localBad)
+
+
+isLocalNonPortable :: Bool -> ModuleName.Canonical -> Name.Name -> Maybe Problem -> Bool
+isLocalNonPortable usesKernel home name structuralVerdict
+  | usesKernel && not (Set.member (home, name) allowList) =
+      True
+
+  | otherwise =
+      case structuralVerdict of
+        Nothing -> False
+        Just _  -> True
 
 
 
@@ -176,3 +238,26 @@ isContainer home name =
 setModule :: ModuleName.Canonical
 setModule =
   ModuleName.Canonical Pkg.core "Set"
+
+
+
+-- KERNEL ALLOW-LIST
+--
+-- Plain-data types that live in kernel-importing modules and clone fine, so
+-- the kernel rule must not reject them.
+
+
+allowList :: Set.Set Atom
+allowList =
+  Set.fromList
+    [ (ModuleName.basics, "Order")
+    , (ModuleName.jsonEncode, "Value")
+    , (ModuleName.Canonical Pkg.bytes "Bytes", "Bytes")
+    , (timeModule, "Posix")
+    , (timeModule, "Zone")
+    ]
+
+
+timeModule :: ModuleName.Canonical
+timeModule =
+  ModuleName.Canonical Pkg.time "Time"

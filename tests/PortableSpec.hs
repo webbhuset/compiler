@@ -21,7 +21,7 @@ import qualified Type.Portable as Portable
 
 main :: IO ()
 main =
-  do  let outcomes = map runCase cases
+  do  let outcomes = map runCase cases ++ computeCases
       mapM_ report outcomes
       unless (all snd outcomes) exitFailure
 
@@ -160,4 +160,48 @@ cases =
       (Just (Portable.PBadAtom (otherHome, "Cmd")))
   , Case "a portable foreign container with a function argument is not portable"
       noInfo noUnions (foreign_ "Box" [lambda]) (Just Portable.PFunction)
+  ]
+
+
+
+-- COMPUTE (definition-site verdicts)
+
+
+nonportablesOf :: Set.Set Portable.Atom -> Bool -> ModuleName.Canonical -> Map.Map Name.Name Can.Union -> Set.Set Portable.Atom
+nonportablesOf imported usesKernel h unions =
+  Portable._nonportables (Portable.computeLocals imported usesKernel h unions)
+
+
+-- type Plain = Ctor Int   (structurally portable)
+plainUnions :: Map.Map Name.Name Can.Union
+plainUnions =
+  Map.fromList [ ("Plain", union [] [int]) ]
+
+-- type Order = LT | EQ | GT   (allow-listed, lives in Basics)
+orderUnions :: Map.Map Name.Name Can.Union
+orderUnions =
+  Map.fromList [ ("Order", union [] []) ]
+
+importedAtom :: Portable.Atom
+importedAtom =
+  (otherHome, "Imported")
+
+
+computeCases :: [(String, Bool)]
+computeCases =
+  [ ( "non-kernel module: a portable union is not recorded"
+    , not (Set.member (home, "Tree") (nonportablesOf Set.empty False home treeUnions))
+    )
+  , ( "non-kernel module: a function-wrapping union is recorded"
+    , Set.member (home, "Weird") (nonportablesOf Set.empty False home weirdUnions)
+    )
+  , ( "kernel module: even a structurally-portable union is recorded"
+    , Set.member (home, "Plain") (nonportablesOf Set.empty True home plainUnions)
+    )
+  , ( "kernel module: an allow-listed type is not recorded"
+    , not (Set.member (ModuleName.basics, "Order") (nonportablesOf Set.empty True ModuleName.basics orderUnions))
+    )
+  , ( "imported verdicts are carried through"
+    , Set.member importedAtom (nonportablesOf (Set.singleton importedAtom) False home noUnions)
+    )
   ]
