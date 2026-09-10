@@ -96,8 +96,14 @@ error. Workers can spawn workers; a spawn *cycle* is a compile error.
 
 - `args`, `toParent`, and the worker's `msg` cross the boundary as
   structured clones. Custom types, records, lists, dicts — all fine.
-  **Functions do not clone**: a message containing a function fails at
-  runtime (`onCrash` from the worker side, a console error from `send`).
+  **Non-portable types are a compile error.** A boundary type that contains
+  a function, an effect or kernel type (`Cmd`, `Sub`, `Task`,
+  `Json.Decode.Decoder`, `Worker`, `Channel`, …), a free type variable, or
+  an open record is rejected at compile time with a `NON-PORTABLE WORKER
+  MESSAGE` error, reported at the worker program's definition. `Bytes`,
+  `Json.Value`, `Time.Posix`, `Time.Zone`, and `Basics.Order` are allowed.
+  The `model` type is exempt — it never leaves the worker. (`Json.Value` can
+  still wrap a non-cloneable JS value at runtime; that remains an `onCrash`.)
 - Values are *copied*, not shared. Coarse-grained messages are cheap;
   shipping a huge model on every animation frame is not what workers are
   for.
@@ -125,6 +131,12 @@ error. Workers can spawn workers; a spawn *cycle* is a compile error.
 - A worker module's `main` must be annotated with its `Worker.Program`
   type. It is not an app `main`: `elm make src/Counter.elm` alone is not a
   valid program root.
+- The `args`, `toParent`, and `msg` types must be portable
+  (structured-cloneable) — see [Messages and the boundary](#messages-and-the-boundary).
+  If you ship a kernel package, the compiler treats every type defined in a
+  module that imports kernel code as non-portable unless it is on the
+  built-in allow-list, so keep the plain data you send across the boundary
+  in modules that do not import kernel code.
 
 ## Runtime: patched elm/browser
 

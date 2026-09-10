@@ -245,9 +245,14 @@ Worker.spawn Counter.main
 - The spawned program must be a direct reference to a top-level value
   (`Worker.spawn Counter.main args handlers`); anything else is a compile
   error, as is compiling a worker-spawning program to `.js`/`.html`.
-- Messages must be function-free (structured clone); violations fail at
-  runtime via `onCrash`. CSS blocks inside worker code land in the same
-  `.css` sidecar as the rest of the program.
+- Boundary types (`args`, `toParent`, `msg`) must be portable
+  (structured-cloneable): a function, effect/kernel type (`Cmd`, `Task`,
+  `Decoder`, `Worker`, `Channel`, …), free type variable, or open record in
+  one is a `NON-PORTABLE WORKER MESSAGE` compile error at the program's
+  definition, rather than a runtime `onCrash`. `Bytes`, `Json.Value`,
+  `Time.Posix`/`Zone`, and `Basics.Order` are allowed; `model` is exempt.
+  CSS blocks inside worker code land in the same `.css` sidecar as the rest
+  of the program.
 - The `Browser.Worker` module ships in a patched `elm/browser` (kernel
   code plus an effect manager), consumed as a git dependency. No elm/core
   or virtual-dom patches needed.

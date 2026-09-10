@@ -12,11 +12,11 @@ license: BSD-3-Clause
 license-file: LICENSE
 
 
-executable elm
-    ghc-options: -O2 -rtsopts -threaded "-with-rtsopts=-N -qg -A128m" -Wall -Werror
-        -- add -eventlog for (elm make src/Main.elm +RTS -l; threadscope elm.eventlog)
-        -- https://www.oreilly.com/library/view/parallel-and-concurrent/9781449335939/
-
+-- Shared by the `elm` executable and the test-suite so the compiler
+-- modules are described in exactly one place. Component-specific flags
+-- (the exe's optimisation/RTS options, the test-suite's main-is) stay in
+-- their own stanzas.
+common compiler
     build-depends:
         ansi-terminal,
         ansi-wl-pprint < 1,
@@ -50,6 +50,8 @@ executable elm
         vector,
         zip-archive
 
+    ghc-options: -Wall -Werror
+
     hs-source-dirs:
         compiler/src
         builder/src
@@ -57,9 +59,6 @@ executable elm
         terminal/impl
         terminal/src
         gen
-
-    main-is:
-        Main.hs
 
     other-modules:
         BuildCount
@@ -213,6 +212,7 @@ executable elm
         Type.Error
         Type.Instantiate
         Type.Occurs
+        Type.Portable
         Type.Solve
         Type.Type
         Type.Unify
@@ -222,3 +222,26 @@ executable elm
         -- utils
         Bytes
         Literals
+
+
+executable elm
+    import: compiler
+
+    ghc-options: -O2 -rtsopts -threaded "-with-rtsopts=-N -qg -A128m"
+        -- add -eventlog for (elm make src/Main.elm +RTS -l; threadscope elm.eventlog)
+        -- https://www.oreilly.com/library/view/parallel-and-concurrent/9781449335939/
+
+    main-is:
+        Main.hs
+
+
+test-suite portable-spec
+    import: compiler
+
+    type: exitcode-stdio-1.0
+
+    hs-source-dirs:
+        tests
+
+    main-is:
+        PortableSpec.hs
