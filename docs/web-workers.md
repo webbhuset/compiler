@@ -141,7 +141,7 @@ an unpublished version number, like the elm/core patches for task ports:
 
 ```json
 "dependencies": {
-    "direct": { "elm/browser": "1.100.201", ... }
+    "direct": { "elm/browser": "1.100.202", ... }
 },
 "git-dependencies": {
     "elm/browser": "git@github.com:webbhuset/elm-browser.git"

@@ -106,6 +106,34 @@ has already committed to running it by then. Reach the chunk from `update`
 or `view` first, which is the normal shape anyway.
 
 
+## Runtime: patched elm/core and elm/browser
+
+The waiting happens in kernel code, so both packages are forks, consumed as
+[git dependencies](git-dependencies.md) under unpublished version numbers.
+`elm init` pins these already:
+
+```json
+"dependencies": {
+    "direct": { "elm/core": "1.100.504", "elm/browser": "1.100.202", ... }
+},
+"git-dependencies": {
+    "elm/core": "git@github.com:webbhuset/core.git",
+    "elm/browser": "git@github.com:webbhuset/elm-browser.git"
+}
+```
+
+elm/core catches the marker where it calls `init`, `update` and
+`subscriptions` ([patches/elm-core-code-splitting.patch](patches/elm-core-code-splitting.patch));
+elm/browser catches it around the view
+([patches/elm-browser-code-splitting.patch](patches/elm-browser-code-splitting.patch)).
+Both are additive: a program with no async imports behaves identically.
+
+An older elm/core or elm/browser compiles fine and then throws at the first
+reference into a chunk, because nothing is listening for the marker. If you
+see an uncaught `Error: An async-imported module is not here yet`, check
+these two versions first.
+
+
 ## In elm reactor
 
 Works, with no hashed sibling files: each chunk is served from the root
