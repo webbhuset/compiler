@@ -11,6 +11,41 @@ tooling (elm-format, elm-test, editors).
 
 Bugfixes or replacing external tools. No change to the language.
 
+## Exponential compile time and memory with extensible records
+
+*fixes [elm/compiler#1897](https://github.com/elm/compiler/issues/1897)*
+
+Nesting extensible-record aliases doubled both compile time and memory for
+every level of nesting, so a chain of them became unbuildable long before
+it became unreadable:
+
+```elm
+type alias Part1 a = { a | part1 : String }
+type alias Part2 a = { a | part2 : String }
+type alias Part3 a = { a | part3 : String }
+
+
+type alias Parts =
+    Part1 (Part2 (Part3 {}))
+```
+
+- With 30 nested parts, compiling goes from 23 s and 27 GB to 0.03 s and
+  57 MB.
+- Two places converted an alias's arguments once per level.
+  `Type.Instantiate.fromSrcType` substituted the instantiated arguments
+  into `Holey` alias bodies, so a separate variable graph was built for
+  the copy in the body and the copy in the argument list; it now leaves a
+  `PlaceHolder`, which `Solve.typeToVar` already resolves to the shared
+  argument variable.
+- `Type.toAnnotation` and `toErrorType` converted an alias's arguments and
+  its real type independently, and since each record's extension runs
+  through the next alias, everything below was converted again at every
+  level. Variables equivalent to an alias argument are now mapped back to
+  it, so inferred annotations emit `Can.Holey` bodies the way
+  canonicalization already did for written ones.
+- Documentation output and error messages are unchanged.
+
+
 ## Git dependencies — private packages
 
 *[docs](docs/git-dependencies.md)*
