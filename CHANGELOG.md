@@ -120,7 +120,10 @@ Elm.Main.init({ node: ... });
 - Nothing is assigned to the global scope, and separate `.mjs` bundles do
   not merge into a shared `Elm` object the way classic bundles do.
 - `--output=foo.js` and `--output=foo.html` are byte-for-byte unchanged.
-- Always a single module; code splitting is left to bundlers.
+- One module per invocation, unless the program asks for more files:
+  `import async` writes one chunk per async-imported module and
+  `Worker.spawn` one bundle per worker program. Both resolve their
+  files against `import.meta.url`, which is why they need this mode.
 
 ## Comparable newtypes
 
@@ -256,6 +259,66 @@ Worker.spawn Counter.main
   code plus an effect manager), consumed as a git dependency. No elm/core
   or virtual-dom patches needed.
 
+## Code splitting — async imports
+
+*[docs](docs/code-splitting.md) · design notes:
+[docs](docs/code-splitting-design.md) · runtime: patches to
+[elm/core](docs/patches/elm-core-code-splitting.patch) and
+[elm/browser](docs/patches/elm-browser-code-splitting.patch) ·
+requires `--output=something.mjs`*
+
+Everything reachable from `main` is downloaded and evaluated before the
+program starts, including the screen nobody opens. Mark an import `async`
+and that module's code moves into a file of its own, fetched the first
+time something needs it:
+
+```elm
+import async Pages.Report
+
+
+view : Model -> Html Msg
+view model =
+    case model of
+        Reporting n ->
+            -- the file is fetched here, the first time
+            Pages.Report.open n
+
+        Counting n ->
+            viewCounter n
+```
+
+`import async M` brings exactly the same names into scope as `import M`,
+at the same types, used at the same call sites — `as` and `exposing` work
+as usual, and `async` remains a legal variable name.
+
+- `elm make src/Main.elm --output=app.mjs` writes `app.mjs` plus one
+  content-hashed `app.<hash>.mjs` per async-imported module.
+- There is nothing to await at the call site, because the value is an
+  ordinary Elm value, not a promise. A reference to a file that has not
+  arrived throws a marker carrying it, and the four places the runtime
+  calls into user code — `init`, `update`, `view`, `subscriptions` —
+  catch it, wait, and call again. That is safe because Elm is pure:
+  nothing the first call produced was kept. While a file is in flight the
+  app pauses rather than showing a partial state, and messages that arrive
+  meanwhile are handled in order once it lands.
+- A chunk takes whatever only it needs, transitively, packages included —
+  a chart library used by one screen leaves the initial download
+  entirely. Code a second chunk also needs is hoisted into the main
+  bundle, so one page never holds two copies of a value. Effect managers
+  and kernel code stay in the main bundle as well, since they are
+  registered when the program starts.
+- A module that is reachable without the async import anyway is already
+  in the main bundle, so the import costs nothing and fetches nothing.
+- `--optimize` works normally: one `elm make` means one field-rename
+  table, so values cross between the files unchanged.
+- Compile errors for a reference that would be forced when the bundle
+  loads (a top-level definition written without arguments), for
+  `import async` in a package, for non-ESM output, and for an async
+  import reached from a worker program.
+- Not a retry point: a chunk first touched inside a `Task` callback
+  raises a JavaScript error naming the problem rather than waiting, since
+  the scheduler has already committed to running it.
+
 ## Compiled pieces in elm reactor
 
 *[docs](docs/reactor.md)*
@@ -279,6 +342,11 @@ written, so a hand-written HTML page can pull in exactly what it needs:
   compiled responses are sent `Cache-Control: no-store`.
 - A worker program can be compiled on its own:
   `elm make src/Counter.elm --output=counter.mjs`.
+- Async imports work in the reactor too, and a program that has them is
+  loaded as a module for the same reason a worker-spawning one is. A
+  chunk is not a program, so it cannot be served from its own source
+  file; it comes from the root program's endpoint instead, as
+  `/src/Main.elm.mjs?chunk=Pages.Report`.
 - A failed build served as a script is a 500 whose body logs the compiler's
   report with `console.error`.
 
