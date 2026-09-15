@@ -6,6 +6,11 @@ that use none of these features compile exactly as with the official
 compiler, and every `elm.json` this fork writes remains valid for official
 tooling (elm-format, elm-test, editors).
 
+
+# Bugfix and quality of life
+
+Bugfixes or replacing external tools. No change to the language.
+
 ## Git dependencies — private packages
 
 *[docs](docs/git-dependencies.md)*
@@ -65,6 +70,114 @@ need native code, e.g. server modules running on Node.js.
   include it (an upstream limitation the elm organization also lives
   with). Develop against a test application.
 
+## ES module output
+
+*[docs](docs/esm-output.md)*
+
+Naming the output `.mjs` produces an ES module instead of the classic
+IIFE that assigns `window.Elm`:
+
+```
+elm make src/Main.elm src/Pages/Home.elm --output=elm.mjs
+```
+
+```js
+import { Elm } from "./elm.mjs";   // also the default export
+Elm.Main.init({ node: ... });
+```
+
+- Same `Elm` object shape as upstream, including nested module names and
+  multiple mains in one file. Works in browsers, Node.js, and bundlers.
+- Nothing is assigned to the global scope, and separate `.mjs` bundles do
+  not merge into a shared `Elm` object the way classic bundles do.
+- `--output=foo.js` and `--output=foo.html` are byte-for-byte unchanged.
+- One module per invocation, unless the program asks for more files:
+  `import async` writes one chunk per async-imported module and
+  `Worker.spawn` one bundle per worker program. Both resolve their
+  files against `import.meta.url`, which is why they need this mode.
+
+## Compiled pieces in elm reactor
+
+*[docs](docs/reactor.md)*
+
+The reactor serves a program in pieces, at the names `elm make` would have
+written, so a hand-written HTML page can pull in exactly what it needs:
+
+```html
+<link rel="stylesheet" href="/src/Main.elm.css">
+<script src="/src/Main.elm.js"></script>
+<script type="module" src="/src/Workers/Main.elm.mjs"></script>
+```
+
+- `Main.elm.js`, `Main.elm.css` and `Main.elm.mjs` compile `Main.elm` on
+  request. Your page keeps its own `<meta viewport>`, ports and flags,
+  which the reactor's generated page cannot offer.
+- Workers work in the reactor, from the dashboard page too: it loads a
+  worker-spawning program as a module. Each spawn points at the worker
+  module's own URL — `Counter.elm.mjs` compiles `Counter.elm` as a worker
+  program — so there are no hashed sibling files to keep in sync, and
+  compiled responses are sent `Cache-Control: no-store`.
+- A worker program can be compiled on its own:
+  `elm make src/Counter.elm --output=counter.mjs`.
+- Async imports work in the reactor too, and a program that has them is
+  loaded as a module for the same reason a worker-spawning one is. A
+  chunk is not a program, so it cannot be served from its own source
+  file; it comes from the root program's endpoint instead, as
+  `/src/Main.elm.mjs?chunk=Pages.Report`.
+- A failed build served as a script is a 500 whose body logs the compiler's
+  report with `console.error`.
+
+
+# Native and compiler output
+
+Changes to the compiler and to some kernel packages, but not new language
+features. Elm itself stays the same; each of these could be replaced by
+boilerplate and external tools.
+
+## Command line scripts
+
+*[docs](docs/system-scripts.md) · runtime in the `webbhuset/system` package*
+
+A module whose `main` has this type is a program that runs on the command
+line, and the compiled file runs itself — it gets a `#!/usr/bin/env node`
+line and the executable bit:
+
+```elm
+main : System.Process -> Task String Int
+main process =
+    System.stdout ("hello " ++ String.join " " process.argv ++ "\n")
+        |> Task.map (\_ -> 0)
+```
+
+```
+$ elm make src/Hello.elm --output=hello.js
+$ ./hello.js world
+hello world
+```
+
+- The type is the contract: succeeding with an `Int` exits with that
+  status, failing with a `String` prints it to stderr and exits 1. No
+  separate exit API is needed for the normal path.
+- `Process` carries `argv` (without the node binary and script path), an
+  `env` dict, and `platform`. Things that change while the program runs,
+  like the working directory, are tasks instead of fields.
+- `System` has stdout/stderr/stdin, `isTerminal`, `cwd`/`chdir` and
+  `exit`; `System.File` has the usual file and directory operations;
+  `System.Path` joins and takes apart paths the way the platform expects;
+  and `System.Child` runs other programs, capturing their output or
+  letting it through to the terminal.
+- Failures are structural variant tags, so each operation says what it can
+  actually fail with, chaining unions the rows, and handling one tag with
+  a catch-all removes it from what the caller sees. An error code with no
+  tag crashes, naming the code and asking for a report, so gaps in the
+  vocabulary get found rather than hidden behind a catch-all.
+- A script must be the only program compiled, `--output` must be `.js` or
+  `.mjs`, and the DEV mode console warning is suppressed since a program's
+  stderr is part of its contract.
+- Long running programs that must react to events (watchers, servers,
+  signals) want a message loop instead: write those as a `Platform.worker`
+  with ports. The `System.*` tasks work there unchanged.
+
 ## Task ports
 
 *[docs](docs/task-ports.md) · requires a
@@ -99,31 +212,149 @@ Elm.Main.init({
 - Cancellation is not supported; a killed process drops the result but
   does not abort the promise.
 
-## ES module output
+## Native web workers
 
-*[docs](docs/esm-output.md)*
+*[docs](docs/web-workers.md) · runtime: `Browser.Worker` in a
+[patched elm/browser](docs/patches/elm-browser-worker.patch) ·
+requires `--output=something.mjs`*
 
-Naming the output `.mjs` produces an ES module instead of the classic
-IIFE that assigns `window.Elm`:
+A worker is an Elm module whose `main` is a `Worker.Program`, compiled into
+its own JavaScript file by the same `elm make` that compiles the app
+spawning it. Because both sides share one compilation (and one `--optimize`
+rename table), messages cross the boundary as ordinary Elm values via
+structured clone — custom types included, no JSON encoders to drift:
 
+```elm
+-- Counter.elm
+main : Worker.Program Args ToParent Msg Model
+main =
+    Worker.worker { init = init, update = update, subscriptions = subscriptions }
+
+-- Main.elm
+Worker.spawn Counter.main
+    { initial = 10 }
+    { onSpawn = GotCounter, onMessage = FromCounter, onCrash = CounterCrashed }
 ```
-elm make src/Main.elm src/Pages/Home.elm --output=elm.mjs
+
+- `elm make src/Main.elm --output=main.mjs` writes `main.mjs` plus one
+  content-hashed `main.<hash>.mjs` per spawned worker. Workers can spawn
+  workers; only the workers reachable from `main` are emitted.
+- The worker's `init` receives the spawner's `Channel` for messages upward;
+  the spawner gets a `Worker` handle (send + `kill`). A worker can `stop`
+  itself; a channel can only send, so a worker cannot kill its parent.
+- Subscriptions, tasks, and effect managers work normally inside workers —
+  anything that does not need the DOM. Timers in workers keep running while
+  the page tab is hidden.
+- The spawned program must be a direct reference to a top-level value
+  (`Worker.spawn Counter.main args handlers`); anything else is a compile
+  error, as is compiling a worker-spawning program to `.js`/`.html`.
+- Messages must be function-free (structured clone); violations fail at
+  runtime via `onCrash`. CSS blocks inside worker code land in the same
+  `.css` sidecar as the rest of the program.
+- The `Browser.Worker` module ships in a patched `elm/browser` (kernel
+  code plus an effect manager), consumed as a git dependency. No elm/core
+  or virtual-dom patches needed.
+
+## HTML to string
+
+*[docs](docs/html-to-string.md) · runtime in a
+[patched elm/virtual-dom](docs/patches/elm-virtual-dom-to-string.patch)*
+
+`VirtualDom.toString` renders a node as HTML text, for serving a page from a
+server instead of building it in a browser. The `Int` is the indentation
+width, where `0` adds no whitespace at all — the only setting that cannot
+change what the page means:
+
+```elm
+V.toString 0 (Html.p [] [ Html.text "Hello!" ])
+--> "<p>Hello!</p>"
 ```
 
-```js
-import { Elm } from "./elm.mjs";   // also the default export
-Elm.Main.init({ node: ... });
+Two node kinds go with it, `V.comment` and `V.doctype`, so a whole document
+can be written from Elm. A comment is a real comment node in a browser and
+diffs like any other node; `virtualize` keeps the comments in
+server-rendered markup, so an app taking over a pre-rendered page sees them
+in place. A doctype has no DOM node it could be and renders as an empty
+text node there.
+
+The output is the tree as written: a `script` tag stays a script tag and an
+`on*` attribute keeps its name. Those two rewrites are defenses against
+injecting into *this* document, so they moved from where a node is built to
+`_VirtualDom_render` and `_VirtualDom_applyAttrs`. The browser is defended
+exactly as before, but an attribute name built from user input now reaches
+your server output, where it used to be neutralized for you. Text and
+attribute values are escaped. `Html.Attributes.href`, `src` and `action`
+still refuse a `javascript:` URI, since elm/html checks that where the
+attribute is built.
+
+Event handlers, custom nodes and `innerHTML` cannot be written down and are
+left out. Properties are translated to attributes (`className` to `class`,
+`htmlFor` to `for`, booleans to HTML boolean attributes).
+
+## Code splitting — async imports
+
+*[docs](docs/code-splitting.md) · design notes:
+[docs](docs/code-splitting-design.md) · runtime: patches to
+[elm/core](docs/patches/elm-core-code-splitting.patch) and
+[elm/browser](docs/patches/elm-browser-code-splitting.patch) ·
+requires `--output=something.mjs`*
+
+Everything reachable from `main` is downloaded and evaluated before the
+program starts, including the screen nobody opens. Mark an import `async`
+and that module's code moves into a file of its own, fetched the first
+time something needs it:
+
+```elm
+import async Pages.Report
+
+view : Model -> Html Msg
+view model =
+    case model of
+        Reporting n ->
+            -- the file is fetched here, the first time
+            Pages.Report.open n
+
+        Counting n ->
+            viewCounter n
 ```
 
-- Same `Elm` object shape as upstream, including nested module names and
-  multiple mains in one file. Works in browsers, Node.js, and bundlers.
-- Nothing is assigned to the global scope, and separate `.mjs` bundles do
-  not merge into a shared `Elm` object the way classic bundles do.
-- `--output=foo.js` and `--output=foo.html` are byte-for-byte unchanged.
-- One module per invocation, unless the program asks for more files:
-  `import async` writes one chunk per async-imported module and
-  `Worker.spawn` one bundle per worker program. Both resolve their
-  files against `import.meta.url`, which is why they need this mode.
+`import async M` brings exactly the same names into scope as `import M`,
+at the same types, used at the same call sites — `as` and `exposing` work
+as usual, and `async` remains a legal variable name.
+
+- `elm make src/Main.elm --output=app.mjs` writes `app.mjs` plus one
+  content-hashed `app.<hash>.mjs` per async-imported module.
+- There is nothing to await at the call site, because the value is an
+  ordinary Elm value, not a promise. A reference to a file that has not
+  arrived throws a marker carrying it, and the four places the runtime
+  calls into user code — `init`, `update`, `view`, `subscriptions` —
+  catch it, wait, and call again. That is safe because Elm is pure:
+  nothing the first call produced was kept. While a file is in flight the
+  app pauses rather than showing a partial state, and messages that arrive
+  meanwhile are handled in order once it lands.
+- A chunk takes whatever only it needs, transitively, packages included —
+  a chart library used by one screen leaves the initial download
+  entirely. Code a second chunk also needs is hoisted into the main
+  bundle, so one page never holds two copies of a value. Effect managers
+  and kernel code stay in the main bundle as well, since they are
+  registered when the program starts.
+- A module that is reachable without the async import anyway is already
+  in the main bundle, so the import costs nothing and fetches nothing.
+- `--optimize` works normally: one `elm make` means one field-rename
+  table, so values cross between the files unchanged.
+- Compile errors for a reference that would be forced when the bundle
+  loads (a top-level definition written without arguments), for
+  `import async` in a package, for non-ESM output, and for an async
+  import reached from a worker program.
+- Not a retry point: a chunk first touched inside a `Task` callback
+  raises a JavaScript error naming the problem rather than waiting, since
+  the scheduler has already committed to running it.
+
+
+# New language features
+
+Changes to the syntax or the type system, exploring what Elm could look
+like. These would be hard to do outside the compiler.
 
 ## Comparable newtypes
 
@@ -137,7 +368,6 @@ value satisfy `comparable`, so they work as `Dict` keys, in `Set`s, with
 ```elm
 type Id
     = Id String
-
 
 users : Dict Id User
 ```
@@ -183,7 +413,6 @@ sheet =
 -- inferred:
 -- sheet : Css.Stylesheet { bar : Css.Class } { progress : Css.Percentage }
 
-
 view model =
     let
         c = Css.classes sheet
@@ -214,271 +443,6 @@ view model =
   consumed as a git dependency since it has kernel code. External CSS can
   still be referenced explicitly, e.g.
   `Css.value "var(--brand-color)"` for a page-level design token.
-
-## Native web workers
-
-*[docs](docs/web-workers.md) · runtime: `Browser.Worker` in a
-[patched elm/browser](docs/patches/elm-browser-worker.patch) ·
-requires `--output=something.mjs`*
-
-A worker is an Elm module whose `main` is a `Worker.Program`, compiled into
-its own JavaScript file by the same `elm make` that compiles the app
-spawning it. Because both sides share one compilation (and one `--optimize`
-rename table), messages cross the boundary as ordinary Elm values via
-structured clone — custom types included, no JSON encoders to drift:
-
-```elm
--- Counter.elm
-main : Worker.Program Args ToParent Msg Model
-main =
-    Worker.worker { init = init, update = update, subscriptions = subscriptions }
-
-
--- Main.elm
-Worker.spawn Counter.main
-    { initial = 10 }
-    { onSpawn = GotCounter, onMessage = FromCounter, onCrash = CounterCrashed }
-```
-
-- `elm make src/Main.elm --output=main.mjs` writes `main.mjs` plus one
-  content-hashed `main.<hash>.mjs` per spawned worker. Workers can spawn
-  workers; only the workers reachable from `main` are emitted.
-- The worker's `init` receives the spawner's `Channel` for messages upward;
-  the spawner gets a `Worker` handle (send + `kill`). A worker can `stop`
-  itself; a channel can only send, so a worker cannot kill its parent.
-- Subscriptions, tasks, and effect managers work normally inside workers —
-  anything that does not need the DOM. Timers in workers keep running while
-  the page tab is hidden.
-- The spawned program must be a direct reference to a top-level value
-  (`Worker.spawn Counter.main args handlers`); anything else is a compile
-  error, as is compiling a worker-spawning program to `.js`/`.html`.
-- Messages must be function-free (structured clone); violations fail at
-  runtime via `onCrash`. CSS blocks inside worker code land in the same
-  `.css` sidecar as the rest of the program.
-- The `Browser.Worker` module ships in a patched `elm/browser` (kernel
-  code plus an effect manager), consumed as a git dependency. No elm/core
-  or virtual-dom patches needed.
-
-## Code splitting — async imports
-
-*[docs](docs/code-splitting.md) · design notes:
-[docs](docs/code-splitting-design.md) · runtime: patches to
-[elm/core](docs/patches/elm-core-code-splitting.patch) and
-[elm/browser](docs/patches/elm-browser-code-splitting.patch) ·
-requires `--output=something.mjs`*
-
-Everything reachable from `main` is downloaded and evaluated before the
-program starts, including the screen nobody opens. Mark an import `async`
-and that module's code moves into a file of its own, fetched the first
-time something needs it:
-
-```elm
-import async Pages.Report
-
-
-view : Model -> Html Msg
-view model =
-    case model of
-        Reporting n ->
-            -- the file is fetched here, the first time
-            Pages.Report.open n
-
-        Counting n ->
-            viewCounter n
-```
-
-`import async M` brings exactly the same names into scope as `import M`,
-at the same types, used at the same call sites — `as` and `exposing` work
-as usual, and `async` remains a legal variable name.
-
-- `elm make src/Main.elm --output=app.mjs` writes `app.mjs` plus one
-  content-hashed `app.<hash>.mjs` per async-imported module.
-- There is nothing to await at the call site, because the value is an
-  ordinary Elm value, not a promise. A reference to a file that has not
-  arrived throws a marker carrying it, and the four places the runtime
-  calls into user code — `init`, `update`, `view`, `subscriptions` —
-  catch it, wait, and call again. That is safe because Elm is pure:
-  nothing the first call produced was kept. While a file is in flight the
-  app pauses rather than showing a partial state, and messages that arrive
-  meanwhile are handled in order once it lands.
-- A chunk takes whatever only it needs, transitively, packages included —
-  a chart library used by one screen leaves the initial download
-  entirely. Code a second chunk also needs is hoisted into the main
-  bundle, so one page never holds two copies of a value. Effect managers
-  and kernel code stay in the main bundle as well, since they are
-  registered when the program starts.
-- A module that is reachable without the async import anyway is already
-  in the main bundle, so the import costs nothing and fetches nothing.
-- `--optimize` works normally: one `elm make` means one field-rename
-  table, so values cross between the files unchanged.
-- Compile errors for a reference that would be forced when the bundle
-  loads (a top-level definition written without arguments), for
-  `import async` in a package, for non-ESM output, and for an async
-  import reached from a worker program.
-- Not a retry point: a chunk first touched inside a `Task` callback
-  raises a JavaScript error naming the problem rather than waiting, since
-  the scheduler has already committed to running it.
-
-## Compiled pieces in elm reactor
-
-*[docs](docs/reactor.md)*
-
-The reactor serves a program in pieces, at the names `elm make` would have
-written, so a hand-written HTML page can pull in exactly what it needs:
-
-```html
-<link rel="stylesheet" href="/src/Main.elm.css">
-<script src="/src/Main.elm.js"></script>
-<script type="module" src="/src/Workers/Main.elm.mjs"></script>
-```
-
-- `Main.elm.js`, `Main.elm.css` and `Main.elm.mjs` compile `Main.elm` on
-  request. Your page keeps its own `<meta viewport>`, ports and flags,
-  which the reactor's generated page cannot offer.
-- Workers work in the reactor, from the dashboard page too: it loads a
-  worker-spawning program as a module. Each spawn points at the worker
-  module's own URL — `Counter.elm.mjs` compiles `Counter.elm` as a worker
-  program — so there are no hashed sibling files to keep in sync, and
-  compiled responses are sent `Cache-Control: no-store`.
-- A worker program can be compiled on its own:
-  `elm make src/Counter.elm --output=counter.mjs`.
-- Async imports work in the reactor too, and a program that has them is
-  loaded as a module for the same reason a worker-spawning one is. A
-  chunk is not a program, so it cannot be served from its own source
-  file; it comes from the root program's endpoint instead, as
-  `/src/Main.elm.mjs?chunk=Pages.Report`.
-- A failed build served as a script is a 500 whose body logs the compiler's
-  report with `console.error`.
-
-## Structural variants
-
-*[docs](docs/structural-variants.md) · [type system](docs/types-design.md)*
-
-Anonymous, row-polymorphic sum types — the dual of extensible records. Tags
-are declared once and then combined structurally, so functions can accept
-exactly the tags they handle without a shared custom type:
-
-```elm
-type tag Loading
-type tag Success value
-
-state : Int -> [ r | Loading, Success Int ]
-state n =
-    if n > 0 then Success n else Loading
-
-describe : [ Loading, Success Int ] -> String
-describe s =
-    case s of
-        Loading -> "loading"
-        Success n -> "got " ++ String.fromInt n
-```
-
-- `[ A, B Int ]` is a closed row (exactly these tags); `[ r | A, B Int ]`
-  is open (at least these tags), mirroring record extension syntax.
-- Exhaustiveness is part of type checking: a `case` without a `_` branch
-  closes the row, so an unhandled tag is a type error naming the tag.
-- Row subtraction: a final catch-all variable is bound at the scrutinee row
-  minus the (irrefutably) matched tags, so
-  `removeLoading : r -> [ r | Loading ] -> r` works — and instantiating `r`
-  derives row-changing functions like
-  `[ f | Failure String, Loading ] -> [ f | Failure String ]`.
-- Widening: `widen e` (a `Basics` function in the
-  [patched elm/core](docs/patches/elm-core-widen.patch), identity at
-  runtime) uses a variant at any row that includes its own — same tags with
-  the same payloads, and a closed or identical remainder. A closed model
-  field can flow into a consumer handling more tags, and a narrowed
-  catch-all can be passed through into a wider result row. Checked before
-  the enclosing definition generalizes; erased before code generation.
-- Tags are canonical (module + name): same-spelled tags from different
-  modules are distinct and can coexist in one union. Export and import
-  them like constructors.
-- Restrictions: tag patterns cannot sit inside tuple/list/constructor
-  patterns; recursion needs a nominal wrapper type; no ports; not
-  comparable; not shown in docs.json.
-- Tag patterns work inside a constructor argument whose type is a type
-  variable, so `Err (NotFound path)` matches straight out of a `Result`, and
-  exhaustiveness still holds through the nesting. Tuples, lists, and
-  constructor arguments of a fixed type stay rejected: there is no row to
-  close there, so an unhandled tag would reach no branch at run time.
-- Runtime: `{ $: "pkg:Module.Tag", a = ... }` in dev and prod; `==` works.
-
-## Back-lambdas
-
-*[docs](docs/back-lambdas.md)*
-
-A lambda written with the arrow reversed, `\x <- ...`, binds its argument
-for the lines that *follow* it, giving callback-heavy code a flat,
-do-notation-like shape:
-
-```elm
-userDecoder : Decoder User
-userDecoder =
-    \id <- await (D.field "id" D.string)
-    \firstname <- await (D.field "firstname" D.string)
-    \lastname <- await (D.field "lastname" D.string)
-
-    D.succeed { id = id, firstname = firstname, lastname = lastname }
-```
-
-- Pure syntax sugar: `\pat <- source` followed by `rest` is exactly
-  `source (\pat -> rest)`. The compiler sees ordinary lambdas, so types,
-  generated code, and performance are identical to writing them out.
-- The continuation is the **last** argument, so `source` must take its
-  callback last — define a flipped `await`/`with` helper for callback-first
-  APIs like `Decode.andThen`.
-- The source expression ends at the end of the line unless later lines are
-  indented past the `\`; that layout rule is what keeps the continuation
-  from being read as another argument.
-- Several patterns bind a multi-argument callback, and any lambda pattern
-  works, including destructuring.
-- `\x <- ...` was previously a syntax error, so no existing program changes
-  meaning — but elm-format cannot format files that use it.
-- The patched elm/core adds `Task.await` (`andThen` with the task first) so
-  task chains do not each need their own flipped helper.
-
-## Command line scripts
-
-*[docs](docs/system-scripts.md) · runtime in the `webbhuset/system` package*
-
-A module whose `main` has this type is a program that runs on the command
-line, and the compiled file runs itself — it gets a `#!/usr/bin/env node`
-line and the executable bit:
-
-```elm
-main : System.Process -> Task String Int
-main process =
-    System.stdout ("hello " ++ String.join " " process.argv ++ "\n")
-        |> Task.map (\_ -> 0)
-```
-
-```
-$ elm make src/Hello.elm --output=hello.js
-$ ./hello.js world
-hello world
-```
-
-- The type is the contract: succeeding with an `Int` exits with that
-  status, failing with a `String` prints it to stderr and exits 1. No
-  separate exit API is needed for the normal path.
-- `Process` carries `argv` (without the node binary and script path), an
-  `env` dict, and `platform`. Things that change while the program runs,
-  like the working directory, are tasks instead of fields.
-- `System` has stdout/stderr/stdin, `isTerminal`, `cwd`/`chdir` and
-  `exit`; `System.File` has the usual file and directory operations;
-  `System.Path` joins and takes apart paths the way the platform expects;
-  and `System.Child` runs other programs, capturing their output or
-  letting it through to the terminal.
-- Failures are structural variant tags, so each operation says what it can
-  actually fail with, chaining unions the rows, and handling one tag with
-  a catch-all removes it from what the caller sees. An error code with no
-  tag crashes, naming the code and asking for a report, so gaps in the
-  vocabulary get found rather than hidden behind a catch-all.
-- A script must be the only program compiled, `--output` must be `.js` or
-  `.mjs`, and the DEV mode console warning is suppressed since a program's
-  stderr is part of its contract.
-- Long running programs that must react to events (watchers, servers,
-  signals) want a message loop instead: write those as a `Platform.worker`
-  with ports. The `System.*` tasks work there unchanged.
 
 ## Overloading by signature
 
@@ -544,49 +508,101 @@ Ord.compare (Card a) (Card b) =
   exact line to add. Clauses are not inferred, only suggested, and a `let`
   definition cannot have them yet. `comparable` and friends are untouched.
 
-## HTML to string
+## Back-lambdas
 
-*[docs](docs/html-to-string.md) · runtime in a
-[patched elm/virtual-dom](docs/patches/elm-virtual-dom-to-string.patch)*
+*[docs](docs/back-lambdas.md)*
 
-`VirtualDom.toString` renders a node as HTML text, for serving a page from a
-server instead of building it in a browser. The `Int` is the indentation
-width, where `0` adds no whitespace at all — the only setting that cannot
-change what the page means:
+A lambda written with the arrow reversed, `\x <- ...`, binds its argument
+for the lines that *follow* it, giving callback-heavy code a flat,
+do-notation-like shape:
 
 ```elm
-V.toString 0 (Html.p [] [ Html.text "Hello!" ])
---> "<p>Hello!</p>"
+userDecoder : Decoder User
+userDecoder =
+    \id <- await (D.field "id" D.string)
+    \firstname <- await (D.field "firstname" D.string)
+    \lastname <- await (D.field "lastname" D.string)
+
+    D.succeed { id = id, firstname = firstname, lastname = lastname }
 ```
 
-Two node kinds go with it, `V.comment` and `V.doctype`, so a whole document
-can be written from Elm. A comment is a real comment node in a browser and
-diffs like any other node; `virtualize` keeps the comments in
-server-rendered markup, so an app taking over a pre-rendered page sees them
-in place. A doctype has no DOM node it could be and renders as an empty
-text node there.
+- Pure syntax sugar: `\pat <- source` followed by `rest` is exactly
+  `source (\pat -> rest)`. The compiler sees ordinary lambdas, so types,
+  generated code, and performance are identical to writing them out.
+- The continuation is the **last** argument, so `source` must take its
+  callback last — define a flipped `await`/`with` helper for callback-first
+  APIs like `Decode.andThen`.
+- The source expression ends at the end of the line unless later lines are
+  indented past the `\`; that layout rule is what keeps the continuation
+  from being read as another argument.
+- Several patterns bind a multi-argument callback, and any lambda pattern
+  works, including destructuring.
+- `\x <- ...` was previously a syntax error, so no existing program changes
+  meaning — but elm-format cannot format files that use it.
+- The patched elm/core adds `Task.await` (`andThen` with the task first) so
+  task chains do not each need their own flipped helper.
 
-The output is the tree as written: a `script` tag stays a script tag and an
-`on*` attribute keeps its name. Those two rewrites are defenses against
-injecting into *this* document, so they moved from where a node is built to
-`_VirtualDom_render` and `_VirtualDom_applyAttrs`. The browser is defended
-exactly as before, but an attribute name built from user input now reaches
-your server output, where it used to be neutralized for you. Text and
-attribute values are escaped. `Html.Attributes.href`, `src` and `action`
-still refuse a `javascript:` URI, since elm/html checks that where the
-attribute is built.
+## Structural variants
 
-Event handlers, custom nodes and `innerHTML` cannot be written down and are
-left out. Properties are translated to attributes (`className` to `class`,
-`htmlFor` to `for`, booleans to HTML boolean attributes).
+*[docs](docs/structural-variants.md) · [type system](docs/types-design.md)*
 
-## Compatibility notes
+Anonymous, row-polymorphic sum types — the dual of extensible records. Tags
+are declared once and then combined structurally, so functions can accept
+exactly the tags they handle without a shared custom type:
+
+```elm
+type tag Loading
+type tag Success value
+
+state : Int -> [ r | Loading, Success Int ]
+state n =
+    if n > 0 then Success n else Loading
+
+describe : [ Loading, Success Int ] -> String
+describe s =
+    case s of
+        Loading -> "loading"
+        Success n -> "got " ++ String.fromInt n
+```
+
+- `[ A, B Int ]` is a closed row (exactly these tags); `[ r | A, B Int ]`
+  is open (at least these tags), mirroring record extension syntax.
+- Exhaustiveness is part of type checking: a `case` without a `_` branch
+  closes the row, so an unhandled tag is a type error naming the tag.
+- Row subtraction: a final catch-all variable is bound at the scrutinee row
+  minus the (irrefutably) matched tags, so
+  `removeLoading : r -> [ r | Loading ] -> r` works — and instantiating `r`
+  derives row-changing functions like
+  `[ f | Failure String, Loading ] -> [ f | Failure String ]`.
+- Widening: `widen e` (a `Basics` function in the
+  [patched elm/core](docs/patches/elm-core-widen.patch), identity at
+  runtime) uses a variant at any row that includes its own — same tags with
+  the same payloads, and a closed or identical remainder. A closed model
+  field can flow into a consumer handling more tags, and a narrowed
+  catch-all can be passed through into a wider result row. Checked before
+  the enclosing definition generalizes; erased before code generation.
+- Tags are canonical (module + name): same-spelled tags from different
+  modules are distinct and can coexist in one union. Export and import
+  them like constructors.
+- Restrictions: tag patterns cannot sit inside tuple/list/constructor
+  patterns; recursion needs a nominal wrapper type; no ports; not
+  comparable; not shown in docs.json.
+- Tag patterns work inside a constructor argument whose type is a type
+  variable, so `Err (NotFound path)` matches straight out of a `Result`, and
+  exhaustiveness still holds through the nesting. Tuples, lists, and
+  constructor arguments of a fixed type stay rejected: there is no row to
+  close there, so an unhandled tag would reach no branch at run time.
+- Runtime: `{ $: "pkg:Module.Tag", a = ... }` in dev and prod; `==` works.
+
+
+# Compatibility notes
 
 - **elm.json**: the only addition is the optional `"git-dependencies"`
   field, which official parsers ignore.
 - **elm/core**: task ports, comparable newtypes, and `Task.await` need a
-  patched elm/core, `Css.vars` needs a patched elm/virtual-dom, and web workers
-  need a patched elm/browser (all patches are in
+  patched elm/core, `Css.vars` needs a patched elm/virtual-dom, web workers
+  need a patched elm/browser, and async imports need both elm/core and
+  elm/browser (all patches are in
   [docs/patches/](docs/patches/)), consumed through git dependencies
   under unpublished version numbers. The elm/core patches
   are additive; programs not using the features behave identically. The
@@ -598,10 +614,13 @@ left out. Properties are translated to attributes (`className` to `class`,
   package artifacts automatically. Do not alternate this fork and the
   official compiler on the same `ELM_HOME` — they will repeatedly
   invalidate each other's caches.
-- **Object files**: task ports add a node kind, CSS blocks and web workers
-  each add an expression kind, and command line scripts add a main kind to
-  the `.elmo` format; stale `elm-stuff` from other compilers is detected
-  and rebuilt.
+- **Object files**: task ports add a node kind, CSS blocks, web workers and
+  async imports each add an expression kind, and command line scripts add a
+  main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
+  detected and rebuilt. Moving between *builds of this fork* that changed
+  the format is noisier: the package artifacts in `ELM_HOME` are reported
+  as corrupt before being rebuilt. `find ~/.elm -name artifacts.dat -delete`
+  once, after upgrading, avoids the warning.
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.
