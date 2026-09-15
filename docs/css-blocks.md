@@ -177,22 +177,20 @@ contains kernel code and is therefore consumed as a
     "direct": { "webbhuset/css": "1.0.0", ... }
 },
 "git-dependencies": {
-    "webbhuset/css": "git@gitlab.webbhuset.com:webbhuset/internal/frontend/elm-css.git"
+    "webbhuset/css": "git@github.com:webbhuset/elm-css.git"
 }
 ```
 
 `Css.vars` sets custom properties as element styles, which the stock
 `elm/virtual-dom` cannot do (it assigns `element.style[key] = value`;
-browsers require `style.setProperty` for `--custom` properties). Apply
-[patches/elm-virtual-dom-custom-properties.patch](patches/elm-virtual-dom-custom-properties.patch)
-to a fork of elm/virtual-dom, tag it with a [fork
-version](git-dependencies.md#numbering-a-fork-of-a-published-package)
-(`1.100.502` for the fork this compiler expects), and consume it as a git
-dependency, like the elm/core patches for task ports. Everything except
-`Css.vars` works with the stock virtual-dom. Note that `setProperty` only
-accepts hyphenated names, so camelCase keys in `Html.Attributes.style`
-(`style "backgroundColor" ...`, already against elm/html convention) stop
-working with the patch.
+browsers require `style.setProperty` for `--custom` properties). The forked
+elm/virtual-dom `1.100.502` carries that change
+([the patch](patches/elm-virtual-dom-custom-properties.patch)), and
+`elm init` already pins it, so a project started that way needs nothing
+further. Everything except `Css.vars` works with the stock virtual-dom.
+Note that `setProperty` only accepts hyphenated names, so camelCase keys in
+`Html.Attributes.style` (`style "backgroundColor" ...`, already against
+elm/html convention) stop working with the fork.
 
 Design rationale, the checked/unchecked boundary, and open extensions are
 in [css-blocks-design.md](css-blocks-design.md).
