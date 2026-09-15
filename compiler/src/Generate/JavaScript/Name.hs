@@ -9,6 +9,7 @@ module Generate.JavaScript.Name
   , fromLocal
   , fromGlobal
   , fromCycle
+  , fromChunk
   , fromKernel
   , makeF
   , makeA
@@ -76,6 +77,13 @@ fromGlobal home name =
 fromCycle :: ModuleName.Canonical -> N.Name -> Name
 fromCycle home name =
   Name $ homeToBuilder home <> "$cyclic$" <> N.toBuilder name
+
+
+-- The main bundle's handle on one code-splitting chunk, named after the
+-- module that `import async` pointed at: `_Chunk$author$project$Big`.
+fromChunk :: ModuleName.Canonical -> Name
+fromChunk home =
+  Name ("_Chunk" <> homeToBuilder home)
 
 
 fromKernel :: Module.Kernel -> N.Name -> Name

@@ -77,6 +77,7 @@ data Error
   | NoPorts A.Region
   | NoPortsInPackage (A.Located N.Name)
   | NoPortModulesInPackage A.Region
+  | NoAsyncImportsInPackage A.Region
   | NoEffectsOutsideKernel A.Region
   | ParseError Module
 
@@ -686,6 +687,27 @@ toReport source err =
                   ,"should","be","able","to","continue."
                   ]
               , noteForPortsInPackage
+              ]
+          )
+
+    NoAsyncImportsInPackage region ->
+      Report.Report "PACKAGES CANNOT SPLIT CODE" region [] $
+        Code.toSnippet source region Nothing
+          (
+            D.reflow $
+              "Packages cannot use `import async`, so I am getting stuck here:"
+          ,
+            D.stack
+              [ D.fillSep $
+                  ["Remove","the",D.cyan "async","keyword","and","I"
+                  ,"should","be","able","to","continue."
+                  ]
+              , D.reflow $
+                  "An async import says the module's code should be fetched in a\
+                  \ file of its own, which decides how the whole program is split\
+                  \ up. That is the application's decision to make: only it knows\
+                  \ which screens matter, and only it is compiled in one piece.\
+                  \ Expose the values normally and let the application choose."
               ]
           )
 

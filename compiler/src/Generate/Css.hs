@@ -295,6 +295,7 @@ addExpr expression blocks =
     Opt.Triple a b c -> addExpr a (addExpr b (addExpr c blocks))
     Opt.Shader _ _ _ -> blocks
     Opt.WorkerRef _ -> blocks
+    Opt.AsyncRef _ -> blocks
 
 
 addDecider :: Opt.Decider Opt.Choice -> [(ModuleName.Canonical, Css.Content)] -> [(ModuleName.Canonical, Css.Content)]

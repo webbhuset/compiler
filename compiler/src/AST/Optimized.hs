@@ -82,6 +82,10 @@ data Expr
   | Shader Shader.Source (Set.Set N.Name) (Set.Set N.Name)
   | Css ModuleName.Canonical Css.Content
   | WorkerRef Global
+  | AsyncRef Global
+    -- a reference into a module imported with `import async`: the value is
+    -- read out of a chunk that is fetched on first use, and no dependency
+    -- is registered, so the chunk's code stays out of this bundle
 
 
 data Global = Global ModuleName.Canonical N.Name
@@ -301,6 +305,7 @@ eExpr expr =
     Shader s a u     -> E.u8# 27#Word8 <> Shader.eSource s <> E.set32 N.encode a <> E.set32 N.encode u
     Css h c          -> E.u8# 28#Word8 <> ModuleName.eCanonical h <> Css.eContent c
     WorkerRef g      -> E.u8# 29#Word8 <> eGlobal g
+    AsyncRef g       -> E.u8# 30#Word8 <> eGlobal g
 
 
 dExpr :: D.Decoder Expr
@@ -337,6 +342,7 @@ dExpr =
         27 -> liftM3 Shader Shader.dSource (D.set32 N.decode) (D.set32 N.decode)
         28 -> liftM2 Css ModuleName.dCanonical Css.dContent
         29 -> liftM  WorkerRef dGlobal
+        30 -> liftM  AsyncRef dGlobal
         _  -> D.expecting "Expr"
 
 

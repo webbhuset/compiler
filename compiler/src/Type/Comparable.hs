@@ -76,7 +76,7 @@ data Info =
 
 
 compute :: Map.Map Module.Name I.Interface -> Can.Module -> Info
-compute ifaces (Can.Module home _ _ _ unions _ _ _ _ _) =
+compute ifaces (Can.Module home _ _ _ unions _ _ _ _ _ _) =
   let
     imported =
       Map.unions (map I._comparables (Map.elems ifaces))

@@ -1,0 +1,93 @@
+--- a/src/Elm/Kernel/Platform.js
++++ b/src/Elm/Kernel/Platform.js
+@@ -38,19 +38,84 @@
+ 	var result = A2(__Json_run, flagDecoder, __Json_wrap(args ? args['flags'] : undefined));
+ 	__Result_isOk(result) || __Debug_crash(2 /**__DEBUG/, __Json_errorToString(result.a) /**/);
+ 	var managers = {};
+-	var initPair = init(result.a);
+-	var model = initPair.a;
+-	var stepper = stepperBuilder(sendToApp, model);
++	var model;
++	var stepper;
++	var started = false;
++	var queue = [];
++
+ 	var ports = _Platform_setupEffects(managers, sendToApp);
+ 
++	// CODE SPLITTING
++	//
++	// A value from a module imported with `import async` lives in a file
++	// that may not be here yet; reading one throws a marker carrying the
++	// promise for it. Init and update are pure, and nothing they produced
++	// has been committed when the marker arrives -- no model assigned, no
++	// effects enqueued -- so the work is put back on the queue and done
++	// again once the file lands. Messages that arrive meanwhile queue
++	// behind it, which is what keeps the model's history in order.
++
++	function suspendOn(e)
++	{
++		if (!e || !e.elmChunk) { return false; }
++		started = false;
++		e.elmChunk.then(drain, drain);
++		return true;
++	}
++
++	function drain()
++	{
++		if (!stepper) { start(); }
++		if (!started) { return; }
++
++		var work = queue;
++		queue = [];
++		for (var i = 0; i < work.length; i++)
++		{
++			sendToApp(work[i][0], work[i][1]);
++			if (!started) { queue = queue.concat(work.slice(i + 1)); return; }
++		}
++	}
++
++	function start()
++	{
++		var initPair, subs;
++		try
++		{
++			initPair = init(result.a);
++			subs = subscriptions(initPair.a);
++		}
++		catch (e)
++		{
++			if (suspendOn(e)) { return; }
++			throw e;
++		}
++		model = initPair.a;
++		stepper = stepperBuilder(sendToApp, model);
++		started = true;
++		_Platform_enqueueEffects(managers, initPair.b, subs);
++	}
++
+ 	function sendToApp(msg, viewMetadata)
+ 	{
+-		var pair = A2(update, msg, model);
++		if (!started) { queue.push([msg, viewMetadata]); return; }
++
++		var pair, subs;
++		try
++		{
++			pair = A2(update, msg, model);
++			subs = subscriptions(pair.a);
++		}
++		catch (e)
++		{
++			if (suspendOn(e)) { queue.push([msg, viewMetadata]); return; }
++			throw e;
++		}
+ 		stepper(model = pair.a, viewMetadata);
+-		_Platform_enqueueEffects(managers, pair.b, subscriptions(model));
++		_Platform_enqueueEffects(managers, pair.b, subs);
+ 	}
+ 
+-	_Platform_enqueueEffects(managers, initPair.b, subscriptions(model));
++	start();
+ 
+ 	return ports ? { ports: ports } : {};
+ }

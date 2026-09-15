@@ -34,7 +34,7 @@ defaults =
 
 import_ :: Module.Name -> Maybe Module.Prefix -> Src.Exposing -> Src.Import
 import_ name maybeAlias exposing =
-  Src.Import (A.At A.zero name) maybeAlias exposing
+  Src.Import (A.At A.zero name) maybeAlias exposing Src.Eager
 
 
 

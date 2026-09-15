@@ -153,7 +153,7 @@ data Context
 
 
 check :: Can.Module -> Either (NE.List Error) ()
-check (Can.Module _ _ _ decls _ _ _ _ _ _) =
+check (Can.Module _ _ _ decls _ _ _ _ _ _ _) =
   case checkDecls decls [] of
     []   -> Right ()
     e:es -> Left (NE.List e es)

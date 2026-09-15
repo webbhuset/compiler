@@ -65,6 +65,7 @@ So it is clear why the data is kept around.
 
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import GHC.Word (Word16)
 
 import qualified Bytes.Decode as D
@@ -289,6 +290,10 @@ data Module =
     , _overloads :: Overloads
     , _binops  :: Map.Map Op.Name Binop
     , _effects :: Effects
+    , _asyncs  :: Set.Set ModuleName.Canonical
+      -- the modules this one imported with `import async`, so a reference
+      -- into one can be compiled to a chunk lookup instead of a direct
+      -- one (see docs/code-splitting-design.md)
     }
 
 

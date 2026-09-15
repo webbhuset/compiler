@@ -33,11 +33,14 @@ import qualified Elm.Package as Pkg
 -- is reported as an error.
 
 
-plan :: Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Either [String] [Opt.Global]
-plan (Opt.GlobalGraph nodes _) mains =
+-- The extra roots are the values reached through `import async`: their code
+-- lives in a chunk rather than the main bundle, but a `Worker.spawn` in
+-- there still needs a worker bundle of its own.
+plan :: Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> [Opt.Global] -> Either [String] [Opt.Global]
+plan (Opt.GlobalGraph nodes _) mains extraRoots =
   let
     mainRoots =
-      Map.foldrWithKey (\home _ gs -> Opt.Global home N.main : gs) [] mains
+      Map.foldrWithKey (\home _ gs -> Opt.Global home N.main : gs) [] mains ++ extraRoots
 
     mainRefs =
       Set.toList (refsFrom nodes (mainDecoderRefs mains) mainRoots)
@@ -189,6 +192,7 @@ addExpr :: Opt.Expr -> Set.Set Opt.Global -> Set.Set Opt.Global
 addExpr expression refs =
   case expression of
     Opt.WorkerRef global -> Set.insert global refs
+    Opt.AsyncRef _ -> refs
 
     Opt.Bool _ -> refs
     Opt.Chr _ -> refs
