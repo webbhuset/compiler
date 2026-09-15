@@ -134,12 +134,12 @@ forkDefaults :: Map.Map Pkg.Name (V.Version, String)
 forkDefaults =
   Map.fromList
     [ ( Pkg.core
-      , ( V.Version 1 100 503
+      , ( V.Version 1 100 504
         , "git@github.com:webbhuset/core.git"
         )
       )
     , ( Pkg.browser
-      , ( V.Version 1 100 201
+      , ( V.Version 1 100 202
         , "git@github.com:webbhuset/elm-browser.git"
         )
       )

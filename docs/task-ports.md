@@ -78,7 +78,7 @@ dependency](git-dependencies.md):
 
 ```json
 "dependencies": {
-    "direct": { "elm/core": "1.100.503", ... }
+    "direct": { "elm/core": "1.100.504", ... }
 },
 "git-dependencies": {
     "elm/core": "git@github.com:webbhuset/core.git"
