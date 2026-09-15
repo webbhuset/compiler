@@ -20,6 +20,7 @@ tooling (elm-format, elm-test, editors).
   - [Task ports](#task-ports)
   - [Native web workers](#native-web-workers)
   - [HTML to string](#html-to-string)
+  - [HTTP over fetch](#http-over-fetch)
   - [Code splitting — async imports](#code-splitting--async-imports)
 - **[New language features](#new-language-features)**
   - [Comparable newtypes](#comparable-newtypes)
@@ -350,6 +351,44 @@ Event handlers, custom nodes and `innerHTML` cannot be written down and are
 left out. Properties are translated to attributes (`className` to `class`,
 `htmlFor` to `for`, booleans to HTML boolean attributes).
 
+## HTTP over fetch
+
+*fork: `webbhuset/elm-http` 2.100.1, opt-in through
+[git dependencies](docs/git-dependencies.md)*
+
+`elm/http` is built on `XMLHttpRequest`, which exists only on a browser's
+main thread. That kept `Http` out of exactly the places this fork otherwise
+opens up — command line scripts, web workers, service workers. The forked
+package does the same job with `fetch`, so the module works unchanged in
+all of them:
+
+```json
+"dependencies": {
+    "direct": { "elm/http": "2.100.1", ... }
+},
+"git-dependencies": {
+    "elm/http": "git@github.com:webbhuset/elm-http.git"
+}
+```
+
+- The public API is untouched. `Http.get`, `Http.request`, `Http.track`,
+  `expectString`/`expectBytes`/`expectJson`, `riskyRequest`, timeouts and
+  cancellation all behave as before, and the four `Http.Error` cases still
+  mean what they meant.
+- An `AbortController` backs cancellation, and a flag set before the abort
+  keeps `Timeout` distinguishable from a cancel — `fetch` reports both the
+  same way, as it does a bad URL and a dead network, so a bad URL is caught
+  while the `Request` is constructed instead.
+- Download progress reads the response stream; upload progress needs a
+  request stream, which Firefox and Safari do not have. Uploads still work
+  there, but `Http.Sending` never fires.
+- Two deliberate differences from XHR: a body's declared mime now
+  overwrites an explicit `Content-Type` header rather than being combined
+  with it, and a body on `GET` or `HEAD` is dropped rather than throwing,
+  so code that worked before does not become a `BadUrl`.
+- Not pinned by `elm init`, since not every project wants HTTP. Name it in
+  `"git-dependencies"` to opt in.
+
 ## Code splitting — async imports
 
 *[docs](docs/code-splitting.md) · design notes:
@@ -660,8 +699,9 @@ describe s =
   field, which official parsers ignore.
 - **elm/core**: task ports, comparable newtypes, and `Task.await` need a
   patched elm/core, `Css.vars` needs a patched elm/virtual-dom, web workers
-  need a patched elm/browser, and async imports need both elm/core and
-  elm/browser (all patches are in
+  need a patched elm/browser, async imports need both elm/core and
+  elm/browser, and `Http` off the browser main thread needs a patched
+  elm/http (all patches are in
   [docs/patches/](docs/patches/)), consumed through git dependencies
   under unpublished version numbers. The elm/core patches
   are additive; programs not using the features behave identically. The

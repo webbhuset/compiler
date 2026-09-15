@@ -112,14 +112,19 @@ satisfy that. Everything below the major is free: for a package listed in
 outright, so fork numbers are never compared with published ones. Version
 fields are 16-bit, so the scheme holds until upstream reaches patch 655.
 
-The forks this compiler expects (the versions `elm init` pins). Each lives
-on a `wh-fork` branch in its repository, tagged per revision:
+The forks this compiler expects. Each lives on a `wh-fork` branch in its
+repository, tagged per revision:
 
 | package | upstream | fork | repository | patches |
 | --- | --- | --- | --- | --- |
 | elm/core | 1.0.5 | 1.100.504 | `webbhuset/core` | comparable newtypes, task ports, `Task.await`, `widen`, code splitting |
 | elm/browser | 1.0.2 | 1.100.202 | `webbhuset/elm-browser` | `Browser.Worker`, code splitting |
 | elm/virtual-dom | 1.0.5 | 1.100.502 | `webbhuset/virtual-dom` | custom properties, HTML to string |
+| elm/http | 2.0.0 | 2.100.1 | `webbhuset/elm-http` | `fetch` instead of XMLHttpRequest |
+
+`elm init` pins the first three, since every project gets them. elm/http is
+opt-in: `elm install elm/http` takes the registry version, so name the fork
+in `"git-dependencies"` and set the version yourself if you want it.
 
 ## Kernel code in git dependencies
 
