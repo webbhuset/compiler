@@ -32,6 +32,9 @@ Differences from `.js` output:
   module stands alone.
 - `--output=foo.js` and `--output=foo.html` are unchanged, byte-for-byte.
 
-The compiler always produces a single module, even with multiple inputs;
-shared-code splitting is left to bundlers, which handle a single ESM entry
-point well.
+The compiler produces a single module per invocation, even with multiple
+inputs, unless the program asks for more files: `import async` writes one
+chunk per async-imported module (`code-splitting.md`) and `Worker.spawn`
+writes one bundle per worker program (`web-workers.md`). Both resolve
+their files relative to `import.meta.url`, which is why they need this
+output mode.

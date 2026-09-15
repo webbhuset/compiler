@@ -18,6 +18,7 @@ import qualified Elm.Interface as I
 import qualified Elm.ModuleName as ModuleName
 import qualified Elm.Package as Pkg
 import qualified Nitpick.PatternMatches as PatternMatches
+import qualified Nitpick.AsyncImports as AsyncImports
 import qualified Nitpick.Workers as Workers
 import qualified Optimize.Module as Optimize
 import qualified Reporting.Error as E
@@ -70,7 +71,7 @@ canonicalize pkg ifaces modul =
 
 
 typeCheck :: Comparable.Info -> Src.Module -> Can.Module -> Either E.Error (Map.Map Name.Name Can.Annotation)
-typeCheck comparables modul canonical@(Can.Module _ _ _ _ _ _ _ overloads _ _) =
+typeCheck comparables modul canonical@(Can.Module _ _ _ _ _ _ _ overloads _ _ _) =
   case unsafePerformIO (Comparable.register comparables >> (Type.run overloads =<< Type.constrain canonical)) of
     Right annotations ->
       Right annotations
@@ -82,7 +83,7 @@ typeCheck comparables modul canonical@(Can.Module _ _ _ _ _ _ _ overloads _ _) =
 -- Runs after typeCheck, because which definition each overloaded use site
 -- means is decided by the type the solver gave it.
 resolveOverloads :: Src.Module -> Can.Module -> Either E.Error ()
-resolveOverloads modul (Can.Module home _ _ _ _ _ _ overloads _ _) =
+resolveOverloads modul (Can.Module home _ _ _ _ _ _ overloads _ _ _) =
   case unsafePerformIO (Overload.resolveModule home overloads) of
     [] ->
       Right ()
@@ -99,6 +100,9 @@ nitpick canonical =
       case Workers.check canonical of
         Right () -> Right ()
         Left errors -> Left (E.BadWorkers errors)
+      case AsyncImports.check canonical of
+        Right () -> Right ()
+        Left errors -> Left (E.BadAsyncImports errors)
 
 
 optimize :: Src.Module -> Map.Map Name.Name Can.Annotation -> Can.Module -> Either E.Error Opt.LocalGraph

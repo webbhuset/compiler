@@ -302,7 +302,7 @@ attemptImport lines =
   in
   do  result <- P.fromByteString parser (\_ -> ()) src
       case result of
-        Right (Src.Import (A.At _ name) _ _) -> return $ Done (Import name src)
+        Right (Src.Import (A.At _ name) _ _ _) -> return $ Done (Import name src)
         Left ()                              -> ifFail lines (Import "ERR" src)
 
 

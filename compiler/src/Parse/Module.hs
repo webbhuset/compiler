@@ -89,6 +89,26 @@ chompModule projectType =
 
 checkModule :: ProjectType -> Module -> Either E.Error Src.Module
 checkModule projectType (Module maybeHeader imports infixes decls) =
+  do  checkAsyncImports projectType imports
+      checkModuleHelp projectType maybeHeader imports infixes decls
+
+
+-- `import async` decides how the program that uses this module is split into
+-- files, which is not a package's call to make.
+checkAsyncImports :: ProjectType -> [Src.Import] -> Either E.Error ()
+checkAsyncImports projectType imports =
+  case projectType of
+    Application ->
+      Right ()
+
+    Package _ ->
+      case [ region | Src.Import (A.At region _) _ _ Src.Async <- imports ] of
+        [] -> Right ()
+        region : _ -> Left (E.NoAsyncImportsInPackage region)
+
+
+checkModuleHelp :: ProjectType -> Maybe Header -> [Src.Import] -> [A.Located Src.Infix] -> [Decl.Decl] -> Either E.Error Src.Module
+checkModuleHelp projectType maybeHeader imports infixes decls =
   let
     (values, unions, aliases, tags, overloads, ports) = categorizeDecls [] [] [] [] [] [] decls
   in
@@ -391,21 +411,28 @@ chompImport :: Parser E.Module Src.Import
 chompImport =
   do  Keyword.import_ E.ImportStart
       Space.chompAndCheckIndent E.ModuleSpace E.ImportIndentName
+      loading <-
+        oneOfWithFallback
+          [ do  Keyword.async_ E.ImportName
+                Space.chompAndCheckIndent E.ModuleSpace E.ImportIndentName
+                return Src.Async
+          ]
+          Src.Eager
       name@(A.At (A.Region _ end) _) <- addLocation (Var.moduleName E.ImportName)
       Space.chomp E.ModuleSpace
       oneOf E.ImportEnd
         [ do  Space.checkFreshLine E.ImportEnd
-              return $ Src.Import name Nothing (Src.Explicit [])
+              return $ Src.Import name Nothing (Src.Explicit []) loading
         , do  Space.checkIndent (A.Position end) E.ImportEnd
               oneOf E.ImportAs
-                [ chompAs name
-                , chompExposing name Nothing
+                [ chompAs loading name
+                , chompExposing loading name Nothing
                 ]
         ]
 
 
-chompAs :: A.Located Name.Name -> Parser E.Module Src.Import
-chompAs name =
+chompAs :: Src.Loading -> A.Located Name.Name -> Parser E.Module Src.Import
+chompAs loading name =
   do  Keyword.as_ E.ImportAs
       Space.chompAndCheckIndent E.ModuleSpace E.ImportIndentAlias
       alias <- Var.upper E.ImportAlias
@@ -413,19 +440,19 @@ chompAs name =
       Space.chomp E.ModuleSpace
       oneOf E.ImportEnd
         [ do  Space.checkFreshLine E.ImportEnd
-              return $ Src.Import name (Just alias) (Src.Explicit [])
+              return $ Src.Import name (Just alias) (Src.Explicit []) loading
         , do  Space.checkIndent end E.ImportEnd
-              chompExposing name (Just alias)
+              chompExposing loading name (Just alias)
         ]
 
 
-chompExposing :: A.Located Name.Name -> Maybe Name.Name -> Parser E.Module Src.Import
-chompExposing name maybeAlias =
+chompExposing :: Src.Loading -> A.Located Name.Name -> Maybe Name.Name -> Parser E.Module Src.Import
+chompExposing loading name maybeAlias =
   do  Keyword.exposing_ E.ImportExposing
       Space.chompAndCheckIndent E.ModuleSpace E.ImportIndentExposingList
       exposed <- specialize E.ImportExposingList exposing
       freshLine E.ImportEnd
-      return $ Src.Import name maybeAlias exposed
+      return $ Src.Import name maybeAlias exposed loading
 
 
 

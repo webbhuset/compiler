@@ -96,12 +96,12 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
 
                     [name] ->
                       do  bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
-                          let (Generate.Bundles builder css _ _) = bundles
+                          let (Generate.Bundles builder css _ _ _ _) = bundles
                           generate style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
                       do  bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
-                          let (Generate.Bundles builder css _ _) = bundles
+                          let (Generate.Bundles builder css _ _ _ _) = bundles
                           writeCss "elm.js" css
                           generate style "elm.js" builder (NE.List name names)
 
@@ -116,7 +116,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                             then writeBundles style target bundles (Build.getRootNames artifacts)
                             else
                               do  checked <- noWorkers bundles
-                                  let (Generate.Bundles builder css _ _) = checked
+                                  let (Generate.Bundles builder css _ _ _ _) = checked
                                   writeCss target css
                                   generate style target builder (Build.getRootNames artifacts)
 
@@ -135,7 +135,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (Html target) ->
                   do  name <- hasOneMain artifacts
                       bundles <- noWorkers =<< toBuilder Generate.Iife root details desiredMode artifacts
-                      let (Generate.Bundles builder css _ _) = bundles
+                      let (Generate.Bundles builder css _ _ _ _) = bundles
                       generate style target (Html.sandwich name css builder) (NE.List name [])
 
 
@@ -269,27 +269,31 @@ generate style target builder names =
         Reporting.reportGenerate style names target
 
 
--- Non-ESM outputs cannot host web workers (no import.meta to resolve the
--- worker files relative to the bundle).
+-- Non-ESM outputs cannot host web workers or code-splitting chunks: both
+-- are files loaded relative to the bundle, and only an ES module knows its
+-- own URL (import.meta).
 noWorkers :: Generate.Bundles -> Task Generate.Bundles
-noWorkers bundles@(Generate.Bundles _ _ workers isScript) =
+noWorkers bundles@(Generate.Bundles _ _ workers isScript _ hasChunks) =
   if isScript then
     Task.throw (Exit.MakeBadGenerate Exit.GenerateScriptBadOutput)
+  else if not (null workers) then
+    Task.throw (Exit.MakeBadGenerate Exit.GenerateWorkersRequireEsm)
+  else if hasChunks then
+    Task.throw (Exit.MakeBadGenerate Exit.GenerateChunksRequireEsm)
   else
-    case workers of
-      [] -> return bundles
-      _ -> Task.throw (Exit.MakeBadGenerate Exit.GenerateWorkersRequireEsm)
+    return bundles
 
 
 -- ESM output: the main bundle, its .css sidecar, and one .mjs file per
--- spawned worker program, named by content hash.
+-- spawned worker program and per async-imported module, each named by
+-- content hash.
 writeBundles :: Reporting.Style -> FilePath -> Generate.Bundles -> NE.List ModuleName.Raw -> Task ()
 writeBundles style target bundles names =
   Task.io $
     do  let dir = FP.takeDirectory target
         Dir.createDirectoryIfMissing True dir
-        let (workerFiles, mainBytes, cssBytes) = Generate.finalize (FP.takeBaseName target) bundles
-        mapM_ (\(name, bytes) -> BS.writeFile (dir FP.</> name) bytes) workerFiles
+        let (extraFiles, mainBytes, cssBytes) = Generate.finalize (FP.takeBaseName target) bundles
+        mapM_ (\(name, bytes) -> BS.writeFile (dir FP.</> name) bytes) extraFiles
         maybe (return ()) (BS.writeFile (target ++ ".css")) cssBytes
         BS.writeFile target mainBytes
         makeExecutableIf (Generate._isScript bundles) target

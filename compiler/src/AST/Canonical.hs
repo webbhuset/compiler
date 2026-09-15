@@ -65,6 +65,7 @@ import Control.Monad (liftM, liftM2, liftM3, liftM4, replicateM)
 import Data.Binary
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Name (Name)
 
 import qualified AST.Source as Src
@@ -279,6 +280,10 @@ data Module =
     , _overloads :: Overloads
     , _binops  :: Map.Map Name Binop
     , _effects :: Effects
+    , _asyncs  :: Set.Set ModuleName.Canonical
+      -- the modules this one imported with `import async`, so a reference
+      -- into one can be compiled to a chunk lookup instead of a direct
+      -- one (see docs/code-splitting-design.md)
     }
 
 

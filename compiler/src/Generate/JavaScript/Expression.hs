@@ -31,6 +31,7 @@ import qualified AST.Optimized as Opt
 import qualified AST.Utils.Css as Css
 import qualified AST.Utils.Shader as Shader
 import qualified Generate.Css as CssGen
+import qualified Generate.Chunks as Chunks
 import qualified Generate.Workers as Workers
 import qualified Data.Index as Index
 import qualified Elm.Compiler.Type as Type
@@ -181,6 +182,14 @@ generate mode expression =
       -- placeholder token; replaced with the worker bundle's file name
       -- once all bundles are rendered and hashed (Generate.Workers)
       JsExpr $ JS.String (Workers.tokenBuilder global)
+
+    -- A value from a module imported with `import async`: read it out of
+    -- the chunk's exports, which _Chunk_get either has or suspends for.
+    Opt.AsyncRef (Opt.Global h n) ->
+      JsExpr $
+        JS.Access
+          (JS.Call (JS.Ref Chunks.getName) [ JS.Ref (JsName.fromChunk h) ])
+          (JsName.fromGlobal h n)
 
     Opt.Css home (Css.Content _ (Css.Types classes keyframes vars)) ->
       let

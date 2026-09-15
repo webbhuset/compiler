@@ -183,7 +183,7 @@ checkImports interfaces imports =
         unimported =
           Map.keysSet (Map.difference interfaces importDict)
 
-        toError (Src.Import (A.At region name) _ _) =
+        toError (Src.Import (A.At region name) _ _ _) =
           Import.Error region name unimported Import.NotFound
       in
       Left (fmap toError (NE.List i is))

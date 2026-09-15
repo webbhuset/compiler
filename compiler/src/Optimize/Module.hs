@@ -41,8 +41,8 @@ type Annotations =
 
 
 optimize :: Annotations -> Can.Module -> Result i [W.Warning] Opt.LocalGraph
-optimize annotations (Can.Module home _ _ decls unions aliases tags overloads _ effects) =
-  addDecls home (Can._constrained overloads) annotations decls $
+optimize annotations (Can.Module home _ _ decls unions aliases tags overloads _ effects asyncs) =
+  addDecls home asyncs (Can._constrained overloads) annotations decls $
     addEffects home effects $
       addUnions home unions $
         addTags home tags $
@@ -56,6 +56,19 @@ optimize annotations (Can.Module home _ _ decls unions aliases tags overloads _ 
 
 type Nodes =
   Map.Map Opt.Global Opt.Node
+
+
+-- The modules this one imported with `import async`.
+type Asyncs =
+  Set.Set ModuleName.Canonical
+
+
+-- Ports, flags decoders and program registrations all run when the bundle
+-- loads, so they are optimized as if nothing were async: a chunk lookup
+-- there could never be awaited.
+noAsyncs :: Asyncs
+noAsyncs =
+  Set.empty
 
 
 addUnions :: ModuleName.Canonical -> Map.Map Name.Name Can.Union -> Opt.LocalGraph -> Opt.LocalGraph
@@ -167,14 +180,14 @@ addPort home name port_ graph =
   case port_ of
     Can.Incoming _ payloadType _ ->
       let
-        (deps, fields, decoder) = Names.run (Port.toDecoder payloadType)
+        (deps, fields, decoder) = Names.run noAsyncs (Port.toDecoder payloadType)
         node = Opt.PortIncoming decoder deps
       in
       addToGraph (Opt.Global home name) node fields graph
 
     Can.Outgoing _ payloadType _ ->
       let
-        (deps, fields, encoder) = Names.run (Port.toEncoder payloadType)
+        (deps, fields, encoder) = Names.run noAsyncs (Port.toEncoder payloadType)
         node = Opt.PortOutgoing encoder deps
       in
       addToGraph (Opt.Global home name) node fields graph
@@ -182,7 +195,7 @@ addPort home name port_ graph =
     Can.Task _ argType _ okType _ ->
       let
         (deps, fields, (encoder, decoder)) =
-          Names.run ((,) <$> Port.toEncoder argType <*> Port.toDecoder okType)
+          Names.run noAsyncs ((,) <$> Port.toEncoder argType <*> Port.toDecoder okType)
         node = Opt.PortTask encoder decoder deps
       in
       addToGraph (Opt.Global home name) node fields graph
@@ -208,17 +221,17 @@ type Constrained =
   Map.Map Can.OverloadName [Can.Constraint]
 
 
-addDecls :: ModuleName.Canonical -> Constrained -> Annotations -> Can.Decls -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
-addDecls home constrained annotations decls graph =
+addDecls :: ModuleName.Canonical -> Asyncs -> Constrained -> Annotations -> Can.Decls -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
+addDecls home asyncs constrained annotations decls graph =
   case decls of
     Can.Declare def subDecls ->
-      addDecls home constrained annotations subDecls =<< addDef home constrained annotations def graph
+      addDecls home asyncs constrained annotations subDecls =<< addDef home asyncs constrained annotations def graph
 
     Can.DeclareRec d ds subDecls ->
       let defs = d:ds in
       case findMain defs of
         Nothing ->
-          addDecls home constrained annotations subDecls (addRecDefs home constrained defs graph)
+          addDecls home asyncs constrained annotations subDecls (addRecDefs home asyncs constrained defs graph)
 
         Just region ->
           Result.throw $ E.BadCycle region (defToName d) (map defToName ds)
@@ -253,16 +266,16 @@ defToName def =
 -- ADD DEFS
 
 
-addDef :: ModuleName.Canonical -> Constrained -> Annotations -> Can.Def -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
-addDef home constrained annotations def graph =
+addDef :: ModuleName.Canonical -> Asyncs -> Constrained -> Annotations -> Can.Def -> Opt.LocalGraph -> Result i [W.Warning] Opt.LocalGraph
+addDef home asyncs constrained annotations def graph =
   case def of
     Can.Def (A.At region name) args body ->
       do  let (Can.Forall _ tipe) = annotations ! name
           Result.warn $ W.MissingTypeAnnotation region name tipe
-          addDefHelp region annotations home name (dicts home constrained name ++ args) body graph
+          addDefHelp region annotations home asyncs name (dicts home constrained name ++ args) body graph
 
     Can.TypedDef (A.At region name) _ typedArgs body _ ->
-      addDefHelp region annotations home name
+      addDefHelp region annotations home asyncs name
         (dicts home constrained name ++ map fst typedArgs) body graph
 
 
@@ -276,21 +289,21 @@ dicts home constrained name =
   ]
 
 
-addDefHelp :: A.Region -> Annotations -> ModuleName.Canonical -> Name.Name -> [Can.Pattern] -> Can.Expr -> Opt.LocalGraph -> Result i w Opt.LocalGraph
-addDefHelp region annotations home name args body graph@(Opt.LocalGraph _ nodes fieldCounts) =
+addDefHelp :: A.Region -> Annotations -> ModuleName.Canonical -> Asyncs -> Name.Name -> [Can.Pattern] -> Can.Expr -> Opt.LocalGraph -> Result i w Opt.LocalGraph
+addDefHelp region annotations home asyncs name args body graph@(Opt.LocalGraph _ nodes fieldCounts) =
   if name /= Name._main then
-    Result.ok (addDefNode home name args body Set.empty graph)
+    Result.ok (addDefNode home asyncs name args body Set.empty graph)
   else
     let
       (Can.Forall _ tipe) = annotations ! name
 
       addMain (deps, fields, main) =
-        addDefNode home name args body deps $
+        addDefNode home asyncs name args body deps $
           Opt.LocalGraph (Just main) nodes (Map.unionWith (+) fields fieldCounts)
     in
     case scriptMainType tipe of
       Just True ->
-        Result.ok $ addMain $ Names.run $
+        Result.ok $ addMain $ Names.run noAsyncs $
           Names.registerKernel (Name.fromChars "System") Opt.Script
 
       Just False ->
@@ -307,13 +320,13 @@ addProgramMain
 addProgramMain region tipe addMain =
     case Type.deepDealias tipe of
       Can.TType hm nm [_] | hm == ModuleName.virtualDom && nm == Name.node ->
-          Result.ok $ addMain $ Names.run $
+          Result.ok $ addMain $ Names.run noAsyncs $
             Names.registerKernel Name.virtualDom Opt.Static
 
       Can.TType hm nm [flags, _, message] | hm == ModuleName.platform && nm == Name.program ->
           case Effects.checkPayload flags of
             Right () ->
-              Result.ok $ addMain $ Names.run $
+              Result.ok $ addMain $ Names.run noAsyncs $
                 Opt.Dynamic message <$> Port.toFlagsDecoder flags
 
             Left (subType, invalidPayload) ->
@@ -324,7 +337,7 @@ addProgramMain region tipe addMain =
       -- `elm make src/Counter.elm --output=counter.mjs` and the reactor's
       -- `Counter.elm.mjs` serve one.
       Can.TType hm nm [_, _, _, _] | hm == ModuleName.workers && nm == Name.fromChars "Program" ->
-          Result.ok $ addMain $ Names.run $
+          Result.ok $ addMain $ Names.run noAsyncs $
             Names.registerKernel (Name.fromChars "Worker") Opt.Worker
 
 
@@ -332,11 +345,11 @@ addProgramMain region tipe addMain =
           Result.throw (E.BadType region tipe)
 
 
-addDefNode :: ModuleName.Canonical -> Name.Name -> [Can.Pattern] -> Can.Expr -> Set.Set Opt.Global -> Opt.LocalGraph -> Opt.LocalGraph
-addDefNode home name args body mainDeps graph =
+addDefNode :: ModuleName.Canonical -> Asyncs -> Name.Name -> [Can.Pattern] -> Can.Expr -> Set.Set Opt.Global -> Opt.LocalGraph -> Opt.LocalGraph
+addDefNode home asyncs name args body mainDeps graph =
   let
     (deps, fields, def) =
-      Names.run $
+      Names.run asyncs $
         case args of
           [] ->
             Expr.optimize Set.empty body
@@ -361,8 +374,8 @@ data State =
     }
 
 
-addRecDefs :: ModuleName.Canonical -> Constrained -> [Can.Def] -> Opt.LocalGraph -> Opt.LocalGraph
-addRecDefs home constrained defs (Opt.LocalGraph main nodes fieldCounts) =
+addRecDefs :: ModuleName.Canonical -> Asyncs -> Constrained -> [Can.Def] -> Opt.LocalGraph -> Opt.LocalGraph
+addRecDefs home asyncs constrained defs (Opt.LocalGraph main nodes fieldCounts) =
   let
     names = reverse (map toName defs)
     cycleName = Opt.Global home (Name.fromManyNames names)
@@ -370,7 +383,7 @@ addRecDefs home constrained defs (Opt.LocalGraph main nodes fieldCounts) =
     links = foldr (addLink home (Opt.Link cycleName)) Map.empty defs
 
     (deps, fields, State values funcs) =
-      Names.run $
+      Names.run asyncs $
         foldM (addRecDef home constrained cycle) (State [] []) defs
   in
   Opt.LocalGraph

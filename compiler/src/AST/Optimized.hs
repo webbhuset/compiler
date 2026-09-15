@@ -74,6 +74,10 @@ data Expr
   | Shader Shader.Source (Set.Set Name) (Set.Set Name)
   | Css ModuleName.Canonical Css.Content
   | WorkerRef Global
+  | AsyncRef Global
+    -- a reference into a module imported with `import async`: the value is
+    -- read out of a chunk that is fetched on first use, and no dependency
+    -- is registered, so the chunk's code stays out of this bundle
 
 
 data Global = Global ModuleName.Canonical Name
@@ -285,6 +289,7 @@ instance Binary Expr where
       Shader a b c     -> putWord8 26 >> put a >> put b >> put c
       Css a b          -> putWord8 27 >> put a >> put b
       WorkerRef a      -> putWord8 28 >> put a
+      AsyncRef a       -> putWord8 29 >> put a
 
   get =
     do  word <- getWord8
@@ -318,6 +323,7 @@ instance Binary Expr where
           26 -> liftM3 Shader get get get
           27 -> liftM2 Css get get
           28 -> liftM  WorkerRef get
+          29 -> liftM  AsyncRef get
           _  -> fail "problem getting Opt.Expr binary"
 
 

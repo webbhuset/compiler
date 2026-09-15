@@ -1,0 +1,30 @@
+--- a/src/Elm/Kernel/Browser.js
++++ b/src/Elm/Kernel/Browser.js
+@@ -107,8 +107,26 @@
+ 		: function(callback) { return setTimeout(callback, 1000 / 60); };
+ 
+ 
+-function _Browser_makeAnimator(model, draw)
++function _Browser_makeAnimator(model, rawDraw)
+ {
++	// The view can read a value from a module imported with `import async`,
++	// whose file may not be here yet; reading one throws a marker carrying
++	// the promise for it. Nothing has been drawn when the marker arrives --
++	// the view function and the diff both run before a single DOM node is
++	// touched -- so the frame is simply drawn again once the file lands.
++	function draw(m)
++	{
++		try
++		{
++			rawDraw(m);
++		}
++		catch (e)
++		{
++			if (!e || !e.elmChunk) { throw e; }
++			e.elmChunk.then(function() { draw(model); });
++		}
++	}
++
+ 	draw(model);
+ 
+ 	var state = __4_NO_REQUEST;

@@ -68,6 +68,7 @@ hasDebug expression =
     Opt.Shader _ _ _     -> False
     Opt.Css _ _          -> False
     Opt.WorkerRef _      -> False
+    Opt.AsyncRef _       -> False
 
 
 defHasDebug :: Opt.Def -> Bool

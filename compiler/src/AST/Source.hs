@@ -7,6 +7,7 @@ module AST.Source
   , getName
   , getImportName
   , Import(..)
+  , Loading(..)
   , Value(..)
   , Overload(..)
   , Signature(..)
@@ -162,7 +163,7 @@ getName (Module maybeName _ _ _ _ _ _ _ _ _ _) =
 
 
 getImportName :: Import -> Name
-getImportName (Import (A.At _ name) _ _) =
+getImportName (Import (A.At _ name) _ _ _) =
   name
 
 
@@ -171,7 +172,18 @@ data Import =
     { _import :: A.Located Name
     , _alias :: Maybe Name
     , _exposing :: Exposing
+    , _loading :: Loading
     }
+
+
+-- `import async M` says the module's code may arrive in a separate file,
+-- fetched the first time one of its values is referenced. It changes
+-- nothing about what the import brings into scope; see
+-- docs/code-splitting-design.md.
+data Loading
+  = Eager
+  | Async
+  deriving (Eq)
 
 
 data Value = Value (A.Located Name) [Pattern] Expr (Maybe Signature)

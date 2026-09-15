@@ -292,6 +292,7 @@ addExpr expression blocks =
       addExpr a (addExpr b (foldr addExpr blocks maybeC))
     Opt.Shader _ _ _ -> blocks
     Opt.WorkerRef _ -> blocks
+    Opt.AsyncRef _ -> blocks
 
 
 addDecider :: Opt.Decider Opt.Choice -> [(ModuleName.Canonical, Css.Content)] -> [(ModuleName.Canonical, Css.Content)]

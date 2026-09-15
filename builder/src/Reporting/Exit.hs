@@ -2040,6 +2040,9 @@ data Generate
   | GenerateWorkerCycle [String]
   | GenerateWorkerNeedsOneMain
   | GenerateWorkerNotAProgram
+  | GenerateChunksRequireEsm
+  | GenerateChunkCycle [String]
+  | GenerateChunkInWorker String
   | GenerateScriptNeedsOneMain
   | GenerateScriptBadOutput
 
@@ -2096,6 +2099,38 @@ toGenerateReport problem =
         [ D.reflow $
             "A worker bundle runs itself when a spawner loads it, so it cannot also\
             \ export other programs for a page to start. Compile the worker on its own."
+        ]
+
+    GenerateChunksRequireEsm ->
+      Help.report "ASYNC IMPORTS NEED ES MODULES" Nothing
+        "This program has an `import async`, so it must be compiled to an ES module:"
+        [ D.indent 4 $ D.dullyellow "elm make src/Main.elm --output=main.mjs"
+        , D.reflow $
+            "Each async-imported module becomes a file loaded relative to the\
+            \ compiled bundle, and only ES modules can know their own URL (via\
+            \ import.meta). Drop the `async` from the import to keep the classic\
+            \ .js and .html outputs."
+        ]
+
+    GenerateChunkInWorker name ->
+      Help.report "ASYNC IMPORT INSIDE A WORKER" Nothing
+        ("A worker program reaches `" ++ name ++ "`, which is imported with `import async`:")
+        [ D.reflow $
+            "A worker bundle is a file of its own, with its own copy of\
+            \ everything it needs, so there is no main bundle for it to fetch a\
+            \ chunk into. Import that module normally in the code the worker\
+            \ uses; the page can still import it with `async`."
+        ]
+
+    GenerateChunkCycle names ->
+      Help.report "ASYNC IMPORT CYCLE" Nothing
+        "These modules reach each other through `import async` in a cycle:"
+        [ D.indent 4 $ D.red $ D.vcat $ map D.fromChars names
+        , D.reflow $
+            "Each one compiles to a file named by the hash of its content, and\
+            \ naming another inside the cycle makes those hashes depend on each\
+            \ other. Break the cycle: import one of them normally, or move what\
+            \ they share into a module they both import."
         ]
 
     GenerateWorkerCycle names ->
@@ -2158,6 +2193,7 @@ data Reactor
   | ReactorBadBuild BuildProblem
   | ReactorBadGenerate Generate
   | ReactorWorkerUnservable ModuleName.Raw
+  | ReactorChunkUnservable ModuleName.Raw
 
 
 reactorToReport :: Reactor -> Help.Report
@@ -2186,6 +2222,18 @@ reactorToReport problem =
             \ outside that. Start the reactor from a directory that contains it, or\
             \ build with `elm make --output=main.mjs` to get the worker as a file\
             \ next to the bundle instead."
+        ]
+
+    ReactorChunkUnservable name ->
+      Help.report "CANNOT SERVE ASYNC IMPORT" Nothing
+        ("This program has `import async " ++ ModuleName.toChars name ++ "`, whose source I cannot serve:")
+        [ D.reflow $
+            "elm reactor serves each async-imported module from its own source\
+            \ file, as `<path>.elm.mjs`, and only files under the directory it was\
+            \ started in. This module either lives in a package or under a source\
+            \ directory outside that. Start the reactor from a directory that\
+            \ contains it, or build with `elm make --output=main.mjs` to get the\
+            \ chunk as a file next to the bundle instead."
         ]
 
     ReactorBadGenerate generate ->

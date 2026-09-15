@@ -7,6 +7,7 @@ module Canonicalize.Module
 import qualified Data.Graph as Graph
 import qualified Data.Map as Map
 import qualified Data.Name as Name
+import qualified Data.Set as Set
 
 import qualified AST.Canonical as Can
 import qualified AST.Source as Src
@@ -65,6 +66,19 @@ canonicalize pkg ifaces modul@(Src.Module _ exports docs imports values _ _ _ ov
       cexports <- canonicalizeExports values cunions caliases ctags cbinops ceffects exports
 
       return $ Can.Module home cexports docs cvalues cunions caliases ctags coverloads cbinops ceffects
+                (asyncHomes ifaces imports)
+
+
+-- The canonical name of every module brought in with `import async`. An
+-- import that names a module with no interface is already an error by the
+-- time canonicalization runs, so a missing one is simply dropped here.
+asyncHomes :: Map.Map ModuleName.Raw I.Interface -> [Src.Import] -> Set.Set ModuleName.Canonical
+asyncHomes ifaces imports =
+  Set.fromList
+    [ ModuleName.Canonical (I._home iface) name
+    | Src.Import (A.At _ name) _ _ Src.Async <- imports
+    , Just iface <- [Map.lookup name ifaces]
+    ]
 
 
 -- Overload definitions go last so their bodies can see every ordinary value in

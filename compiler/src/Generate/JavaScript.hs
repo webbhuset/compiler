@@ -3,6 +3,7 @@ module Generate.JavaScript
   ( generate
   , hasScriptMain
   , generateEsm
+  , generateEsmWithChunks
   , generateWorkerBundle
   , generateForRepl
   , generateForReplEndpoint
@@ -11,7 +12,9 @@ module Generate.JavaScript
 
 
 import Prelude hiding (cycle, print)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.List as List
 import Data.Map ((!))
 import qualified Data.Map as Map
@@ -27,7 +30,9 @@ import qualified Elm.ModuleName as ModuleName
 import qualified Generate.JavaScript.Builder as JS
 import qualified Generate.JavaScript.Expression as Expr
 import qualified Generate.JavaScript.Functions as Functions
+import qualified Generate.Chunks as Chunks
 import qualified Generate.Css as GenCss
+import qualified Generate.JavaScript.Scope as Scope
 import qualified Generate.JavaScript.Name as JsName
 import qualified Generate.Mode as Mode
 import qualified Reporting.Doc as D
@@ -130,13 +135,135 @@ generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
   ( javascript, GenCss.generate mode globalGraph mains workerRoots )
 
 
--- Worker files are loaded relative to the bundle that spawns them, which
--- only ES modules can know (import.meta). The kernel in webbhuset/worker
--- reads this variable; it is only emitted in ESM output, where the syntax
--- is legal.
+-- Worker files and code-splitting chunks are loaded relative to the bundle
+-- that names them, which only ES modules can know (import.meta). The kernel
+-- in webbhuset/worker reads this variable, and so does the chunk loader in
+-- Generate.Chunks; it is only emitted in ESM output, where the syntax is
+-- legal.
 metaUrlLine :: B.Builder
 metaUrlLine =
   "var __elmWorkerBaseUrl = import.meta.url;\n"
+
+
+
+-- GENERATE ESM WITH CODE-SPLITTING CHUNKS
+--
+-- The main bundle emits everything the plan left it, which is the live
+-- graph minus what the chunks took. Each chunk is then walked with the
+-- main bundle's globals already marked as seen, so it stops at the
+-- boundary and emits only its own.
+--
+-- The order matters: a chunk's text has to exist before we can ask which
+-- of the main bundle's names it mentions, and the main bundle's scope
+-- object is the union of those answers. So chunks are rendered first and
+-- the main bundle is assembled last.
+
+
+generateEsmWithChunks
+  :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> Chunks.Plan
+  -> (B.Builder, Maybe B.Builder, [(ModuleName.Canonical, B.Builder)])
+generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots (Chunks.Plan chunks planned) =
+  let
+    mainState@(State _ _ mainSeen) =
+      List.foldl' (addGlobal mode graph) emptyState
+        (filter (\global -> Map.member global graph) (Set.toList planned))
+
+    mainBody =
+      Functions.functions <> stateToBuilder mainState
+
+    -- What a chunk may take from the main bundle: everything defined at the
+    -- top level of the text it will sit beside, plus the chunk handles,
+    -- which are named up front and assigned further down the file. Without
+    -- the handles and the loader, a chunk could not reference a chunk.
+    mainDefined =
+      Set.union
+        (Scope.topLevelNames (render (metaUrlLine <> mainBody <> Chunks.runtime)))
+        (Set.fromList
+          (map (render . JsName.toBuilder . JsName.fromChunk . Chunks._home) chunks))
+
+    step (revBundles, revRegs, needed) chunk =
+      let
+        home = Chunks._home chunk
+      in
+      case generateChunkBundle mode graph mainSeen mainDefined chunk of
+        Left exports ->
+          (revBundles, Chunks.readyRegistration home exports : revRegs, needed)
+
+        Right (ns, builder) ->
+          ((home, builder) : revBundles, Chunks.registration home : revRegs, Set.union needed ns)
+
+    (revChunkBundles, revRegistrations, allNeeded) =
+      List.foldl' step ([], [], Set.empty) chunks
+
+    javascript =
+      metaUrlLine
+      <> mainBody
+      <> perfNote mode
+      <> Chunks.runtime
+      <> Chunks.scopeDef allNeeded
+      <> mconcat (reverse revRegistrations)
+      <> toMainExportsEsm mode mains
+
+    cssRoots =
+      workerRoots ++ concatMap (Set.toList . Chunks._roots) chunks
+  in
+  ( javascript
+  , GenCss.generate mode globalGraph mains cssRoots
+  , reverse revChunkBundles
+  )
+
+
+-- One chunk: an ES module whose default export takes the main bundle's
+-- scope, rebinds every name it needs from it as a local, and returns the
+-- values the rest of the program reaches it by.
+--
+-- Left means the walk found nothing the main bundle does not already have,
+-- which happens when the module is also reachable without crossing an
+-- async import. There is no file to write; the caller registers the chunk
+-- as already loaded, with these exports.
+generateChunkBundle
+  :: Mode.Mode -> Graph -> Set.Set Opt.Global -> Set.Set BS.ByteString -> Chunks.Chunk
+  -> Either [B.Builder] (Set.Set BS.ByteString, B.Builder)
+generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk _ roots) =
+  let
+    state@(State _ _ seen) =
+      List.foldl' (addGlobal mode graph) (State mempty [] mainSeen)
+        (filter (\global -> Map.member global graph) (Set.toList roots))
+
+    body = stateToBuilder state
+
+    exports =
+      map (\(Opt.Global home name) -> JsName.toBuilder (JsName.fromGlobal home name))
+        (Set.toList roots)
+
+    needed =
+      Set.intersection
+        (Scope.mentionedNames (render (body <> mconcat exports)))
+        mainDefined
+
+    scope =
+      JsName.toBuilder Chunks.scopeArg
+
+    rebind name =
+      "var " <> B.byteString name <> " = " <> scope <> "." <> B.byteString name <> ";\n"
+  in
+  if Set.size seen == Set.size mainSeen then
+    Left exports
+  else
+    Right
+      ( needed
+      , "export default function(" <> scope <> ") {\n"
+        <> mconcat (map rebind (Set.toList needed))
+        <> body
+        <> "return {"
+        <> mconcat (List.intersperse "," (map (\e -> e <> ":" <> e) exports))
+        <> "};\n}\n"
+      )
+
+
+render :: B.Builder -> BS.ByteString
+render builder =
+  LBS.toStrict (B.toLazyByteString builder)
 
 
 -- A web worker bundle: an ES module with no exports that boots the given

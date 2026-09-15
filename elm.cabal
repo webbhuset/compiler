@@ -156,6 +156,7 @@ executable elm
         Canonicalize.Pattern
         Canonicalize.Type
         Compile
+        Generate.Chunks
         Generate.Css
         Generate.Html
         Generate.JavaScript
@@ -163,8 +164,10 @@ executable elm
         Generate.JavaScript.Expression
         Generate.JavaScript.Functions
         Generate.JavaScript.Name
+        Generate.JavaScript.Scope
         Generate.Mode
         Generate.Workers
+        Nitpick.AsyncImports
         Nitpick.Debug
         Nitpick.PatternMatches
         Nitpick.Workers

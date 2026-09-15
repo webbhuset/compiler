@@ -58,7 +58,7 @@ addConstrained
   -> Src.Import
   -> Map.Map (ModuleName.Canonical, Name.Name) (Can.Annotation, [Can.Constraint])
   -> Map.Map (ModuleName.Canonical, Name.Name) (Can.Annotation, [Can.Constraint])
-addConstrained ifaces (Src.Import (A.At _ name) _ _) table =
+addConstrained ifaces (Src.Import (A.At _ name) _ _ _) table =
   let
     (I.Interface pkg defs _ _ _ _ _ overloads) = ifaces ! name
     !home = ModuleName.Canonical pkg name
@@ -72,7 +72,7 @@ addConstrained ifaces (Src.Import (A.At _ name) _ _) table =
 
 
 unionImported :: Map.Map ModuleName.Raw I.Interface -> Src.Import -> Can.Overloads -> Can.Overloads
-unionImported ifaces (Src.Import (A.At _ name) _ _) overloads =
+unionImported ifaces (Src.Import (A.At _ name) _ _ _) overloads =
   Can.unionOverloads (I._overloads (ifaces ! name)) overloads
 
 
@@ -122,7 +122,7 @@ toSafeImports (ModuleName.Canonical pkg _) imports =
 
 
 isNormal :: Src.Import -> Bool
-isNormal (Src.Import (A.At _ name) maybeAlias _) =
+isNormal (Src.Import (A.At _ name) maybeAlias _ _) =
   if Name.isKernel name
   then
     case maybeAlias of
@@ -137,7 +137,7 @@ isNormal (Src.Import (A.At _ name) maybeAlias _) =
 
 
 addImport :: Map.Map ModuleName.Raw I.Interface -> State -> Src.Import -> Result i w State
-addImport ifaces (State vs ts cs bs qvs qts qcs qos) (Src.Import (A.At _ name) maybeAlias exposing) =
+addImport ifaces (State vs ts cs bs qvs qts qcs qos) (Src.Import (A.At _ name) maybeAlias exposing _) =
   let
     (I.Interface pkg defs unions aliases tags binops _ overloads) = ifaces ! name
     !prefix = maybe name id maybeAlias

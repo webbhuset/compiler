@@ -82,7 +82,7 @@ data Binop =
 
 
 fromModule :: Pkg.Name -> Can.Module -> Map.Map Name.Name Can.Annotation -> Map.Map (ModuleName.Canonical, Name.Name) [Int] -> Interface
-fromModule pkg (Can.Module home exports _ _ unions aliases tags overloads binops _) annotations comparables =
+fromModule pkg (Can.Module home exports _ _ unions aliases tags overloads binops _ _) annotations comparables =
   Interface
     { _home = pkg
     , _values = Map.withoutKeys (restrict exports annotations) (definitions home overloads)

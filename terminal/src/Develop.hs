@@ -12,9 +12,11 @@ import Control.Monad.Trans (MonadIO(liftIO))
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.UTF8 as BS_UTF8
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Name as Name
 import qualified Data.NonEmptyList as NE
 import qualified System.Directory as Dir
 import System.FilePath as FP
@@ -162,16 +164,21 @@ compile path =
   build path $ \root details artifacts ->
     do  bundles <- generate Generate.Iife root details artifacts
         case bundles of
-          Generate.Bundles _ _ _ True ->
+          Generate.Bundles _ _ _ True _ _ ->
             Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
-          -- spawns workers: only a module knows its own URL, so the page
-          -- loads the program from the .mjs endpoint instead of inlining it
-          Generate.Bundles _ css (_:_) _ ->
+          -- spawns workers, or splits code across chunks: only a module knows
+          -- its own URL, so the page loads the program from the .mjs endpoint
+          -- instead of inlining it
+          Generate.Bundles _ css (_:_) _ _ _ ->
             do  let (NE.List name _) = Build.getRootNames artifacts
                 return $ Html.sandwichModule name css (B.stringUtf8 ('/' : path ++ ".mjs"))
 
-          Generate.Bundles javascript css [] _ ->
+          Generate.Bundles _ css _ _ _ True ->
+            do  let (NE.List name _) = Build.getRootNames artifacts
+                return $ Html.sandwichModule name css (B.stringUtf8 ('/' : path ++ ".mjs"))
+
+          Generate.Bundles javascript css [] _ _ False ->
             do  let (NE.List name _) = Build.getRootNames artifacts
                 return $ Html.sandwich name css javascript
 
@@ -223,7 +230,8 @@ serveCompiled =
 
         Just (elmPath, piece) ->
           do  guard =<< liftIO (Dir.doesFileExist elmPath)
-              result <- liftIO (compilePiece piece elmPath)
+              wanted <- fmap (fmap (Name.fromChars . BS_UTF8.toString)) (getParam "chunk")
+              result <- liftIO (compilePiece piece wanted elmPath)
               -- a worker's URL is stable, which is exactly what a browser would
               -- otherwise cache across edits
               modifyResponse (setHeader "Cache-Control" "no-store")
@@ -267,29 +275,33 @@ errorScript exit =
     <> ");\n"
 
 
-compilePiece :: Piece -> FilePath -> IO (Either Exit.Reactor BS.ByteString)
-compilePiece piece path =
+compilePiece :: Piece -> Maybe Name.Name -> FilePath -> IO (Either Exit.Reactor BS.ByteString)
+compilePiece piece wanted path =
   do  served <- Dir.canonicalizePath =<< Dir.getCurrentDirectory
-      build path $ \root details artifacts -> compilePieceIn served root details artifacts piece
+      build path $ \root details artifacts ->
+        compilePieceIn served root details artifacts piece wanted path
 
 
-compilePieceIn :: FilePath -> FilePath -> Details.Details -> Build.Artifacts -> Piece -> Task.Task Exit.Reactor BS.ByteString
-compilePieceIn served root details artifacts piece =
+compilePieceIn :: FilePath -> FilePath -> Details.Details -> Build.Artifacts -> Piece -> Maybe Name.Name -> FilePath -> Task.Task Exit.Reactor BS.ByteString
+compilePieceIn served root details artifacts piece wanted path =
   case piece of
     Js ->
       do  bundles <- generate Generate.Iife root details artifacts
           case bundles of
-            Generate.Bundles _ _ _ True ->
+            Generate.Bundles _ _ _ True _ _ ->
               Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
-            Generate.Bundles _ _ (_:_) _ ->
+            Generate.Bundles _ _ (_:_) _ _ _ ->
               Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-            Generate.Bundles javascript _ [] _ ->
+            Generate.Bundles _ _ _ _ _ True ->
+              Task.throw (Exit.ReactorBadGenerate Exit.GenerateChunksRequireEsm)
+
+            Generate.Bundles javascript _ [] _ _ False ->
               return (toBytes javascript)
 
     Css ->
-      do  Generate.Bundles _ css _ _ <- generate Generate.Iife root details artifacts
+      do  Generate.Bundles _ css _ _ _ _ <- generate Generate.Iife root details artifacts
           return (maybe BS.empty toBytes css)
 
     Mjs ->
@@ -299,12 +311,32 @@ compilePieceIn served root details artifacts piece =
             else
               do  let workers = [ global | Generate.WorkerBundle global _ <- Generate._workerBundles bundles ]
                   urls <- Task.io (workerUrls served root details workers)
-                  case Generate.finalizeWith (\global -> Map.findWithDefault Nothing global urls) bundles of
-                    Left (Opt.Global home _) ->
+                  let finalized = Generate.finalizeWith (\global -> Map.findWithDefault Nothing global urls) (chunkUrl path) bundles
+                  case finalized of
+                    Left (Left (Opt.Global home _)) ->
                       Task.throw (Exit.ReactorWorkerUnservable (ModuleName._module home))
 
-                    Right (javascript, _) ->
-                      return javascript
+                    Left (Right home) ->
+                      Task.throw (Exit.ReactorChunkUnservable (ModuleName._module home))
+
+                    Right (javascript, _, chunks) ->
+                      case wanted of
+                        Nothing ->
+                          return javascript
+
+                        Just name ->
+                          case [ bytes | (home, bytes) <- chunks, ModuleName._module home == name ] of
+                            bytes : _ -> return bytes
+                            []        -> Task.throw (Exit.ReactorChunkUnservable name)
+
+
+-- A chunk is not a program of its own -- it is a function of the bundle that
+-- loads it -- so it cannot be served from its own source file the way a
+-- worker is. It is served from the root program's endpoint instead, which is
+-- already being compiled, with the module named in the query.
+chunkUrl :: FilePath -> ModuleName.Canonical -> Maybe String
+chunkUrl path home =
+  Just ('/' : path ++ ".mjs?chunk=" ++ ModuleName.toChars (ModuleName._module home))
 
 
 -- Each worker is served at its own module's URL, as an absolute path so it
