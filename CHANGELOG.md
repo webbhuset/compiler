@@ -7,6 +7,30 @@ compiler, and every `elm.json` this fork writes remains valid for official
 tooling (elm-format, elm-test, editors).
 
 
+## Contents
+
+- **[Bugfix and quality of life](#bugfix-and-quality-of-life)**
+  - [Exponential compile time and memory with extensible records](#exponential-compile-time-and-memory-with-extensible-records)
+  - [Git dependencies — private packages](#git-dependencies--private-packages)
+  - [Kernel code in git dependencies](#kernel-code-in-git-dependencies)
+  - [ES module output](#es-module-output)
+  - [Compiled pieces in elm reactor](#compiled-pieces-in-elm-reactor)
+- **[Native and compiler output](#native-and-compiler-output)**
+  - [Command line scripts](#command-line-scripts)
+  - [Task ports](#task-ports)
+  - [Native web workers](#native-web-workers)
+  - [HTML to string](#html-to-string)
+  - [Code splitting — async imports](#code-splitting--async-imports)
+- **[New language features](#new-language-features)**
+  - [Comparable newtypes](#comparable-newtypes)
+  - [CSS blocks](#css-blocks)
+  - [Overloading by signature](#overloading-by-signature)
+  - [Back-lambdas](#back-lambdas)
+  - [Structural variants](#structural-variants)
+- **[Compatibility notes](#compatibility-notes)**
+  - [Cross-platform release binaries](#cross-platform-release-binaries)
+
+
 # Bugfix and quality of life
 
 Bugfixes or replacing external tools. No change to the language.
