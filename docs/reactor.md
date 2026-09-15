@@ -69,6 +69,27 @@ worker in any of the project's source directories. A worker that lives in a
 bundle that spawns one is an error saying so.
 
 
+## Async imports
+
+A program with an `import async` has to be loaded as a module too, for the
+same reason a worker-spawning one does: a chunk is found relative to the
+bundle that names it. Opening `/src/Main.elm` for such a program gives a page
+that imports `Main.elm.mjs` rather than inlining it.
+
+A chunk is not a program of its own — it is a function of the bundle that
+loads it, and has no meaning alone — so unlike a worker it cannot be served
+from its own source file. The reactor serves it from the root program's
+endpoint, which it is compiling anyway, with the module named in the query:
+
+```
+/src/Main.elm.mjs?chunk=Pages.Report
+```
+
+So there are no hashed sibling files here either, and these responses are sent
+`Cache-Control: no-store` like the rest. Requesting a `.js` bundle for a
+program with async imports is an error saying it needs ES module output.
+
+
 ## When the build fails
 
 A `.js` or `.mjs` request that fails to compile answers with status 500 and a
