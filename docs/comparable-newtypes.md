@@ -84,9 +84,10 @@ to your elm/core fork and consume it via a
 - The interface file format changed to carry comparability information,
   so the first build after upgrading rebuilds caches (`elm-stuff` and the
   packages in `ELM_HOME`). This is automatic — corrupt-looking caches are
-  simply rebuilt. Avoid switching back and forth between this fork and
-  the official compiler on the same `ELM_HOME`, or they will keep
-  invalidating each other's caches.
+  simply rebuilt. The official compiler cannot read these interfaces, but
+  it never sees them: this fork caches packages under
+  `$ELM_HOME/webbhuset-0.19.2/`, separate from the official compiler's
+  `$ELM_HOME/0.19.1/`.
 - `elm diff` does not know that changing a newtype's payload to something
   non-comparable breaks downstream `Dict` users; within a private package
   ecosystem, treat such a change as a major version bump yourself.

@@ -236,10 +236,19 @@ getReplTmpRoot =
       return $ Root (dir </> "tmp")
 
 
+-- The subdirectory of ELM_HOME that holds this fork's caches. It is
+-- prefixed so it can never collide with the official compiler's cache:
+-- the two write incompatible interface and object files, so sharing a
+-- directory makes them invalidate each other's artifacts on every switch.
+cacheVersion :: FilePath
+cacheVersion =
+  "webbhuset-" ++ V.toChars V.compiler
+
+
 getCacheDir :: FilePath -> IO FilePath
 getCacheDir projectName =
   do  (ElmHome home) <- getElmHome
-      let root = home </> V.toChars V.compiler </> projectName
+      let root = home </> cacheVersion </> projectName
       Dir.createDirectoryIfMissing True root
       return root
 

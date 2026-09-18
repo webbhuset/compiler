@@ -74,7 +74,7 @@ reference that version in `elm.json`.
   discovered with `git ls-remote --tags`.
 
 Sources are cloned once into the shared package cache
-(`~/.elm/0.19.2/packages/author/project/version/`) with
+(`~/.elm/webbhuset-0.19.2/packages/author/project/version/`) with
 `git clone --depth 1 --branch <version>`. A `git-url` file in that
 directory records where the sources came from; if a project maps the same
 package name and version to a *different* URL, the build stops with an
