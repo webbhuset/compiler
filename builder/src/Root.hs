@@ -98,7 +98,7 @@ newtype Stuff = Stuff FilePath
 
 getStuff :: Root -> IO Stuff
 getStuff (Root root) =
-  do  let dir = root </> "elm-stuff" </> V.toChars V.compiler
+  do  let dir = root </> "elm-stuff" </> cacheVersion
       Dir.createDirectoryIfMissing True dir
       return (Stuff dir)
 
@@ -236,10 +236,11 @@ getReplTmpRoot =
       return $ Root (dir </> "tmp")
 
 
--- The subdirectory of ELM_HOME that holds this fork's caches. It is
--- prefixed so it can never collide with the official compiler's cache:
--- the two write incompatible interface and object files, so sharing a
--- directory makes them invalidate each other's artifacts on every switch.
+-- The directory name this fork caches under, both in ELM_HOME and in a
+-- project's elm-stuff. It is prefixed so it can never collide with the
+-- official compiler's caches: the two write incompatible interface and
+-- object files, so sharing a directory makes them invalidate each other's
+-- artifacts on every switch.
 cacheVersion :: FilePath
 cacheVersion =
   "webbhuset-" ++ V.toChars V.compiler

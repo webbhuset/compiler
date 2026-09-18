@@ -159,7 +159,7 @@ projects and the stale package artifacts once:
 
 ```
 rm -rf elm-stuff
-find ~/.elm -name artifacts.dat -delete
+find ~/.elm/webbhuset-* -name artifacts.dat -delete
 ```
 
 Without it the compiler reports a corrupt cache and rebuilds anyway, which
