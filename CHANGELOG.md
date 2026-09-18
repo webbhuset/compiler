@@ -708,15 +708,16 @@ describe s =
   virtual-dom patch applies styles with `setProperty`, which only accepts
   hyphenated CSS names — camelCase keys like `style "backgroundColor"`
   (already against elm/html convention) stop working.
-- **Caches**: this fork keeps its package cache in a directory of its own,
-  `$ELM_HOME/webbhuset-0.19.2/` (so `~/.elm/webbhuset-0.19.2/` by default)
-  instead of `$ELM_HOME/0.19.2/`, because the interface file format carries
-  extra information the official compiler cannot read. The two compilers can
-  therefore share an `ELM_HOME` without invalidating each other's caches —
-  at the cost of downloading each package once per compiler. `ELM_HOME`
-  itself still selects the root, so an existing override keeps working.
-  Within a project, `elm-stuff/` is still keyed by compiler version only;
-  the first build with this fork rebuilds it automatically.
+- **Caches**: this fork keeps its caches in directories of its own —
+  `$ELM_HOME/webbhuset-0.19.2/` for packages (so `~/.elm/webbhuset-0.19.2/`
+  by default) and `elm-stuff/webbhuset-0.19.2/` inside a project — rather
+  than the `0.19.2/` the version number alone would give. The interface and
+  object file formats carry extra information the official compiler cannot
+  read, so this lets the two share an `ELM_HOME` and a project directory
+  without invalidating each other's caches, at the cost of downloading each
+  package once per compiler. `ELM_HOME` itself still selects the root, so an
+  existing override keeps working, and the fork's build artifacts still live
+  under `elm-stuff/`, which `.gitignore` files already cover.
 - **Object files**: task ports add a node kind, CSS blocks, web workers and
   async imports each add an expression kind, and command line scripts add a
   main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
