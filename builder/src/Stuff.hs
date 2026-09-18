@@ -64,6 +64,15 @@ compilerVersion =
   V.toChars V.compiler
 
 
+-- The subdirectory of ELM_HOME that holds this fork's caches. It is
+-- prefixed so it can never collide with the official compiler's cache:
+-- the two write incompatible interface and object files, so sharing a
+-- directory makes them invalidate each other's artifacts on every switch.
+cacheVersion :: FilePath
+cacheVersion =
+  "webbhuset-" ++ compilerVersion
+
+
 
 -- ELMI and ELMO
 
@@ -165,7 +174,7 @@ getReplCache =
 getCacheDir :: FilePath -> IO FilePath
 getCacheDir projectName =
   do  home <- getElmHome
-      let root = home </> compilerVersion </> projectName
+      let root = home </> cacheVersion </> projectName
       Dir.createDirectoryIfMissing True root
       return root
 

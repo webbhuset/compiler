@@ -708,18 +708,23 @@ describe s =
   virtual-dom patch applies styles with `setProperty`, which only accepts
   hyphenated CSS names — camelCase keys like `style "backgroundColor"`
   (already against elm/html convention) stop working.
-- **Caches**: the interface file format carries extra information, so the
-  first build with this fork rebuilds `elm-stuff` and the `ELM_HOME`
-  package artifacts automatically. Do not alternate this fork and the
-  official compiler on the same `ELM_HOME` — they will repeatedly
-  invalidate each other's caches.
+- **Caches**: this fork keeps its package cache in a directory of its own,
+  `$ELM_HOME/webbhuset-0.19.2/` (so `~/.elm/webbhuset-0.19.2/` by default)
+  instead of `$ELM_HOME/0.19.2/`, because the interface file format carries
+  extra information the official compiler cannot read. The two compilers can
+  therefore share an `ELM_HOME` without invalidating each other's caches —
+  at the cost of downloading each package once per compiler. `ELM_HOME`
+  itself still selects the root, so an existing override keeps working.
+  Within a project, `elm-stuff/` is still keyed by compiler version only;
+  the first build with this fork rebuilds it automatically.
 - **Object files**: task ports add a node kind, CSS blocks, web workers and
   async imports each add an expression kind, and command line scripts add a
   main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
   detected and rebuilt. Moving between *builds of this fork* that changed
   the format is noisier: the package artifacts in `ELM_HOME` are reported
-  as corrupt before being rebuilt. `find ~/.elm -name artifacts.dat -delete`
-  once, after upgrading, avoids the warning.
+  as corrupt before being rebuilt.
+  `find ~/.elm/webbhuset-* -name artifacts.dat -delete` once, after
+  upgrading, avoids the warning.
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.
