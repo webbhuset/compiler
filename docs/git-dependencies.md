@@ -154,5 +154,6 @@ Notes:
   of course — everyone building the project should use this fork.
 - Projects without `"git-dependencies"` behave byte-for-byte like the
   official compiler; the field is never written unless present.
-- `elm publish` rejects packages that have `"git-dependencies"`, since
-  published packages must be resolvable from the public registry.
+- There is no `elm publish` in this fork, so a package with
+  `"git-dependencies"` cannot reach the public registry, where its
+  dependencies would not be resolvable.
