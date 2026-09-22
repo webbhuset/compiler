@@ -54,7 +54,7 @@ run args () =
                   do  env0 <- Task.eio Exit.InstallBadRegistry $ Solver.initEnv
                       oldOutline <- Task.eio Exit.InstallBadOutline $ Outline.read root
                       env <- Task.eio (Exit.InstallHadSolverTrouble . Exit.SolverBadGitDep) $
-                        Solver.addGitDeps oldOutline env0
+                        Solver.addGitDeps Reporting.gitDetails oldOutline env0
                       case oldOutline of
                         Outline.App outline ->
                           do  changes <- makeAppPlan env pkg outline
@@ -194,7 +194,7 @@ makeAppPlan (Solver.Env cache _ connection registry gitUrls) pkg outline@(Outlin
                       Solver.Offline  -> Task.throw (Exit.InstallUnknownPackageOffline pkg suggestions)
 
                   Right _ ->
-                    do  result <- Task.io $ Solver.addToApp cache connection registry gitUrls pkg outline
+                    do  result <- Task.io $ Solver.addToApp Reporting.gitDetails cache connection registry gitUrls pkg outline
                         case result of
                           Solver.Ok (Solver.AppSolution old new app) ->
                             return (Changes (detectChanges old new) (Outline.App app))
@@ -238,7 +238,7 @@ makePkgPlan (Solver.Env cache _ connection registry gitUrls) pkg outline@(Outlin
           Right (Registry.KnownVersions _ _) ->
             do  let old = Map.union deps test
                 let cons = Map.insert pkg C.anything old
-                result <- Task.io $ Solver.verify cache connection registry gitUrls cons
+                result <- Task.io $ Solver.verify Reporting.gitDetails cache connection registry gitUrls cons
                 case result of
                   Solver.Ok solution ->
                     let

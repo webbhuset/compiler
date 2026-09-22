@@ -75,7 +75,7 @@ init =
         Right (Solver.Env cache _ connection registry gitUrls) ->
           do  let registry' = foldr addForkVersion registry (Map.toList forkDefaults)
               let gitUrls' = Map.union (Map.map snd forkDefaults) gitUrls
-              result <- Solver.verify cache connection registry' gitUrls' defaults
+              result <- Solver.verify Reporting.gitDetails cache connection registry' gitUrls' defaults
               case result of
                 Solver.Err exit ->
                   return (Left (Exit.InitSolverProblem exit))

@@ -17,7 +17,7 @@ module Deps.Solver
   where
 
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, when)
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, readMVar)
 import qualified Data.Map as Map
 import Data.Map ((!))
@@ -34,6 +34,7 @@ import qualified Elm.Version as V
 import qualified File
 import qualified Http
 import qualified Json.Decode as D
+import qualified Reporting
 import qualified Reporting.Exit as Exit
 import qualified Stuff
 
@@ -56,7 +57,8 @@ newtype Solver a =
 
 data State =
   State
-    { _cache :: Stuff.PackageCache
+    { _key :: Reporting.DKey
+    , _cache :: Stuff.PackageCache
     , _connection :: Connection
     , _registry :: Registry.Registry
     , _gitUrls :: Map.Map Pkg.Name String
@@ -95,19 +97,19 @@ data Details =
   Details V.Version (Map.Map Pkg.Name C.Constraint)
 
 
-verify :: Stuff.PackageCache -> Connection -> Registry.Registry -> Map.Map Pkg.Name String -> Map.Map Pkg.Name C.Constraint -> IO (Result (Map.Map Pkg.Name Details))
-verify cache connection registry gitUrls constraints =
+verify :: Reporting.DKey -> Stuff.PackageCache -> Connection -> Registry.Registry -> Map.Map Pkg.Name String -> Map.Map Pkg.Name C.Constraint -> IO (Result (Map.Map Pkg.Name Details))
+verify key cache connection registry gitUrls constraints =
   Stuff.withRegistryLock cache $
   case try constraints of
     Solver solver ->
-      solver (State cache connection registry gitUrls Map.empty)
+      solver (State key cache connection registry gitUrls Map.empty)
         (\s a _ -> return $ Ok (Map.mapWithKey (addDeps s) a))
         (\_     -> return $ noSolution connection)
         (\e     -> return $ Err e)
 
 
 addDeps :: State -> Pkg.Name -> V.Version -> Details
-addDeps (State _ _ _ _ constraints) name vsn =
+addDeps (State _ _ _ _ _ constraints) name vsn =
   case Map.lookup (name, vsn) constraints of
     Just (Constraints _ deps) -> Details vsn deps
     Nothing                   -> error "compiler bug manifesting in Deps.Solver.addDeps"
@@ -132,8 +134,8 @@ data AppSolution =
     }
 
 
-addToApp :: Stuff.PackageCache -> Connection -> Registry.Registry -> Map.Map Pkg.Name String -> Pkg.Name -> Outline.AppOutline -> IO (Result AppSolution)
-addToApp cache connection registry gitUrls pkg outline@(Outline.AppOutline _ _ direct indirect testDirect testIndirect _) =
+addToApp :: Reporting.DKey -> Stuff.PackageCache -> Connection -> Registry.Registry -> Map.Map Pkg.Name String -> Pkg.Name -> Outline.AppOutline -> IO (Result AppSolution)
+addToApp key cache connection registry gitUrls pkg outline@(Outline.AppOutline _ _ direct indirect testDirect testIndirect _) =
   Stuff.withRegistryLock cache $
   let
     allIndirects = Map.union indirect testIndirect
@@ -153,14 +155,14 @@ addToApp cache connection registry gitUrls pkg outline@(Outline.AppOutline _ _ d
       ]
   of
     Solver solver ->
-      solver (State cache connection registry gitUrls Map.empty)
+      solver (State key cache connection registry gitUrls Map.empty)
         (\s a _ -> return $ Ok (toApp s pkg outline allDeps a))
         (\_     -> return $ noSolution connection)
         (\e     -> return $ Err e)
 
 
 toApp :: State -> Pkg.Name -> Outline.AppOutline -> Map.Map Pkg.Name V.Version -> Map.Map Pkg.Name V.Version -> AppSolution
-toApp (State _ _ _ _ constraints) pkg (Outline.AppOutline elm srcDirs direct _ testDirect _ gitDependencies) old new =
+toApp (State _ _ _ _ _ constraints) pkg (Outline.AppOutline elm srcDirs direct _ testDirect _ gitDependencies) old new =
   let
     d   = Map.intersection new (Map.insert pkg V.one direct)
     i   = Map.difference (getTransitive constraints new (Map.toList d) Map.empty) d
@@ -264,7 +266,7 @@ addConstraint solved unsolved (name, newConstraint) =
 
 getRelevantVersions :: Pkg.Name -> C.Constraint -> Solver (V.Version, [V.Version])
 getRelevantVersions name constraint =
-  Solver $ \state@(State _ _ registry _ _) ok back _ ->
+  Solver $ \state@(State _ _ _ registry _ _) ok back _ ->
     case Registry.getVersions name registry of
       Just (Registry.KnownVersions newest previous) ->
         case filter (C.satisfies constraint) (newest:previous) of
@@ -281,19 +283,22 @@ getRelevantVersions name constraint =
 
 getConstraints :: Pkg.Name -> V.Version -> Solver Constraints
 getConstraints pkg vsn =
-  Solver $ \state@(State cache connection registry gitUrls cDict) ok back err ->
+  Solver $ \state@(State dkey cache connection registry gitUrls cDict) ok back err ->
     do  let key = (pkg, vsn)
         case Map.lookup key cDict of
           Just cs ->
             ok state cs back
 
           Nothing ->
-            do  let toNewState cs = State cache connection registry gitUrls (Map.insert key cs cDict)
+            do  let toNewState cs = State dkey cache connection registry gitUrls (Map.insert key cs cDict)
                 let home = Stuff.package cache pkg vsn
                 let path = home </> "elm.json"
                 case Map.lookup pkg gitUrls of
                   Just url ->
-                    do  ensured <- Git.ensurePackage home pkg url vsn
+                    do  needsClone <- not <$> File.exists path
+                        when needsClone $
+                          Reporting.report dkey (Reporting.DGitClone pkg vsn url)
+                        ensured <- Git.ensurePackage home pkg url vsn
                         case ensured of
                           Left gitProblem ->
                             err (Exit.SolverBadGitDep gitProblem)
@@ -317,9 +322,9 @@ getConstraintsHelp
   -> (State -> IO b)
   -> (Exit.Solver -> IO b)
   -> IO b
-getConstraintsHelp pkg vsn state@(State cache connection registry gitUrls cDict) ok back err =
+getConstraintsHelp pkg vsn state@(State dkey cache connection registry gitUrls cDict) ok back err =
     do  let key = (pkg, vsn)
-        do  let toNewState cs = State cache connection registry gitUrls (Map.insert key cs cDict)
+        do  let toNewState cs = State dkey cache connection registry gitUrls (Map.insert key cs cDict)
             let home = Stuff.package cache pkg vsn
             let path = home </> "elm.json"
             outlineExists <- File.exists path
@@ -431,8 +436,8 @@ initEnv =
 --
 
 
-addGitDeps :: Outline.Outline -> Env -> IO (Either Git.Problem Env)
-addGitDeps outline env@(Env cache manager connection registry _) =
+addGitDeps :: Reporting.DKey -> Outline.Outline -> Env -> IO (Either Git.Problem Env)
+addGitDeps key outline env@(Env cache manager connection registry _) =
   let
     gitUrls = Outline.gitDeps outline
   in
@@ -440,7 +445,7 @@ addGitDeps outline env@(Env cache manager connection registry _) =
   then return (Right env)
   else
     do  Pkg.registerTrustedKernelPackages (Map.keysSet gitUrls)
-        result <- foldM (addGitDep outline) (Right registry) (Map.toList gitUrls)
+        result <- foldM (addGitDep key outline) (Right registry) (Map.toList gitUrls)
         case result of
           Left problem ->
             return (Left problem)
@@ -449,8 +454,8 @@ addGitDeps outline env@(Env cache manager connection registry _) =
             return (Right (Env cache manager connection newRegistry gitUrls))
 
 
-addGitDep :: Outline.Outline -> Either Git.Problem Registry.Registry -> (Pkg.Name, String) -> IO (Either Git.Problem Registry.Registry)
-addGitDep outline result (pkg, url) =
+addGitDep :: Reporting.DKey -> Outline.Outline -> Either Git.Problem Registry.Registry -> (Pkg.Name, String) -> IO (Either Git.Problem Registry.Registry)
+addGitDep key outline result (pkg, url) =
   case result of
     Left problem ->
       return (Left problem)
@@ -462,7 +467,8 @@ addGitDep outline result (pkg, url) =
             Map.insert pkg (Registry.KnownVersions vsn []) versions
 
         Nothing ->
-          do  eitherVersions <- Git.getVersions url
+          do  Reporting.report key (Reporting.DGitLookup pkg url)
+              eitherVersions <- Git.getVersions url
               case eitherVersions of
                 Left problem ->
                   return (Left problem)
