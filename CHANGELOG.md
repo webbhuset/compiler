@@ -154,10 +154,13 @@ Elm.Main.init({ node: ... });
 - Nothing is assigned to the global scope, and separate `.mjs` bundles do
   not merge into a shared `Elm` object the way classic bundles do.
 - `--output=foo.js` and `--output=foo.html` are byte-for-byte unchanged.
-- One module per invocation, unless the program asks for more files:
-  `import async` writes one chunk per async-imported module and
-  `Worker.spawn` one bundle per worker program. Both resolve their
-  files against `import.meta.url`, which is why they need this mode.
+- One module per program. Several programs in one invocation are split:
+  each one's code goes in a content-hashed sibling fetched when it is
+  started, and the module keeps what they share (see code splitting
+  below). A program can ask for more files too: `import async` writes one
+  chunk per async-imported module and `Worker.spawn` one bundle per worker
+  program. All of these resolve their files against `import.meta.url`,
+  which is why they need this mode.
 
 ## Compiled pieces in elm reactor
 
@@ -441,6 +444,13 @@ as usual, and `async` remains a legal variable name.
   registered when the program starts.
 - A module that is reachable without the async import anyway is already
   in the main bundle, so the import costs nothing and fetches nothing.
+- Several applications compiled into one `.mjs` are split the same way
+  with no `import async` at all: one chunk per application, fetched the
+  first time it is started, and the shared code in the module itself.
+  `Elm.App1.init` still returns at once, with the application's ports on
+  the object; what the page sends or subscribes before the chunk lands is
+  replayed once the program starts. An application reachable from another
+  one anyway stays in the module.
 - `--optimize` works normally: one `elm make` means one field-rename
   table, so values cross between the files unchanged.
 - Compile errors for a reference that would be forced when the bundle

@@ -110,8 +110,16 @@ generateWith format =
 
 toBundles :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Task Bundles
 toBundles format mode graph mains =
-  do  maybePlan <-
-        case Chunks.plan (Mode.isDebug mode) graph mains of
+  do  -- Several applications in one ES module each get a chunk of their
+      -- own, fetched when the application is started; the module itself
+      -- keeps what they share. Only ESM output can host the files.
+      let splitApps =
+            case format of
+              Esm  -> Map.size mains > 1
+              Iife -> False
+
+      maybePlan <-
+        case Chunks.plan (Mode.isDebug mode) splitApps graph mains of
           Left cycleNames -> Task.throw (Exit.GenerateChunkCycle cycleNames)
           Right maybePlan -> return maybePlan
 

@@ -2,12 +2,15 @@
 module Generate.Chunks
   ( Plan(..)
   , Chunk(..)
+  , Program(..)
   , plan
   , insideWorkers
   , getName
   , regName
   , scopeName
   , scopeArg
+  , programName
+  , appExport
   , token
   , tokenBuilder
   , homeToChars
@@ -41,6 +44,10 @@ import qualified Generate.JavaScript.Name as JsName
 -- docs/code-splitting-design.md for the rules; the short version is that a
 -- chunk owns what only it needs, and everything else -- code a second
 -- chunk also wants, effect managers, kernel code -- stays in main.
+--
+-- When several applications are compiled into one ES module, each one's
+-- `main` roots a chunk of its own as well, so the main bundle holds only
+-- what they share and an application's code is fetched when it is started.
 
 
 data Plan =
@@ -60,11 +67,26 @@ data Chunk =
     , _roots :: Set.Set Opt.Global
       -- the values referenced across the boundary: the chunk's walk starts
       -- here and its exports are exactly these
+    , _program :: Maybe Program
+      -- set when this chunk holds an application the bundle exports; its
+      -- `init` then fetches the chunk instead of finding `main` in scope
     }
 
 
-plan :: Bool -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Either [String] (Maybe Plan)
-plan isDebug (Opt.GlobalGraph allNodes _) mains =
+-- An application that lives in a chunk, with the ports a host page can
+-- reach on it: the incoming ones (`send`) and the outgoing ones
+-- (`subscribe`/`unsubscribe`). They are known here, before the chunk
+-- arrives, which is what lets `init` hand back a usable app object at once.
+data Program =
+  Program
+    { _main :: Opt.Main
+    , _incomingPorts :: [Name.Name]
+    , _outgoingPorts :: [Name.Name]
+    }
+
+
+plan :: Bool -> Bool -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Either [String] (Maybe Plan)
+plan isDebug splitApps (Opt.GlobalGraph allNodes _) mains =
   let
     nodes =
       if isDebug then allNodes else Map.filterWithKey (\g _ -> not (isDebugger g)) allNodes
@@ -72,23 +94,59 @@ plan isDebug (Opt.GlobalGraph allNodes _) mains =
     mainRoots =
       Map.foldrWithKey (\home _ gs -> Opt.Global home "main" : gs) [] mains
 
-    seed =
-      closure nodes Set.empty mainRoots
+    -- Splitting applications means the main bundle starts empty and each
+    -- `main` is a chunk root; what the applications share, effect managers
+    -- and kernel code then land in main by the ordinary hoisting rule.
+    (seed, appRoots) =
+      if splitApps then
+        ( Set.empty
+        , Map.fromList [ (home, Set.singleton global) | global@(Opt.Global home _) <- mainRoots ]
+        )
+      else
+        ( closure nodes Set.empty mainRoots
+        , Map.empty
+        )
+
+    toProgram home =
+      if splitApps then
+        fmap (program nodes home) (Map.lookup home mains)
+      else
+        Nothing
   in
-  case Map.toList (settle nodes seed) of
+  case Map.toList (settle nodes seed appRoots) of
     [] ->
       Right Nothing
 
     chunkList ->
       let
         mainSeen = grow nodes seed (map snd chunkList)
+        table = Map.fromList chunkList
       in
       case order nodes mainSeen chunkList of
         Left cycleNames ->
           Left cycleNames
 
         Right ordered ->
-          Right (Just (Plan ordered mainSeen))
+          Right $ Just $ Plan
+            [ Chunk home (table Map.! home) (toProgram home) | home <- ordered ]
+            mainSeen
+
+
+program :: Map.Map Opt.Global Opt.Node -> ModuleName.Canonical -> Opt.Main -> Program
+program nodes home main =
+  let
+    live = Set.toList (closure nodes Set.empty [Opt.Global home "main"])
+
+    portsOf isKind =
+      [ name
+      | global@(Opt.Global _ name) <- live
+      , maybe False isKind (Map.lookup global nodes)
+      ]
+
+    isIncoming node = case node of { Opt.PortIncoming _ _ -> True ; _ -> False }
+    isOutgoing node = case node of { Opt.PortOutgoing _ _ -> True ; _ -> False }
+  in
+  Program main (portsOf isIncoming) (portsOf isOutgoing)
 
 
 
@@ -113,15 +171,18 @@ insideWorkers isDebug (Opt.GlobalGraph allNodes _) workerRoots =
 -- An async reference in the main bundle names a chunk; that chunk's own
 -- code can name further chunks, so this runs to a fixed point. The value
 -- is every referenced global per module, which is also that chunk's export
--- list.
+-- list. The caller may hand in chunks that exist for another reason -- an
+-- application's `main` when applications are split -- and those are
+-- walked for async references like any other.
 
 
 settle
   :: Map.Map Opt.Global Opt.Node
   -> Set.Set Opt.Global
   -> Map.Map ModuleName.Canonical (Set.Set Opt.Global)
-settle nodes seen =
-  go (asyncRefsIn nodes seen) Map.empty
+  -> Map.Map ModuleName.Canonical (Set.Set Opt.Global)
+settle nodes seen given =
+  go (Map.unionWith Set.union given (asyncRefsIn nodes seen)) Map.empty
   where
     go found acc =
       let
@@ -213,7 +274,7 @@ order
   :: Map.Map Opt.Global Opt.Node
   -> Set.Set Opt.Global
   -> [(ModuleName.Canonical, Set.Set Opt.Global)]
-  -> Either [String] [Chunk]
+  -> Either [String] [ModuleName.Canonical]
 order nodes mainSeen chunkList =
   let
     table = Map.fromList chunkList
@@ -229,7 +290,7 @@ order nodes mainSeen chunkList =
       Left cycleNames
 
     Right (revOrder, _, _) ->
-      Right [ Chunk home (table Map.! home) | home <- reverse revOrder ]
+      Right (reverse revOrder)
 
 
 visitAll
@@ -447,6 +508,21 @@ scopeArg =
   JsName.fromKernel "Chunk" "s"
 
 
+-- Builds the exported `init` of an application that lives in a chunk.
+programName :: JsName.Name
+programName =
+  JsName.fromKernel "Chunk" "program"
+
+
+-- The key under which an application chunk exports its started program:
+-- `main` applied to its flags decoder and debug metadata, ready for the
+-- host page's `args`. Built inside the chunk, so the decoder's own
+-- dependencies are in scope wherever the planner put them.
+appExport :: B.Builder
+appExport =
+  "_app"
+
+
 
 -- RUNTIME
 --
@@ -465,22 +541,61 @@ scopeArg =
 -- uncaught object. The tag is spelled without leading underscores on
 -- purpose: `__name` in a kernel file is a token the kernel preprocessor
 -- rewrites, and the two sides have to agree on one literal name.
+--
+-- An application that lives in a chunk is started through _Chunk_program.
+-- Its `init` cannot wait: host pages call `app.ports.x.send` on the very
+-- next line. So it returns an app object at once whose ports are known
+-- from the graph, records what the page does with them, and replays it on
+-- the real app once the chunk has landed and `main` has been started with
+-- the same `args`. Nothing is lost in between: an outgoing port's first
+-- messages are delivered after a `sleep 0` anyway, so a subscriber
+-- registered right after the real start still sees them.
 
 
 runtime :: B.Builder
 runtime =
   "function _Chunk_reg(url) { return { u: url, e: null, p: null }; }\n\
   \function _Chunk_ready(exports) { return { u: null, e: exports, p: null }; }\n\
-  \function _Chunk_get(c) {\n\
-  \\tif (c.e) { return c.e; }\n\
+  \function _Chunk_load(c) {\n\
   \\tif (!c.p) {\n\
   \\t\tc.p = import(new URL(c.u, __elmWorkerBaseUrl)).then(function(m) {\n\
   \\t\t\tc.e = m.default(_Chunk_scope());\n\
   \\t\t});\n\
   \\t}\n\
+  \\treturn c.p;\n\
+  \}\n\
+  \function _Chunk_get(c) {\n\
+  \\tif (c.e) { return c.e; }\n\
   \\tvar e = new Error(\"An async-imported module is not here yet. Elm waits for one in init, update, view and subscriptions; this reference was somewhere else, such as inside a Task callback. See docs/code-splitting.md.\");\n\
-  \\te.elmChunk = c.p;\n\
+  \\te.elmChunk = _Chunk_load(c);\n\
   \\tthrow e;\n\
+  \}\n\
+  \function _Chunk_program(c, incoming, outgoing) {\n\
+  \\treturn function(args) {\n\
+  \\t\tif (c.e) { return c.e." <> appExport <> "(args); }\n\
+  \\t\tvar app = null;\n\
+  \\t\tvar pending = [];\n\
+  \\t\tfunction later(f) { app ? f() : pending.push(f); }\n\
+  \\t\tvar ports = {};\n\
+  \\t\tincoming.forEach(function(name) {\n\
+  \\t\t\tports[name] = {\n\
+  \\t\t\t\tsend: function(value) { later(function() { app.ports[name].send(value); }); }\n\
+  \\t\t\t};\n\
+  \\t\t});\n\
+  \\t\toutgoing.forEach(function(name) {\n\
+  \\t\t\tports[name] = {\n\
+  \\t\t\t\tsubscribe: function(callback) { later(function() { app.ports[name].subscribe(callback); }); },\n\
+  \\t\t\t\tunsubscribe: function(callback) { later(function() { app.ports[name].unsubscribe(callback); }); }\n\
+  \\t\t\t};\n\
+  \\t\t});\n\
+  \\t\t_Chunk_load(c).then(function() {\n\
+  \\t\t\tapp = c.e." <> appExport <> "(args);\n\
+  \\t\t\tvar work = pending;\n\
+  \\t\t\tpending = [];\n\
+  \\t\t\tfor (var i = 0; i < work.length; i++) { work[i](); }\n\
+  \\t\t});\n\
+  \\t\treturn incoming.length || outgoing.length ? { ports: ports } : {};\n\
+  \\t};\n\
   \}\n"
 
 

@@ -130,7 +130,7 @@ generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
 
         Nothing ->
           metaUrlLine <> Functions.functions <> perfNote mode
-            <> stateToBuilder state <> toMainExportsEsm mode mains
+            <> stateToBuilder state <> toMainExportsEsm mode mains Map.empty
   in
   ( javascript, GenCss.generate mode globalGraph mains workerRoots )
 
@@ -181,19 +181,26 @@ generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoo
         (Set.fromList
           (map (render . JsName.toBuilder . JsName.fromChunk . Chunks._home) chunks))
 
-    step (revBundles, revRegs, needed) chunk =
+    -- An application whose chunk turned out to be born loaded is in the
+    -- main bundle after all, so it is exported the ordinary way; only one
+    -- that has a file of its own goes through the chunk loader.
+    step (revBundles, revRegs, needed, apps) chunk =
       let
         home = Chunks._home chunk
       in
       case generateChunkBundle mode graph mainSeen mainDefined chunk of
         Left exports ->
-          (revBundles, Chunks.readyRegistration home exports : revRegs, needed)
+          (revBundles, Chunks.readyRegistration home exports : revRegs, needed, apps)
 
         Right (ns, builder) ->
-          ((home, builder) : revBundles, Chunks.registration home : revRegs, Set.union needed ns)
+          ( (home, builder) : revBundles
+          , Chunks.registration home : revRegs
+          , Set.union needed ns
+          , maybe apps (\p -> Map.insert home p apps) (Chunks._program chunk)
+          )
 
-    (revChunkBundles, revRegistrations, allNeeded) =
-      List.foldl' step ([], [], Set.empty) chunks
+    (revChunkBundles, revRegistrations, allNeeded, chunkedApps) =
+      List.foldl' step ([], [], Set.empty, Map.empty) chunks
 
     javascript =
       metaUrlLine
@@ -202,7 +209,7 @@ generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoo
       <> Chunks.runtime
       <> Chunks.scopeDef allNeeded
       <> mconcat (reverse revRegistrations)
-      <> toMainExportsEsm mode mains
+      <> toMainExportsEsm mode mains chunkedApps
 
     cssRoots =
       workerRoots ++ concatMap (Set.toList . Chunks._roots) chunks
@@ -224,7 +231,7 @@ generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoo
 generateChunkBundle
   :: Mode.Mode -> Graph -> Set.Set Opt.Global -> Set.Set BS.ByteString -> Chunks.Chunk
   -> Either [B.Builder] (Set.Set BS.ByteString, B.Builder)
-generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk _ roots) =
+generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk home roots maybeProgram) =
   let
     state@(State _ _ seen) =
       List.foldl' (addGlobal mode graph) (State mempty [] mainSeen)
@@ -233,12 +240,26 @@ generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk _ roots) =
     body = stateToBuilder state
 
     exports =
-      map (\(Opt.Global home name) -> JsName.toBuilder (JsName.fromGlobal home name))
+      map (\(Opt.Global h name) -> JsName.toBuilder (JsName.fromGlobal h name))
         (Set.toList roots)
+
+    -- An application chunk also exports its started program, so the main
+    -- bundle's `init` has nothing to build but the call.
+    fields =
+      map (\e -> e <> ":" <> e) exports
+      ++ case maybeProgram of
+           Nothing ->
+             []
+
+           Just (Chunks.Program main _ _) ->
+             [ Chunks.appExport <> ":" <> JS.exprToBuilder (Expr.generateMain mode home main) ]
+
+    record =
+      "{" <> mconcat (List.intersperse "," fields) <> "}"
 
     needed =
       Set.intersection
-        (Scope.mentionedNames (render (body <> mconcat exports)))
+        (Scope.mentionedNames (render (body <> record)))
         mainDefined
 
     scope =
@@ -255,9 +276,7 @@ generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk _ roots) =
       , "export default function(" <> scope <> ") {\n"
         <> mconcat (map rebind (Set.toList needed))
         <> body
-        <> "return {"
-        <> mconcat (List.intersperse "," (map (\e -> e <> ":" <> e) exports))
-        <> "};\n}\n"
+        <> "return " <> record <> ";\n}\n"
       )
 
 
@@ -753,20 +772,25 @@ toMainExports :: Mode.Mode -> Mains -> B.Builder
 toMainExports mode mains =
   let
     export = JsName.fromKernel Name.platform "export"
-    exports = generateExports mode (Map.foldrWithKey addToTrie emptyTrie mains)
+    exports = generateExports mode Map.empty (Map.foldrWithKey addToTrie emptyTrie mains)
   in
   JsName.toBuilder export <> "(" <> exports <> ");"
 
 
-toMainExportsEsm :: Mode.Mode -> Mains -> B.Builder
-toMainExportsEsm mode mains =
+-- The applications in `chunked` live in a chunk of their own; their `init`
+-- goes through the chunk loader instead of touching `main` directly.
+type ChunkedApps = Map.Map ModuleName.Canonical Chunks.Program
+
+
+toMainExportsEsm :: Mode.Mode -> Mains -> ChunkedApps -> B.Builder
+toMainExportsEsm mode mains chunked =
   "const Elm = "
-  <> generateExports mode (Map.foldrWithKey addToTrie emptyTrie mains)
+  <> generateExports mode chunked (Map.foldrWithKey addToTrie emptyTrie mains)
   <> ";\nexport { Elm };\nexport default Elm;\n"
 
 
-generateExports :: Mode.Mode -> Trie -> B.Builder
-generateExports mode (Trie maybeMain subs) =
+generateExports :: Mode.Mode -> ChunkedApps -> Trie -> B.Builder
+generateExports mode chunked (Trie maybeMain subs) =
   let
     starter end =
       case maybeMain of
@@ -775,7 +799,7 @@ generateExports mode (Trie maybeMain subs) =
 
         Just (home, main) ->
           "{'init':"
-          <> JS.exprToBuilder (Expr.generateMain mode home main)
+          <> JS.exprToBuilder (generateInit mode chunked home main)
           <> end
     in
     case Map.toList subs of
@@ -785,13 +809,29 @@ generateExports mode (Trie maybeMain subs) =
       (name, subTrie) : otherSubTries ->
         starter "," <>
         "'" <> Utf8.toBuilder name <> "':"
-        <> generateExports mode subTrie
-        <> List.foldl' (addSubTrie mode) "}" otherSubTries
+        <> generateExports mode chunked subTrie
+        <> List.foldl' (addSubTrie mode chunked) "}" otherSubTries
 
 
-addSubTrie :: Mode.Mode -> B.Builder -> (Name.Name, Trie) -> B.Builder
-addSubTrie mode end (name, trie) =
-  ",'" <> Utf8.toBuilder name <> "':" <> generateExports mode trie <> end
+-- `_Chunk_program(_Chunk$author$project$App, ['incoming'], ['outgoing'])`
+-- for an application in a chunk; the started `main` otherwise.
+generateInit :: Mode.Mode -> ChunkedApps -> ModuleName.Canonical -> Opt.Main -> JS.Expr
+generateInit mode chunked home main =
+  case Map.lookup home chunked of
+    Nothing ->
+      Expr.generateMain mode home main
+
+    Just (Chunks.Program _ incoming outgoing) ->
+      JS.Call (JS.Ref Chunks.programName)
+        [ JS.Ref (JsName.fromChunk home)
+        , JS.Array (map (JS.String . Name.toBuilder) incoming)
+        , JS.Array (map (JS.String . Name.toBuilder) outgoing)
+        ]
+
+
+addSubTrie :: Mode.Mode -> ChunkedApps -> B.Builder -> (Name.Name, Trie) -> B.Builder
+addSubTrie mode chunked end (name, trie) =
+  ",'" <> Utf8.toBuilder name <> "':" <> generateExports mode chunked trie <> end
 
 
 
