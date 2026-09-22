@@ -34,7 +34,7 @@
 +
 +	function drain()
 +	{
-+		if (!stepper) { start(); }
++		if (!stepper) { start(); } else { started = true; }
 +		if (!started) { return; }
 +
 +		var work = queue;

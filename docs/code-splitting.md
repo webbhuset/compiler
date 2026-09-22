@@ -73,6 +73,50 @@ What does not move:
 they share one field-rename table and values cross between them unchanged.
 
 
+## Several applications in one file
+
+Compiling more than one program into one ES module splits it the same way,
+with no `import async` anywhere: each application's code goes in a chunk of
+its own, fetched the first time that application is started, and the module
+itself keeps what the applications share -- `elm/core`, the virtual DOM,
+effect managers, and any of your modules more than one of them imports.
+
+```
+elm make src/App1.elm src/App2.elm --output=bundle.mjs
+```
+
+writes `bundle.mjs` plus one `bundle.<hash>.mjs` per application.
+
+```js
+import { Elm } from "./bundle.mjs";
+
+const app1 = Elm.App1.init({ flags: 21 });   // fetches App1's chunk
+app1.ports.nameIn.send("World");             // fine: queued until it lands
+
+const app2 = Elm.App2.init({});              // fetches App2's chunk
+```
+
+`init` returns at once, as it always has, and the object it returns carries
+the ports that application can reach. Until the chunk arrives, `send`
+queues its value and `subscribe` remembers its callback; both are replayed
+against the real program the moment it starts, in the order they happened.
+Messages an outgoing port sends from `init` are not lost either: Elm
+delivers them after a `sleep 0` in any case, so a subscriber registered
+right after `init` still sees them. `node`, `flags` and `taskPorts` are
+passed through untouched, so a `Browser` program renders into its node when
+its chunk lands.
+
+A page that starts one application now downloads two files instead of one,
+the shared module and that application's chunk, and the sibling files have
+to be deployed next to the module. An application that is reachable from
+another one anyway -- `App1` imports `App2` and touches its `main` -- is
+already in the shared module, and its `init` is the ordinary one.
+
+Nothing changes for a single program, for `.js` output, or for the reactor,
+which compiles one program at a time. There is no way to turn the split off
+yet; a `--split` flag is a likely follow-up.
+
+
 ## Rules
 
 **Use it under a lambda.** A top-level definition with no arguments is

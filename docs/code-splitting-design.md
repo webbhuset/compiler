@@ -2,7 +2,9 @@
 
 **Status: implemented. Compiler side on this branch; the runtime is two
 patches to the forked packages (`patches/elm-core-code-splitting.patch`,
-`patches/elm-browser-code-splitting.patch`). Requires `--output=*.mjs`.**
+`patches/elm-browser-code-splitting.patch`). Requires `--output=*.mjs`.
+Several applications in one `.mjs` are split into one chunk each by the
+same machinery; see *Several applications* below.**
 
 Everything reachable from `main` ships in one bundle and is evaluated
 before the app starts, including the page the user never opens. There is no
@@ -177,6 +179,10 @@ export default function(__scope) {
 }
 ```
 
+An application chunk (below) returns one more field, `_app`: `main`
+applied to its flags decoder and debug metadata, so the main bundle's
+`init` has nothing left to build but the call with `args`.
+
 Rebinding the shared names as locals at chunk init keeps every reference
 inside the chunk a plain identifier, so chunk code pays no per-access cost
 for living in another file. Main pays one property lookup per async
@@ -223,6 +229,8 @@ it produces today.
 a loader that `import()`s the file, memoizes the promise, applies the
 default export to `_Chunk_scope()`, and keeps the returned record.
 `_Chunk_get` returns that record, or throws `{ elmChunk: promise }`.
+`_Chunk_load` is the loader on its own, and `_Chunk_program` builds the
+exported `init` of an application chunk (below).
 
 The marker is a plain object rather than a class so the patches can
 recognise it whether or not this prelude was emitted. Its field is spelled
@@ -241,6 +249,99 @@ preprocessed -- has to agree with the patches on one literal name.
 - `elm/browser` `Browser.js`. `_Browser_makeAnimator`'s `draw` is the
   single place `view` is called. Catch there, leave the dirty flag set,
   and request another frame when the chunk lands.
+
+
+## Several applications
+
+`elm make src/App1.elm src/App2.elm --output=bundle.mjs` splits the output
+into the shared module and one chunk per application, with nothing marked
+`async` anywhere. The planner already had every rule this needs; the
+change is in how it is seeded. Normally the main bundle starts as the
+closure of every `main` and chunks are whatever async references lead to.
+With several applications it starts *empty*, and each application's `main`
+is handed to `settle` as a chunk root. The hoisting rule then does the
+rest: code two applications both reach has a count of two and moves to
+main, effect managers and kernel code move to main because they always do,
+and what remains of an application is its chunk. An application reachable
+from another one synchronously has its `main` hoisted, its chunk comes out
+empty, and it degrades to a ready registration with the ordinary `init` --
+the same degradation an `import async` of a synchronously reachable module
+has.
+
+**Where `init` waits.** The exported `init` used to be
+`main(flagDecoder)(debugMetadata)`, evaluated when the bundle loads. With
+`main` in a chunk that reference would throw outside every retry point, so
+something has to change shape, and two options were weighed:
+
+- *Keep each `main` expression in the main bundle and make the functions
+  it names -- `init`, `update`, `view`, `subscriptions` -- the async
+  references.* Then the patched `_Platform_initialize` does everything:
+  it sets up ports before it calls `init`, catches the marker, and returns
+  a real app object. Nothing new at runtime. But it needs the compiler to
+  decide which of `main`'s direct dependencies are functions it may wrap
+  in a forwarder, and a point-free `view = lazy viewHelp` or a
+  `Browser.sandbox { init = initialModel }` is not a `Function` node. Those
+  would have to be hoisted with their whole closure, silently defeating the
+  split in exactly the programs that look fine.
+- *Put the whole `main` in the chunk and make the exported `init` a
+  loader.* Chosen. `_Chunk_program(handle, incoming, outgoing)` returns
+  the `init`: it starts the `import()`, returns an app object at once, and
+  when the chunk lands calls the chunk's `_app(args)` and replays what the
+  page did meanwhile. It needs no knowledge of `main`'s shape and no new
+  package patch.
+
+**The app object before the chunk lands.** Host pages call
+`app.ports.x.send(...)` on the line after `init`, so the object cannot be
+a promise and its ports cannot be empty. The port names are static: the
+`PortIncoming` and `PortOutgoing` nodes in the closure of the
+application's `main`, all of which are evaluated by the time the chunk has
+been applied. Each incoming port gets a `send` that queues, each outgoing
+one a `subscribe`/`unsubscribe` that records; a second `init` of an
+application whose chunk is already here returns the real app directly.
+Ports reached only through a further `import async` are not on the object,
+since nothing can know their names before that chunk loads.
+
+This narrows what is on `app.ports` compared to upstream, where
+`_Platform_setupEffects` walks every manager registered in the bundle and
+so every application sees every application's ports. The narrowing is
+deliberate: the ports of another application were never usable from this
+one.
+
+Replay ordering is what makes this indistinguishable from a single bundle.
+An outgoing port's manager starts as `sleep 0`, so a message sent from the
+program's `init` reaches subscribers a tick after `init` returns -- and the
+replay of `subscribe` happens synchronously right after the real `init`,
+inside the same microtask. A `send` before the chunk lands is queued and
+delivered after it, where the patched `_Platform_initialize` would have
+queued it anyway had `init` suspended.
+
+**Why the flags decoder is applied inside the chunk.** The decoder's
+dependencies are folded into `main`'s node, so they follow `main` into the
+chunk unless another application shares them. A `Json.Decode.succeed` used
+by one application's unit flags and by nothing else is in that chunk only,
+and an export block in the main bundle that named it would throw. So the
+chunk exports `_app`, built by `generateMain` inside the chunk, where the
+decoder's names are in scope wherever the planner put them.
+
+**Only ESM, only with two or more mains.** `.js` output cannot host the
+files and a single program would gain a file and a request for nothing.
+Both cases take the pre-existing path byte for byte. The reactor compiles
+one program at a time, so it never splits.
+
+**Not fixed here.** Code shared by an application and an `import async`
+page that only it uses is hoisted to the main bundle, since the planner
+only knows one scope. Keeping it in the application's chunk would need
+nested scopes, where a chunk's scope object is main's plus its parent
+application's. Stale hashed siblings also accumulate faster with one file
+per application.
+
+**A bug this surfaced in the core patch.** Testing an application chunk
+that also reaches an `import async` module from `update` hung the program:
+`drain` in `_Platform_initialize` only ever set `started` back to true
+through `start()`, so a suspend in `update` -- as opposed to `init` --
+was never resumed. `patches/elm-core-code-splitting.patch` now sets
+`started = true` when the stepper already exists. The fix is in the patch
+file; the published fork of `elm/core` needs a release that carries it.
 
 
 ## What is checked, what is not
