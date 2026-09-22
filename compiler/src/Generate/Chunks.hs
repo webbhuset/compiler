@@ -558,7 +558,7 @@ runtime =
   \function _Chunk_ready(exports) { return { u: null, e: exports, p: null }; }\n\
   \function _Chunk_load(c) {\n\
   \\tif (!c.p) {\n\
-  \\t\tc.p = import(new URL(c.u, __elmWorkerBaseUrl)).then(function(m) {\n\
+  \\t\tc.p = import(new URL(c.u, _Elm_baseUrl)).then(function(m) {\n\
   \\t\t\tc.e = m.default(_Chunk_scope());\n\
   \\t\t});\n\
   \\t}\n\

@@ -136,13 +136,18 @@ generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
 
 
 -- Worker files and code-splitting chunks are loaded relative to the bundle
--- that names them, which only ES modules can know (import.meta). The kernel
--- in webbhuset/worker reads this variable, and so does the chunk loader in
--- Generate.Chunks; it is only emitted in ESM output, where the syntax is
+-- that names them, which only ES modules can know (import.meta). The worker
+-- kernel in elm/browser reads this variable, and so does the chunk loader
+-- in Generate.Chunks; it is only emitted in ESM output, where the syntax is
 -- legal.
+--
+-- The name has a single leading underscore on purpose. A kernel file cannot
+-- spell a `__lowercase` name: the kernel preprocessor takes it for a field
+-- token and renames it, which is how an earlier `__elmWorkerBaseUrl` was
+-- never actually read by the kernel that meant to.
 metaUrlLine :: B.Builder
 metaUrlLine =
-  "var __elmWorkerBaseUrl = import.meta.url;\n"
+  "var _Elm_baseUrl = import.meta.url;\n"
 
 
 

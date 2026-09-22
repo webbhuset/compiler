@@ -394,11 +394,11 @@ index 0000000..52d736d
 +});
 +
 +
-+// The main bundle defines __elmWorkerBaseUrl as import.meta.url (only ES
++// The main bundle defines _Elm_baseUrl as import.meta.url (only ES
 +// modules can, which is why workers require --output=something.mjs).
 +function _Worker_baseUrl()
 +{
-+	return typeof __elmWorkerBaseUrl !== 'undefined' ? __elmWorkerBaseUrl : self.location.href;
++	return typeof _Elm_baseUrl !== 'undefined' ? _Elm_baseUrl : self.location.href;
 +}
 +
 +
