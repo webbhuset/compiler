@@ -134,7 +134,7 @@ forkDefaults :: Map.Map Pkg.Name (V.Version, String)
 forkDefaults =
   Map.fromList
     [ ( Pkg.core
-      , ( V.Version 1 100 504
+      , ( V.Version 1 100 505
         , "git@github.com:webbhuset/core.git"
         )
       )
