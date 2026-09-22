@@ -231,7 +231,7 @@ initEnv key root stuff =
                   return $ Left $ Exit.DetailsCannotGetRegistry problem
 
                 Right solverEnv ->
-                  do  eitherEnv <- Solver.addGitDeps outline solverEnv
+                  do  eitherEnv <- Solver.addGitDeps key outline solverEnv
                       case eitherEnv of
                         Left gitProblem ->
                           return $ Left $ Exit.DetailsSolverProblem (Exit.SolverBadGitDep gitProblem)
@@ -284,8 +284,8 @@ checkAppDeps (Outline.AppOutline _ _ direct indirect testDirect testIndirect _) 
 
 
 verifyConstraints :: Env -> Map.Map Pkg.Name Con.Constraint -> Task (Map.Map Pkg.Name Solver.Details)
-verifyConstraints (Env _ _ cache _ connection registry gitUrls) constraints =
-  do  result <- Task.io $ Solver.verify cache connection registry gitUrls constraints
+verifyConstraints (Env key _ cache _ connection registry gitUrls) constraints =
+  do  result <- Task.io $ Solver.verify key cache connection registry gitUrls constraints
       case result of
         Solver.Ok details        -> return details
         Solver.NoSolution        -> Task.throw $ Exit.DetailsNoSolution

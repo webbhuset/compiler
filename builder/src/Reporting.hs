@@ -16,6 +16,7 @@ module Reporting
   , DKey
   , DMsg(..)
   , trackDetails
+  , gitDetails
   --
   , BKey
   , BMsg(..)
@@ -230,10 +231,12 @@ data DMsg
   | DFailed Pkg.Name V.Version
   | DBuilt
   | DBroken
+  | DGitLookup Pkg.Name String
+  | DGitClone Pkg.Name V.Version String
 
 
 detailsStep :: DMsg -> DState -> IO DState
-detailsStep msg (DState total cached rqst rcvd failed built broken) =
+detailsStep msg state@(DState total cached rqst rcvd failed built broken) =
   case msg of
     DStart numDependencies ->
       return (DState numDependencies 0 0 0 0 0 0)
@@ -258,6 +261,62 @@ detailsStep msg (DState total cached rqst rcvd failed built broken) =
 
     DBroken ->
       putBuilt (DState total cached rqst rcvd failed built (broken + 1))
+
+    DGitLookup pkg url ->
+      do  putGitLookup pkg url
+          return state
+
+    DGitClone pkg vsn url ->
+      do  putGitClone pkg vsn url
+          return state
+
+
+
+-- GIT DEPENDENCIES
+--
+-- A git dependency is fetched by running git with its output captured, so
+-- without this the terminal sits silent for as long as the clone takes. Say
+-- what is being fetched from where BEFORE waiting on it, so that a slow
+-- remote is identifiable while it is still slow.
+--
+-- These messages carry no counters. They are reported while the solver runs,
+-- which is before DStart has set a total, so no progress line exists yet for
+-- them to disturb.
+
+
+gitDetails :: DKey
+gitDetails =
+  Key $ \msg ->
+    case msg of
+      DGitLookup pkg url    -> putGitLookup pkg url
+      DGitClone pkg vsn url -> putGitClone pkg vsn url
+      _                     -> return ()
+
+
+putGitLookup :: Pkg.Name -> String -> IO ()
+putGitLookup pkg url =
+  Help.toStdout $ D.indent 2 $
+    fetchMark
+    <+> "looking up versions of"
+    <+> D.fromPackage pkg
+    <+> D.fromChars ("(" ++ url ++ ")")
+    <> "\n"
+
+
+putGitClone :: Pkg.Name -> V.Version -> String -> IO ()
+putGitClone pkg vsn url =
+  Help.toStdout $ D.indent 2 $
+    fetchMark
+    <+> "cloning"
+    <+> D.fromPackage pkg
+    <+> D.fromVersion vsn
+    <+> D.fromChars ("(" ++ url ++ ")")
+    <> "\n"
+
+
+fetchMark :: D.Doc
+fetchMark =
+  D.dullcyan $ if isWindows then "v" else "↓"
 
 
 putDownload :: D.Doc -> Pkg.Name -> V.Version -> IO ()

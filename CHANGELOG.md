@@ -100,6 +100,10 @@ like Elm versions (`1.2.0`):
   versions with `git ls-remote --tags`.
 - `elm install` works for git dependencies and preserves the field when
   rewriting `elm.json`. The field is never written unless present.
+- Cloning a repository can take a while, and git's output is captured, so
+  each package is announced with its URL before it is fetched:
+  `↓ cloning elm/core 1.100.504 (git@github.com:webbhuset/core.git)`. Nothing
+  is printed for a package already in the cache, or under `--report=json`.
 - A name+version is expected to be immutable: if you move a tag, delete
   the package's directory from `ELM_HOME` to force a fresh clone. The same
   applies when the *URL spelling* for a name+version changes (e.g. a local

@@ -154,6 +154,17 @@ Notes:
   of course — everyone building the project should use this fork.
 - Projects without `"git-dependencies"` behave byte-for-byte like the
   official compiler; the field is never written unless present.
+- Fetching is announced before it happens, since a clone can be slow and
+  git's own output is captured:
+
+  ```
+    ↓ looking up versions of elm/core (git@github.com:webbhuset/core.git)
+    ↓ cloning elm/core 1.100.504 (git@github.com:webbhuset/core.git)
+  ```
+
+  The lookup line only appears for package projects, since an application
+  pins its versions in `elm.json` and needs no `git ls-remote`. Neither line
+  is printed for a package already in the cache, or under `--report=json`.
 - There is no `elm publish` in this fork, so a package with
   `"git-dependencies"` cannot reach the public registry, where its
   dependencies would not be resolvable.
