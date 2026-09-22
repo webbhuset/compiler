@@ -29,6 +29,7 @@ tooling (elm-format, elm-test, editors).
   - [Back-lambdas](#back-lambdas)
   - [Structural variants](#structural-variants)
 - **[Compatibility notes](#compatibility-notes)**
+  - [No `elm publish`](#no-elm-publish)
   - [Cross-platform release binaries](#cross-platform-release-binaries)
 
 
@@ -99,8 +100,6 @@ like Elm versions (`1.2.0`):
   versions with `git ls-remote --tags`.
 - `elm install` works for git dependencies and preserves the field when
   rewriting `elm.json`. The field is never written unless present.
-- `elm publish` rejects packages that have git dependencies, since their
-  dependencies are not publicly resolvable.
 - A name+version is expected to be immutable: if you move a tag, delete
   the package's directory from `ELM_HOME` to force a fresh clone. The same
   applies when the *URL spelling* for a name+version changes (e.g. a local
@@ -729,6 +728,15 @@ describe s =
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.
+
+## No `elm publish`
+
+The `publish` command is removed from this fork's CLI, so nothing built here
+can reach <https://package.elm-lang.org> by accident. A package using any
+fork-only feature would be unusable to anyone on the official compiler, and
+the mistake is not undoable once a version is published. `elm bump` and
+`elm diff` are untouched, and a package meant for the official registry is
+published with the official compiler.
 
 ## Cross-platform release binaries
 
