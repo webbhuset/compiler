@@ -128,7 +128,7 @@ Follows the CSS-blocks rails, with multi-bundle output as the new part:
    workers each bundle spawns; SHA-1 the bytes; name the file
    `<base>.<hash16>.mjs`; finally substitute all names into the main
    bundle. Both bundles begin with
-   `var __elmWorkerBaseUrl = import.meta.url;` and the kernel resolves
+   `var _Elm_baseUrl = import.meta.url;` and the kernel resolves
    worker URLs against it — which is why workers require ESM output
    (`import.meta` is illegal syntax elsewhere); `.js`, `.html`, and
    `elm reactor` report an error when the program spawns workers.
