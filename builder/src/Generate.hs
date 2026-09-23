@@ -192,8 +192,8 @@ debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
   do  loading <- loadObjects stuff details modules
       types   <- loadTypes stuff ifaces modules
       objects <- finalizeObjects loading
-      let mode = Mode.Dev (Just types)
       let graph = objectsToGlobalGraph objects
+      let mode = Mode.Dev (Mode.callees (Opt._g_nodes graph)) (Just types)
       let mains = gatherMains pkg objects roots
       toBundles format mode graph mains
 
@@ -201,8 +201,8 @@ debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
 dev :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
 dev format stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
-      let mode = Mode.Dev Nothing
       let graph = objectsToGlobalGraph objects
+      let mode = Mode.Dev (Mode.callees (Opt._g_nodes graph)) Nothing
       let mains = gatherMains pkg objects roots
       toBundles format mode graph mains
 
@@ -213,7 +213,7 @@ prod format stuff details (Build.Artifacts pkg _ roots modules) =
       checkForDebugUses objects
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      let mode = Mode.Prod (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
+      let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
       toBundles format mode graph mains
 
 

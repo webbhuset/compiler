@@ -22,6 +22,7 @@ tooling (elm-format, elm-test, editors).
   - [HTML to string](#html-to-string)
   - [HTTP over fetch](#http-over-fetch)
   - [Code splitting — async imports](#code-splitting--async-imports)
+  - [Direct function calls](#direct-function-calls)
 - **[New language features](#new-language-features)**
   - [Comparable newtypes](#comparable-newtypes)
   - [CSS blocks](#css-blocks)
@@ -461,6 +462,45 @@ as usual, and `async` remains a legal variable name.
   raises a JavaScript error naming the problem rather than waiting, since
   the scheduler has already committed to running it.
 
+
+## Direct function calls
+
+Upstream wraps every function of two to nine parameters in `F2`..`F9` and
+routes every call through `A2`..`A9`, which checks the arity at run time
+and either calls the underlying function or applies the arguments one at a
+time. This fork emits each such top-level function twice — the bare
+JavaScript function under a `$fn$` name, and the wrapped one under the
+usual name — and calls the bare one directly wherever the arity is known
+to match:
+
+```js
+var $author$project$Lib$fn$scale = function (k, shape) { ... };
+var $author$project$Lib$scale = F2($author$project$Lib$fn$scale);
+
+$author$project$Lib$fn$scale(2, shape)          // was A2($author$project$Lib$scale, 2, shape)
+$author$project$Lib$fn$adder(1, 2)(3)           // was A3($author$project$Lib$adder, 1, 2, 3)
+{$: 1, a: k * w, b: k * h}                      // was A2($author$project$Lib$Rect, k * w, k * h)
+_List_Cons(x, xs)                               // was A2($elm$core$List$cons, x, xs)
+```
+
+- Applies to top-level functions in every package, tail-recursive
+  functions, functions in mutually recursive groups, constructors and
+  structural variant tags. A call with more arguments than parameters
+  calls the bare function and applies the rest to its result.
+- Partial application, higher-order use and kernel code keep going through
+  the wrapped name, so nothing observable changes; it is the same idea as
+  the "applying functions directly" transformation in
+  [elm-optimize-level-2](https://github.com/mdgriffith/elm-optimize-level-2/blob/master/notes/transformations.md),
+  done where the arity of every definition is already known.
+- The compiler knows the arity from the optimized definition, not from the
+  type, so a function defined as `f a = \b -> ...` is called with one
+  argument and the result applied to the next.
+- This trades size for speed: every function of two to nine parameters
+  gains a second definition, and a small program grew by about three
+  percent after minification and gzip. The saving from dropped `A2(`
+  wrappers only offsets that in code with many saturated calls.
+- Code-splitting chunks receive the `$fn$` names they call through the
+  same scope object as everything else.
 
 # New language features
 

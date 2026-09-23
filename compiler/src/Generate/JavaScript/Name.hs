@@ -8,6 +8,7 @@ module Generate.JavaScript.Name
   , fromInt
   , fromLocal
   , fromGlobal
+  , fromDirect
   , fromCycle
   , fromChunk
   , fromKernel
@@ -72,6 +73,14 @@ fromLocal name =
 fromGlobal :: ModuleName.Canonical -> N.Name -> Name
 fromGlobal home name =
   Name $ homeToBuilder home <> usd <> N.toBuilder name
+
+
+-- The bare, unwrapped function behind a global of arity 2..9, which a
+-- saturated call reaches without going through A2..A9. Like `$cyclic$`,
+-- the lowercase infix segment cannot be mistaken for a module name.
+fromDirect :: ModuleName.Canonical -> N.Name -> Name
+fromDirect home name =
+  Name $ homeToBuilder home <> "$fn$" <> N.toBuilder name
 
 
 fromCycle :: ModuleName.Canonical -> N.Name -> Name
