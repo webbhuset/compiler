@@ -64,10 +64,10 @@ generate mode (Opt.GlobalGraph nodes _) mains extraRoots =
 classNameBuilder :: Mode.Mode -> ModuleName.Canonical -> Name.Name -> B.Builder
 classNameBuilder mode home name =
   case mode of
-    Mode.Dev _ ->
+    Mode.Dev _ _ ->
       homeToBuilder home <> "--" <> Name.toBuilder name
 
-    Mode.Prod shortNames ->
+    Mode.Prod _ shortNames ->
       Name.toBuilder (Mode._cssNames shortNames ! (home, name))
 
 
@@ -158,8 +158,8 @@ render mode (home@(ModuleName.Canonical _ moduleName), Css.Content chunks _) =
   let
     comment =
       case mode of
-        Mode.Dev _ -> "/* " <> Name.toBuilder moduleName <> " */"
-        Mode.Prod _ -> mempty
+        Mode.Dev _ _ -> "/* " <> Name.toBuilder moduleName <> " */"
+        Mode.Prod _ _ -> mempty
   in
   comment
   <> foldMap (renderChunk mode home) chunks
