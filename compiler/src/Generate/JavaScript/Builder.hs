@@ -48,6 +48,7 @@ data Expr
   | Json Json.Value
   | Array [Expr]
   | Object [(Name, Expr)]
+  | ObjectSpread Expr [(Name, Expr)]  -- {...record, field: value}: a copy with some fields changed
   | Ref Name
   | Access Expr Name -- foo.bar
   | Index  Expr Expr -- foo[bar]
@@ -365,17 +366,10 @@ fromExpr level@(Level indent nextLevel@(Level deeperIndent _)) grouping expressi
           "[" <> commaSep builders <> "]"
 
     Object fields ->
-      (,) Many $
-        let
-          (anyMany, builders) = linesMap (fromField nextLevel) fields
-        in
-        if anyMany then
-          "{\n"
-          <> deeperIndent
-          <> commaNewlineSep level builders
-          <> "\n" <> indent <> "}"
-        else
-          "{" <> commaSep builders <> "}"
+      fromObject level (map (fromField nextLevel) fields)
+
+    ObjectSpread record fields ->
+      fromObject level (fromSpread nextLevel record : map (fromField nextLevel) fields)
 
     Ref name ->
       ( One, Name.toBuilder name )
@@ -446,6 +440,18 @@ fromExpr level@(Level indent nextLevel@(Level deeperIndent _)) grouping expressi
 -- FIELDS
 
 
+fromObject :: Level -> [(Lines, Builder)] -> (Lines, Builder)
+fromObject level@(Level indent (Level deeperIndent _)) entries =
+  (,) Many $
+    if any ((==) Many . fst) entries then
+      "{\n"
+      <> deeperIndent
+      <> commaNewlineSep level (map snd entries)
+      <> "\n" <> indent <> "}"
+    else
+      "{" <> commaSep (map snd entries) <> "}"
+
+
 fromField :: Level -> (Name, Expr) -> (Lines, Builder)
 fromField level (field, expr) =
   let
@@ -453,6 +459,16 @@ fromField level (field, expr) =
   in
   ( lines
   , Name.toBuilder field <> ": " <> builder
+  )
+
+
+fromSpread :: Level -> Expr -> (Lines, Builder)
+fromSpread level expr =
+  let
+    (lines, builder) = fromExpr level Whatever expr
+  in
+  ( lines
+  , "..." <> builder
   )
 
 

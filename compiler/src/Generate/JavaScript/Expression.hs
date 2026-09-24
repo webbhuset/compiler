@@ -133,12 +133,11 @@ generate mode expression =
     Opt.Access record field ->
       JsExpr $ JS.Access (generateJsExpr mode record) (generateField mode field)
 
+    -- A spread copies the record's shape in one step, where the kernel's
+    -- `_Utils_update` loop would rebuild it one property at a time.
     Opt.Update record fields ->
       JsExpr $
-        JS.Call (JS.Ref (JsName.fromKernel Name.utils "update"))
-          [ generateJsExpr mode record
-          , generateRecord mode fields
-          ]
+        JS.ObjectSpread (generateJsExpr mode record) (generateFields mode fields)
 
     Opt.Record fields ->
       JsExpr $ generateRecord mode fields
@@ -341,11 +340,16 @@ tagNameToBuilder (ModuleName.Canonical pkg home) name =
 
 generateRecord :: Mode.Mode -> Map.Map Name.Name Opt.Expr -> JS.Expr
 generateRecord mode fields =
+  JS.Object (generateFields mode fields)
+
+
+generateFields :: Mode.Mode -> Map.Map Name.Name Opt.Expr -> [(JsName.Name, JS.Expr)]
+generateFields mode fields =
   let
     toPair (field, value) =
       (generateField mode field, generateJsExpr mode value)
   in
-  JS.Object (map toPair (Map.toList fields))
+  map toPair (Map.toList fields)
 
 
 generateField :: Mode.Mode -> Name.Name -> JsName.Name
