@@ -68,6 +68,7 @@ data Expr
   | Function [N.Name] Expr
   | Call Expr [Expr]
   | TailCall N.Name [(N.Name, Expr)]
+  | TailBuild N.Name Index.ZeroBased Expr [(N.Name, Expr)]  -- see Optimize.Expression, TAIL CALL MODULO CONS
   | If [(Expr, Expr)] Expr
   | Let Def Expr
   | Destruct Destructor Expr
@@ -306,6 +307,7 @@ eExpr expr =
     Css h c          -> E.u8# 28#Word8 <> ModuleName.eCanonical h <> Css.eContent c
     WorkerRef g      -> E.u8# 29#Word8 <> eGlobal g
     AsyncRef g       -> E.u8# 30#Word8 <> eGlobal g
+    TailBuild f i h xs -> E.u8# 31#Word8 <> N.encode f <> Index.eZeroBased i <> eExpr h <> E.list32 (\(x,e) -> N.encode x <> eExpr e) xs
 
 
 dExpr :: D.Decoder Expr
@@ -343,6 +345,7 @@ dExpr =
         28 -> liftM2 Css ModuleName.dCanonical Css.dContent
         29 -> liftM  WorkerRef dGlobal
         30 -> liftM  AsyncRef dGlobal
+        31 -> liftM4 TailBuild N.decode Index.dZeroBased dExpr (D.list32 (liftM2 (,) N.decode dExpr))
         _  -> D.expecting "Expr"
 
 
