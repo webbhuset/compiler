@@ -17,6 +17,7 @@ tooling (elm-format, elm-test, editors).
   - [Compiled pieces in elm reactor](#compiled-pieces-in-elm-reactor)
   - [Direct function calls](#direct-function-calls)
   - [Record update by spread](#record-update-by-spread)
+  - [Tail recursion modulo cons](#tail-recursion-modulo-cons)
 - **[Native and compiler output](#native-and-compiler-output)**
   - [Command line scripts](#command-line-scripts)
   - [Task ports](#task-ports)
@@ -251,6 +252,54 @@ property at a time in two `for...in` loops:
   in the same order as before.
 - Object spread is ES2018 syntax. This fork's output already assumes
   modern JavaScript, so it applies to every output mode, `.js` included.
+
+## Tail recursion modulo cons
+
+Upstream turns a self call in tail position into a loop. This fork also
+does it when the only thing left after the call is to put its result in a
+constructor:
+
+```elm
+map f list =
+    case list of
+        [] -> []
+        x :: xs -> f x :: map f xs
+```
+
+compiles to a loop like this one (temporaries elided) that builds the list
+front to back, so it neither grows the stack nor allocates a frame per
+element:
+
+```js
+var $start = {b: null};
+var $end = $start;
+map:
+while (true) {
+    if (!list.b) {
+        $end.b = _List_Nil;
+        return $start.b;
+    } else {
+        var x = list.a, xs = list.b;
+        var $cell = _List_Cons(f(x), _List_Nil);
+        $end.b = $cell;
+        $end = $cell;
+        list = xs;
+        continue map;
+    }
+}
+```
+
+- Applies to `::` and to any saturated constructor with the self call as
+  exactly one of its arguments, in top-level and `let` functions alike.
+  Plain self tail calls in the same function keep working; they append
+  nothing.
+- Every site in a function has to fill the same constructor field. A
+  function that recurses through two different fields, or through two
+  cells at once (`x :: y :: recurse xs`), is compiled as before.
+- The result is built by mutating the last cell, which nothing else can
+  observe: the list does not exist until the function returns it.
+- Arguments after the hole are evaluated before the recursion instead of
+  after it. Elm is pure, so only a `Debug.log` in such an argument can tell.
 
 # Native and compiler output
 
@@ -789,9 +838,9 @@ describe s =
   package once per compiler. `ELM_HOME` itself still selects the root, so an
   existing override keeps working, and the fork's build artifacts still live
   under `elm-stuff/`, which `.gitignore` files already cover.
-- **Object files**: task ports add a node kind, CSS blocks, web workers and
-  async imports each add an expression kind, and command line scripts add a
-  main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
+- **Object files**: task ports add a node kind, CSS blocks, web workers,
+  async imports and tail recursion modulo cons each add an expression kind,
+  and command line scripts add a main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
   detected and rebuilt. Moving between *builds of this fork* that changed
   the format is noisier: the package artifacts in `ELM_HOME` are reported
   as corrupt before being rebuilt.

@@ -14,6 +14,9 @@ module Generate.JavaScript.Name
   , makeA
   , makeLabel
   , makeTemp
+  , tailStart
+  , tailEnd
+  , tailCell
   , dollar
   )
   where
@@ -124,6 +127,24 @@ makeLabel name index =
 makeTemp :: Name.Name -> Name
 makeTemp name =
   Name ("$temp$" <> Name.toBuilder name)
+
+
+-- The structure a tail-recursive-modulo-cons loop builds front to back:
+-- a sentinel whose hole field ends up holding the result, the last cell
+-- appended so far, and the cell being appended.
+tailStart :: Name
+tailStart =
+  Name "$start"
+
+
+tailEnd :: Name
+tailEnd =
+  Name "$end"
+
+
+tailCell :: Name
+tailCell =
+  Name "$cell"
 
 
 dollar :: Name

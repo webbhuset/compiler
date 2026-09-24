@@ -277,6 +277,7 @@ addExpr expression blocks =
     Opt.Function _ body -> addExpr body blocks
     Opt.Call func args -> addExpr func (foldr addExpr blocks args)
     Opt.TailCall _ args -> foldr (addExpr . snd) blocks args
+    Opt.TailBuild _ _ cell args -> addExpr cell (foldr (addExpr . snd) blocks args)
     Opt.If branches final ->
       foldr (\(a, b) bs -> addExpr a (addExpr b bs)) (addExpr final blocks) branches
     Opt.Let def body -> addDef def (addExpr body blocks)

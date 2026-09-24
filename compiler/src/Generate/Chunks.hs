@@ -448,6 +448,7 @@ addExpr expression refs =
     Opt.Function _ body -> addExpr body refs
     Opt.Call func args -> addExpr func (foldr addExpr refs args)
     Opt.TailCall _ args -> foldr (addExpr . snd) refs args
+    Opt.TailBuild _ _ cell args -> addExpr cell (foldr (addExpr . snd) refs args)
     Opt.If branches final ->
       foldr (\(a, b) rs -> addExpr a (addExpr b rs)) (addExpr final refs) branches
     Opt.Let def body -> addDef def (addExpr body refs)

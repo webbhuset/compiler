@@ -10,6 +10,7 @@ module Optimize.Expression
 import Prelude hiding (cycle)
 import Control.Monad (foldM)
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Name as Name
 import qualified Data.Set as Set
 
@@ -476,7 +477,7 @@ optimizePotentialTailCall :: Cycle -> Name.Name -> [Can.Pattern] -> Can.Expr -> 
 optimizePotentialTailCall cycle name args expr =
   do  (argNames, destructors) <- destructArgs args
       toTailDef name argNames destructors <$>
-        optimizeTail cycle name argNames expr
+        optimizeTail cycle name argNames (tailHole name (length argNames) expr) expr
 
 
 -- The overloads were optimized once already, so the callee is taken bare here
@@ -493,69 +494,51 @@ callWithDicts cycle func odicts oargs =
           pure $ Opt.Call ofunc (drop (length odicts) oargs)
 
 
-optimizeTail :: Cycle -> Name.Name -> [Name.Name] -> Can.Expr -> Names.Tracker Opt.Expr
-optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
+-- The hole, when there is one, is the constructor field that a tail call
+-- modulo cons sits in; see TAIL CALL MODULO CONS below.
+optimizeTail :: Cycle -> Name.Name -> [Name.Name] -> Maybe Index.ZeroBased -> Can.Expr -> Names.Tracker Opt.Expr
+optimizeTail cycle rootName argNames hole locExpr@(A.At _ expression) =
   case expression of
+    Can.Binop _ home name _ left right
+      | hole == Just Index.second && isCons home name && isSelfCall rootName (length argNames) right ->
+          optimizeTailBuild cycle rootName argNames hole (Names.registerGlobal home name) [left, right]
+
+    Can.Call (A.At _ (Can.VarCtor Can.Normal home name index annotation)) args
+      | Maybe.isJust hole && hole == selfArgument rootName (length argNames) annotation args ->
+          optimizeTailBuild cycle rootName argNames hole (Names.registerCtor home name index Can.Normal) args
+
     Can.Call func args ->
-      do  -- A constrained function passes its own overloads along, so a self
-          -- call still lines up with the parameter list and stays a tail call.
-          odicts <-
-            case A.toValue func of
-              Can.VarConstrained (Can.Dispatch useHome useRegion _) _ _ _ _ ->
-                traverse fromTarget (Overload.lookupResolved useHome useRegion)
-
-              _ ->
-                pure []
-
-          oargs <- (odicts ++) <$> optimizeArgs cycle func args
-
-          let isMatchingName =
-                case A.toValue func of
-                  Can.VarLocal      name -> rootName == name
-                  Can.VarTopLevel _ name -> rootName == name
-                  Can.VarConstrained _ _ name _ _ -> rootName == name
-                  _                      -> False
-
-          if isMatchingName
-            then
-              case Index.indexedZipWith (\_ a b -> (a,b)) argNames oargs of
-                Index.LengthMatch pairs ->
-                  pure $ Opt.TailCall rootName pairs
-
-                Index.LengthMismatch _ _ ->
-                  callWithDicts cycle func odicts oargs
-            else
-              callWithDicts cycle func odicts oargs
+      either id (Opt.TailCall rootName) <$> optimizeSelfCall cycle rootName argNames func args
 
     Can.If branches finally ->
       let
         optimizeBranch (condition, branch) =
           (,)
             <$> optimize cycle condition
-            <*> optimizeTail cycle rootName argNames branch
+            <*> optimizeTail cycle rootName argNames hole branch
       in
       Opt.If
         <$> traverse optimizeBranch branches
-        <*> optimizeTail cycle rootName argNames finally
+        <*> optimizeTail cycle rootName argNames hole finally
 
     Can.Let def body ->
-      optimizeDef cycle def =<< optimizeTail cycle rootName argNames body
+      optimizeDef cycle def =<< optimizeTail cycle rootName argNames hole body
 
     Can.LetRec defs body ->
       case defs of
         [def] ->
           Opt.Let
             <$> optimizePotentialTailCallDef cycle def
-            <*> optimizeTail cycle rootName argNames body
+            <*> optimizeTail cycle rootName argNames hole body
 
         _ ->
-          do  obody <- optimizeTail cycle rootName argNames body
+          do  obody <- optimizeTail cycle rootName argNames hole body
               foldM (\bod def -> optimizeDef cycle def bod) obody defs
 
     Can.LetDestruct pattern expr body ->
       do  (dname, destructors) <- destruct pattern
           oexpr <- optimize cycle expr
-          obody <- optimizeTail cycle rootName argNames body
+          obody <- optimizeTail cycle rootName argNames hole body
           pure $
             Opt.Let (Opt.Def dname oexpr) (foldr Opt.Destruct obody destructors)
 
@@ -563,7 +546,7 @@ optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
       let
         optimizeBranch root (Can.CaseBranch pattern branch) =
           do  destructors <- destructCase root pattern
-              obranch <- optimizeTail cycle rootName argNames branch
+              obranch <- optimizeTail cycle rootName argNames hole branch
               pure (pattern, foldr Opt.Destruct obranch destructors)
       in
       do  temp <- Names.generate
@@ -578,6 +561,171 @@ optimizeTail cycle rootName argNames locExpr@(A.At _ expression) =
 
     _ ->
       optimize cycle locExpr
+
+
+
+-- Either the call as usual, or, for a call to the function itself with
+-- exactly its parameters, the pairs a loop needs to reassign them.
+optimizeSelfCall :: Cycle -> Name.Name -> [Name.Name] -> Can.Expr -> [Can.Expr] -> Names.Tracker (Either Opt.Expr [(Name.Name, Opt.Expr)])
+optimizeSelfCall cycle rootName argNames func args =
+  do  -- A constrained function passes its own overloads along, so a self
+      -- call still lines up with the parameter list and stays a tail call.
+      odicts <-
+        case A.toValue func of
+          Can.VarConstrained (Can.Dispatch useHome useRegion _) _ _ _ _ ->
+            traverse fromTarget (Overload.lookupResolved useHome useRegion)
+
+          _ ->
+            pure []
+
+      oargs <- (odicts ++) <$> optimizeArgs cycle func args
+
+      if isSelfName rootName func
+        then
+          case Index.indexedZipWith (\_ a b -> (a,b)) argNames oargs of
+            Index.LengthMatch pairs ->
+              pure (Right pairs)
+
+            Index.LengthMismatch _ _ ->
+              Left <$> callWithDicts cycle func odicts oargs
+        else
+          Left <$> callWithDicts cycle func odicts oargs
+
+
+isSelfName :: Name.Name -> Can.Expr -> Bool
+isSelfName rootName (A.At _ func) =
+  case func of
+    Can.VarLocal      name          -> rootName == name
+    Can.VarTopLevel _ name          -> rootName == name
+    Can.VarConstrained _ _ name _ _ -> rootName == name
+    _                               -> False
+
+
+
+-- TAIL CALL MODULO CONS
+--
+-- `x :: recurse ...` in tail position is not a tail call, but the only
+-- thing left to do after the call is to put its result in one field of a
+-- freshly built cell. So the loop can build that cell up front with the
+-- field left empty, hang it on the cell built by the previous iteration,
+-- and carry on; the base case then fills the last field and returns what
+-- hangs off a sentinel. The same holds for any saturated constructor with
+-- the self call as exactly one of its arguments.
+--
+-- The field written into has to be the same at every site, since the
+-- previous iteration's empty field is what the next one fills. A function
+-- whose sites disagree gets no loop for them, and any plain self tail
+-- call in the same function keeps working as before: it appends nothing.
+
+
+-- Whether the sites agree on one field, and which.
+tailHole :: Name.Name -> Int -> Can.Expr -> Maybe Index.ZeroBased
+tailHole rootName arity expr =
+  case Set.toList (tailHoles rootName arity expr) of
+    [hole] -> Just (indexFromInt hole)
+    _      -> Nothing
+
+
+tailHoles :: Name.Name -> Int -> Can.Expr -> Set.Set Int
+tailHoles rootName arity (A.At _ expression) =
+  case expression of
+    Can.Binop _ home name _ _ right
+      | isCons home name && isSelfCall rootName arity right ->
+          Set.singleton 1
+
+    Can.Call (A.At _ (Can.VarCtor Can.Normal _ _ _ annotation)) args ->
+      maybe Set.empty (Set.singleton . Index.toMachine) (selfArgument rootName arity annotation args)
+
+    Can.If branches finally ->
+      Set.unions (tailHoles rootName arity finally : map (tailHoles rootName arity . snd) branches)
+
+    Can.Let _ body ->
+      tailHoles rootName arity body
+
+    Can.LetRec _ body ->
+      tailHoles rootName arity body
+
+    Can.LetDestruct _ _ body ->
+      tailHoles rootName arity body
+
+    Can.Case _ branches ->
+      Set.unions (map (\(Can.CaseBranch _ branch) -> tailHoles rootName arity branch) branches)
+
+    _ ->
+      Set.empty
+
+
+-- The one argument of a saturated constructor that is a self call.
+selfArgument :: Name.Name -> Int -> Can.Annotation -> [Can.Expr] -> Maybe Index.ZeroBased
+selfArgument rootName arity (Can.Forall _ tipe) args =
+  if ctorArity tipe /= length args then
+    Nothing
+  else
+    case [ i | (i, arg) <- Index.indexedMap (,) args, isSelfCall rootName arity arg ] of
+      [i] -> Just i
+      _   -> Nothing
+
+
+ctorArity :: Can.Type -> Int
+ctorArity tipe =
+  case tipe of
+    Can.TLambda _ result -> 1 + ctorArity result
+    _                    -> 0
+
+
+-- A call to the function itself with exactly its parameters, the overloads
+-- a constrained function passes along included.
+isSelfCall :: Name.Name -> Int -> Can.Expr -> Bool
+isSelfCall rootName arity (A.At _ expression) =
+  case expression of
+    Can.Call func args ->
+      let
+        dicts =
+          case A.toValue func of
+            Can.VarConstrained (Can.Dispatch useHome useRegion _) _ _ _ _ ->
+              length (Overload.lookupResolved useHome useRegion)
+
+            _ ->
+              0
+      in
+      isSelfName rootName func && dicts + length args == arity
+
+    _ ->
+      False
+
+
+isCons :: ModuleName.Canonical -> Name.Name -> Bool
+isCons home name =
+  home == ModuleName.list && name == Name.fromChars "cons"
+
+
+indexFromInt :: Int -> Index.ZeroBased
+indexFromInt n =
+  if n <= 0 then Index.first else Index.next (indexFromInt (n - 1))
+
+
+-- The constructor application with the self call's argument left as a
+-- placeholder, and the pairs the loop reassigns. If the argument turns
+-- out not to be a self call after all, this is an ordinary application.
+optimizeTailBuild :: Cycle -> Name.Name -> [Name.Name] -> Maybe Index.ZeroBased -> Names.Tracker Opt.Expr -> [Can.Expr] -> Names.Tracker Opt.Expr
+optimizeTailBuild cycle rootName argNames maybeHole registerCtor args =
+  do  ctor <- registerCtor
+      case (maybeHole, splitAt (maybe 0 Index.toMachine maybeHole) args) of
+        (Just hole, (before, A.At _ (Can.Call func selfArgs) : after)) ->
+          do  obefore <- traverse (optimize cycle) before
+              oafter <- traverse (optimize cycle) after
+              result <- optimizeSelfCall cycle rootName argNames func selfArgs
+              placeholder <- Names.registerKernel Name.list (Opt.List [])
+              pure $
+                case result of
+                  Right pairs ->
+                    Opt.TailBuild rootName hole (Opt.Call ctor (obefore ++ placeholder : oafter)) pairs
+
+                  Left ocall ->
+                    Opt.Call ctor (obefore ++ ocall : oafter)
+
+        _ ->
+          Opt.Call ctor <$> traverse (optimize cycle) args
 
 
 
@@ -596,6 +744,9 @@ hasTailCall :: Opt.Expr -> Bool
 hasTailCall expression =
   case expression of
     Opt.TailCall _ _ ->
+      True
+
+    Opt.TailBuild _ _ _ _ ->
       True
 
     Opt.If branches finally ->

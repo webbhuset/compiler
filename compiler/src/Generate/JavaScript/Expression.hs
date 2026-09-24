@@ -24,6 +24,7 @@ import qualified Data.IntMap as IntMap
 import qualified Data.List as List
 import Data.Map ((!))
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Name as Name
 import qualified Data.Set as Set
 import qualified Data.Utf8 as Utf8
@@ -109,6 +110,7 @@ generate mode expression =
 
     Opt.Call f xs     -> JsExpr $ generateCall mode f xs
     Opt.TailCall n xs -> JsBlock $ generateTailCall mode n xs
+    Opt.TailBuild n hole cell xs -> JsBlock $ generateTailBuild mode n hole cell xs
     Opt.If bs f       -> generateIf mode bs f
 
     Opt.Let def body ->
@@ -807,13 +809,120 @@ generateTailDef mode name argNames body =
   generateFunction (map JsName.fromLocal argNames) (generateTailBody mode name body)
 
 
+-- A function with a tail call modulo cons (see Optimize.Expression) builds
+-- its result front to back: `$start` is a sentinel whose hole field will
+-- hold the result, `$end` the cell appended last. Each iteration appends
+-- a cell (generateTailBuild), and every return of the body becomes
+-- filling the last cell's hole and returning what hangs off the sentinel.
 generateTailBody :: Mode.Mode -> Name.Name -> Opt.Expr -> Code
 generateTailBody mode name body =
-  JsBlock
-    [ JS.Labelled (JsName.fromLocal name) $
-        JS.While (JS.Bool True) $
-          codeToStmt $ generate mode body
-    ]
+  let
+    loop stmt =
+      JS.Labelled (JsName.fromLocal name) (JS.While (JS.Bool True) stmt)
+  in
+  case findHole body of
+    Nothing ->
+      JsBlock [ loop (codeToStmt (generate mode body)) ]
+
+    Just hole ->
+      let
+        field = JsName.fromIndex hole
+      in
+      JsBlock
+        [ JS.Var JsName.tailStart (JS.Object [ (field, JS.Null) ])
+        , JS.Var JsName.tailEnd (JS.Ref JsName.tailStart)
+        , loop (fillHole field (codeToStmt (generate mode body)))
+        ]
+
+
+generateTailBuild :: Mode.Mode -> Name.Name -> Index.ZeroBased -> Opt.Expr -> [(Name.Name, Opt.Expr)] -> [JS.Stmt]
+generateTailBuild mode name hole cell args =
+  JS.Var JsName.tailCell (generateJsExpr mode cell)
+  : JS.ExprStmt (JS.Assign (JS.LDot (JS.Ref JsName.tailEnd) (JsName.fromIndex hole)) (JS.Ref JsName.tailCell))
+  : JS.ExprStmt (JS.Assign (JS.LRef JsName.tailEnd) (JS.Ref JsName.tailCell))
+  : generateTailCall mode name args
+
+
+-- Rewrites every return of the loop body. Nested functions are expressions,
+-- so their own returns are never reached.
+fillHole :: JsName.Name -> JS.Stmt -> JS.Stmt
+fillHole field stmt =
+  case stmt of
+    JS.Return expr ->
+      JS.Block
+        [ JS.ExprStmt (JS.Assign (JS.LDot (JS.Ref JsName.tailEnd) field) expr)
+        , JS.Return (JS.Access (JS.Ref JsName.tailStart) field)
+        ]
+
+    JS.Block stmts ->
+      JS.Block (map (fillHole field) stmts)
+
+    JS.IfStmt condition thenStmt elseStmt ->
+      JS.IfStmt condition (fillHole field thenStmt) (fillHole field elseStmt)
+
+    JS.Switch expr clauses ->
+      JS.Switch expr (map fillClause clauses)
+
+    JS.While condition body ->
+      JS.While condition (fillHole field body)
+
+    JS.Labelled label body ->
+      JS.Labelled label (fillHole field body)
+
+    JS.Try body name handler ->
+      JS.Try (fillHole field body) name (fillHole field handler)
+
+    JS.EmptyStmt -> stmt
+    JS.ExprStmt _ -> stmt
+    JS.Break _ -> stmt
+    JS.Continue _ -> stmt
+    JS.Throw _ -> stmt
+    JS.Var _ _ -> stmt
+    JS.Vars _ -> stmt
+    JS.FunctionStmt _ _ _ -> stmt
+  where
+    fillClause clause =
+      case clause of
+        JS.Case expr stmts -> JS.Case expr (map (fillHole field) stmts)
+        JS.Default stmts   -> JS.Default (map (fillHole field) stmts)
+
+
+-- The hole of a tail-recursive-modulo-cons body, from any of its sites;
+-- the optimizer only produces them when they all agree.
+findHole :: Opt.Expr -> Maybe Index.ZeroBased
+findHole expression =
+  case expression of
+    Opt.TailBuild _ hole _ _ ->
+      Just hole
+
+    Opt.If branches finally ->
+      firstHole (findHole finally : map (findHole . snd) branches)
+
+    Opt.Let _ body ->
+      findHole body
+
+    Opt.Destruct _ body ->
+      findHole body
+
+    Opt.Case _ _ decider jumps ->
+      firstHole (deciderHole decider : map (findHole . snd) jumps)
+
+    _ ->
+      Nothing
+
+
+deciderHole :: Opt.Decider Opt.Choice -> Maybe Index.ZeroBased
+deciderHole decider =
+  case decider of
+    Opt.Leaf (Opt.Inline expr) -> findHole expr
+    Opt.Leaf (Opt.Jump _)      -> Nothing
+    Opt.Chain _ success failure -> firstHole [ deciderHole success, deciderHole failure ]
+    Opt.FanOut _ tests fallback -> firstHole (deciderHole fallback : map (deciderHole . snd) tests)
+
+
+firstHole :: [Maybe Index.ZeroBased] -> Maybe Index.ZeroBased
+firstHole =
+  Maybe.listToMaybe . Maybe.catMaybes
 
 
 

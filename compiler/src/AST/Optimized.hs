@@ -61,6 +61,7 @@ data Expr
   | Function [Name] Expr
   | Call Expr [Expr]
   | TailCall Name [(Name, Expr)]
+  | TailBuild Name Index.ZeroBased Expr [(Name, Expr)]  -- see Optimize.Expression, TAIL CALL MODULO CONS
   | If [(Expr, Expr)] Expr
   | Let Def Expr
   | Destruct Destructor Expr
@@ -290,6 +291,7 @@ instance Binary Expr where
       Css a b          -> putWord8 27 >> put a >> put b
       WorkerRef a      -> putWord8 28 >> put a
       AsyncRef a       -> putWord8 29 >> put a
+      TailBuild a b c d -> putWord8 30 >> put a >> put b >> put c >> put d
 
   get =
     do  word <- getWord8
@@ -324,6 +326,7 @@ instance Binary Expr where
           27 -> liftM2 Css get get
           28 -> liftM  WorkerRef get
           29 -> liftM  AsyncRef get
+          30 -> liftM4 TailBuild get get get get
           _  -> fail "problem getting Opt.Expr binary"
 
 
