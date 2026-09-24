@@ -23,6 +23,7 @@ tooling (elm-format, elm-test, editors).
   - [HTTP over fetch](#http-over-fetch)
   - [Code splitting — async imports](#code-splitting--async-imports)
   - [Direct function calls](#direct-function-calls)
+  - [Record update by spread](#record-update-by-spread)
 - **[New language features](#new-language-features)**
   - [Comparable newtypes](#comparable-newtypes)
   - [CSS blocks](#css-blocks)
@@ -501,6 +502,22 @@ _List_Cons(x, xs)                               // was A2($elm$core$List$cons, x
   wrappers only offsets that in code with many saturated calls.
 - Code-splitting chunks receive the `$fn$` names they call through the
   same scope object as everything else.
+
+## Record update by spread
+
+`{ rec | count = rec.count + n }` compiles to an object spread instead of
+a call to the kernel's `_Utils_update`, which rebuilt the record one
+property at a time in two `for...in` loops:
+
+```js
+{...rec, count: rec.count + n}          // was _Utils_update(rec, {count: rec.count + n})
+```
+
+- The spread copies the record's shape in one step and skips the
+  temporary object of updated fields. The result has the same properties
+  in the same order as before.
+- Object spread is ES2018 syntax. This fork's output already assumes
+  modern JavaScript, so it applies to every output mode, `.js` included.
 
 # New language features
 
