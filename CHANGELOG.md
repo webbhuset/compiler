@@ -9,12 +9,14 @@ tooling (elm-format, elm-test, editors).
 
 ## Contents
 
-- **[Bugfix and quality of life](#bugfix-and-quality-of-life)**
+- **[Bugfix, performance and quality of life](#bugfix-performance-and-quality-of-life)**
   - [Exponential compile time and memory with extensible records](#exponential-compile-time-and-memory-with-extensible-records)
   - [Git dependencies — private packages](#git-dependencies--private-packages)
   - [Kernel code in git dependencies](#kernel-code-in-git-dependencies)
   - [ES module output](#es-module-output)
   - [Compiled pieces in elm reactor](#compiled-pieces-in-elm-reactor)
+  - [Direct function calls](#direct-function-calls)
+  - [Record update by spread](#record-update-by-spread)
 - **[Native and compiler output](#native-and-compiler-output)**
   - [Command line scripts](#command-line-scripts)
   - [Task ports](#task-ports)
@@ -22,8 +24,6 @@ tooling (elm-format, elm-test, editors).
   - [HTML to string](#html-to-string)
   - [HTTP over fetch](#http-over-fetch)
   - [Code splitting — async imports](#code-splitting--async-imports)
-  - [Direct function calls](#direct-function-calls)
-  - [Record update by spread](#record-update-by-spread)
 - **[New language features](#new-language-features)**
   - [Comparable newtypes](#comparable-newtypes)
   - [CSS blocks](#css-blocks)
@@ -35,9 +35,10 @@ tooling (elm-format, elm-test, editors).
   - [Cross-platform release binaries](#cross-platform-release-binaries)
 
 
-# Bugfix and quality of life
+# Bugfix, performance and quality of life
 
-Bugfixes or replacing external tools. No change to the language.
+Bugfixes, faster generated code, or replacing external tools. No change
+to the language.
 
 ## Exponential compile time and memory with extensible records
 
@@ -195,6 +196,61 @@ written, so a hand-written HTML page can pull in exactly what it needs:
 - A failed build served as a script is a 500 whose body logs the compiler's
   report with `console.error`.
 
+
+## Direct function calls
+
+Upstream wraps every function of two to nine parameters in `F2`..`F9` and
+routes every call through `A2`..`A9`, which checks the arity at run time
+and either calls the underlying function or applies the arguments one at a
+time. This fork emits each such top-level function twice — the bare
+JavaScript function under a `$fn$` name, and the wrapped one under the
+usual name — and calls the bare one directly wherever the arity is known
+to match:
+
+```js
+var $author$project$Lib$fn$scale = function (k, shape) { ... };
+var $author$project$Lib$scale = F2($author$project$Lib$fn$scale);
+
+$author$project$Lib$fn$scale(2, shape)          // was A2($author$project$Lib$scale, 2, shape)
+$author$project$Lib$fn$adder(1, 2)(3)           // was A3($author$project$Lib$adder, 1, 2, 3)
+{$: 1, a: k * w, b: k * h}                      // was A2($author$project$Lib$Rect, k * w, k * h)
+_List_Cons(x, xs)                               // was A2($elm$core$List$cons, x, xs)
+```
+
+- Applies to top-level functions in every package, tail-recursive
+  functions, functions in mutually recursive groups, constructors and
+  structural variant tags. A call with more arguments than parameters
+  calls the bare function and applies the rest to its result.
+- Partial application, higher-order use and kernel code keep going through
+  the wrapped name, so nothing observable changes; it is the same idea as
+  the "applying functions directly" transformation in
+  [elm-optimize-level-2](https://github.com/mdgriffith/elm-optimize-level-2/blob/master/notes/transformations.md),
+  done where the arity of every definition is already known.
+- The compiler knows the arity from the optimized definition, not from the
+  type, so a function defined as `f a = \b -> ...` is called with one
+  argument and the result applied to the next.
+- This trades size for speed: every function of two to nine parameters
+  gains a second definition, and a small program grew by about three
+  percent after minification and gzip. The saving from dropped `A2(`
+  wrappers only offsets that in code with many saturated calls.
+- Code-splitting chunks receive the `$fn$` names they call through the
+  same scope object as everything else.
+
+## Record update by spread
+
+`{ rec | count = rec.count + n }` compiles to an object spread instead of
+a call to the kernel's `_Utils_update`, which rebuilt the record one
+property at a time in two `for...in` loops:
+
+```js
+{...rec, count: rec.count + n}          // was _Utils_update(rec, {count: rec.count + n})
+```
+
+- The spread copies the record's shape in one step and skips the
+  temporary object of updated fields. The result has the same properties
+  in the same order as before.
+- Object spread is ES2018 syntax. This fork's output already assumes
+  modern JavaScript, so it applies to every output mode, `.js` included.
 
 # Native and compiler output
 
@@ -463,61 +519,6 @@ as usual, and `async` remains a legal variable name.
   raises a JavaScript error naming the problem rather than waiting, since
   the scheduler has already committed to running it.
 
-
-## Direct function calls
-
-Upstream wraps every function of two to nine parameters in `F2`..`F9` and
-routes every call through `A2`..`A9`, which checks the arity at run time
-and either calls the underlying function or applies the arguments one at a
-time. This fork emits each such top-level function twice — the bare
-JavaScript function under a `$fn$` name, and the wrapped one under the
-usual name — and calls the bare one directly wherever the arity is known
-to match:
-
-```js
-var $author$project$Lib$fn$scale = function (k, shape) { ... };
-var $author$project$Lib$scale = F2($author$project$Lib$fn$scale);
-
-$author$project$Lib$fn$scale(2, shape)          // was A2($author$project$Lib$scale, 2, shape)
-$author$project$Lib$fn$adder(1, 2)(3)           // was A3($author$project$Lib$adder, 1, 2, 3)
-{$: 1, a: k * w, b: k * h}                      // was A2($author$project$Lib$Rect, k * w, k * h)
-_List_Cons(x, xs)                               // was A2($elm$core$List$cons, x, xs)
-```
-
-- Applies to top-level functions in every package, tail-recursive
-  functions, functions in mutually recursive groups, constructors and
-  structural variant tags. A call with more arguments than parameters
-  calls the bare function and applies the rest to its result.
-- Partial application, higher-order use and kernel code keep going through
-  the wrapped name, so nothing observable changes; it is the same idea as
-  the "applying functions directly" transformation in
-  [elm-optimize-level-2](https://github.com/mdgriffith/elm-optimize-level-2/blob/master/notes/transformations.md),
-  done where the arity of every definition is already known.
-- The compiler knows the arity from the optimized definition, not from the
-  type, so a function defined as `f a = \b -> ...` is called with one
-  argument and the result applied to the next.
-- This trades size for speed: every function of two to nine parameters
-  gains a second definition, and a small program grew by about three
-  percent after minification and gzip. The saving from dropped `A2(`
-  wrappers only offsets that in code with many saturated calls.
-- Code-splitting chunks receive the `$fn$` names they call through the
-  same scope object as everything else.
-
-## Record update by spread
-
-`{ rec | count = rec.count + n }` compiles to an object spread instead of
-a call to the kernel's `_Utils_update`, which rebuilt the record one
-property at a time in two `for...in` loops:
-
-```js
-{...rec, count: rec.count + n}          // was _Utils_update(rec, {count: rec.count + n})
-```
-
-- The spread copies the record's shape in one step and skips the
-  temporary object of updated fields. The result has the same properties
-  in the same order as before.
-- Object spread is ES2018 syntax. This fork's output already assumes
-  modern JavaScript, so it applies to every output mode, `.js` included.
 
 # New language features
 
