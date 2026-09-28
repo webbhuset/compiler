@@ -456,6 +456,8 @@ mimeTypeDict =
     , ".tgz"     ==> "application/x-tgz"
     , ".ttf"     ==> "font/ttf"
     , ".txt"     ==> "text/plain"
+    , ".csv"     ==> "text/csv"
+    , ".tsv"     ==> "text/csv"
     , ".wav"     ==> "audio/x-wav"
     , ".wax"     ==> "audio/x-ms-wax"
     , ".webm"    ==> "video/webm"
