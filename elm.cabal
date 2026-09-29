@@ -24,6 +24,7 @@ executable elm
         binary,
         bytestring,
         containers,
+        crypton < 2.0,
         directory,
         edit-distance,
         filelock,
