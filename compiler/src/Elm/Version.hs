@@ -10,6 +10,7 @@ module Elm.Version
   , max
   --
   , compiler
+  , isCompatibleApp
   , bumpPatch
   , bumpMinor
   , bumpMajor
@@ -96,6 +97,16 @@ compiler =
     [x,y]   -> toVersion x y 0
     [x]     -> toVersion x 0 0
     _       -> $(Crash.crash 'compiler) "could not detect compiler version from cabal file"
+
+
+-- An application's elm.json names one exact Elm version. This fork accepts
+-- any patch release of the minor version it is based on, so projects written
+-- for 0.19.1 or 0.19.2 build without editing their elm.json.
+isCompatibleApp :: Version -> Bool
+isCompatibleApp version =
+  fromVersion version $ \major minor _ ->
+  fromVersion compiler $ \cMajor cMinor _ ->
+    major == cMajor && minor == cMinor
 
 
 

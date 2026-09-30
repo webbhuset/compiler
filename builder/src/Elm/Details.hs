@@ -261,7 +261,7 @@ verifyPkg writer env time (Outline.PkgOutline pkg _ _ _ exposed direct testDirec
 
 verifyApp :: File.Writer R.PROJECT -> Env -> File.Time -> Outline.AppOutline -> Task Details
 verifyApp writer env time outline@(Outline.AppOutline elmVersion srcDirs direct _ _ _ _) =
-  if elmVersion == V.compiler
+  if V.isCompatibleApp elmVersion
   then
     do  stated <- checkAppDeps outline
         actual <- verifyConstraints env (Map.map Con.exactly stated)

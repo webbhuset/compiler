@@ -47,7 +47,8 @@ intro =
     [ P.fillSep
         ["Hi,","thank","you","for","trying","out"
         ,P.green "Webbhuset"
-        ,P.green "Elm"
+        ,P.green "Elm,"
+        ,"based","on","Elm"
         ,P.green (P.text (V.toChars V.compiler))
         ,P.text ("(build " ++ BuildCount.count ++ ", " ++ BuildCount.commit ++ ")")
         ]

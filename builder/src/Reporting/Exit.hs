@@ -1417,7 +1417,9 @@ toDetailsReport details =
             , D.green (D.fromVersion version) <> ","
             , "but", "you", "are", "using"
             , D.red (D.fromVersion V.compiler)
-            , "right", "now."
+            , "right", "now,", "which", "accepts", "any"
+            , D.fromChars (V.fromVersion V.compiler $ \major minor _ -> show major ++ "." ++ show minor ++ ".*")
+            , "version."
             ]
         ]
 

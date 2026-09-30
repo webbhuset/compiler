@@ -1,7 +1,7 @@
 # Changes from upstream
 
 This is webbhuset's fork of the [Elm compiler](https://github.com/elm/compiler).
-It tracks upstream `main` (0.19.2) and adds the features below. Projects
+It tracks upstream `main` (0.19.3) and adds the features below. Projects
 that use none of these features compile exactly as with the official
 compiler, and every `elm.json` this fork writes remains valid for official
 tooling (elm-format, elm-test, editors).
@@ -32,6 +32,7 @@ tooling (elm-format, elm-test, editors).
   - [Back-lambdas](#back-lambdas)
   - [Structural variants](#structural-variants)
 - **[Compatibility notes](#compatibility-notes)**
+  - [Any 0.19 `elm-version`](#any-019-elm-version)
   - [No `elm publish`](#no-elm-publish)
   - [Cross-platform release binaries](#cross-platform-release-binaries)
 
@@ -849,6 +850,17 @@ describe s =
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.
+
+## Any 0.19 `elm-version`
+
+An application's `elm.json` names one exact Elm version, and the official
+compiler refuses to build it with any other. This fork accepts every 0.19.x
+there — `0.19.0`, `0.19.1`, `0.19.2` or `0.19.3` — so an existing project
+builds without editing its `elm.json`, and the file stays valid for the
+official compiler it was written for. Other versions (0.18, 0.20) are still
+rejected. `elm init` writes the version this fork is based on, and the CLI
+greeting shows it: "Webbhuset Elm, based on Elm 0.19.3". Packages were
+already fine, since they state a range like `0.19.0 <= v < 0.20.0`.
 
 ## No `elm publish`
 
