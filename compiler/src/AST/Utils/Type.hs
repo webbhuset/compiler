@@ -53,7 +53,24 @@ dealiasHelp typeTable tipe =
       Map.findWithDefault tipe x typeTable
 
     TRecord fields ext ->
-      TRecord (Map.map (dealiasField typeTable) fields) ext
+      let
+        dealiasedFields =
+          Map.map (dealiasField typeTable) fields
+      in
+      case ext >>= \name -> Map.lookup name typeTable of
+        Nothing ->
+          TRecord dealiasedFields ext
+
+        Just extType ->
+          case iteratedDealias extType of
+            TRecord subFields subExt ->
+              TRecord (Map.union subFields dealiasedFields) subExt
+
+            TVar name ->
+              TRecord dealiasedFields (Just name)
+
+            _ ->
+              TRecord dealiasedFields ext
 
     TAlias home name args t' ->
       TAlias home name (map (fmap (dealiasHelp typeTable)) args) t'
