@@ -160,8 +160,11 @@ singleton registry.
    `_Chunk_get(_Chunk$author$project$Big).$author$project$Big$n`. Each
    chunk is walked with the main bundle's globals already marked as seen,
    so it stops at the boundary and emits only its own. The main bundle
-   gains a registration per chunk holding that chunk's placeholder token,
-   and one `_Chunk_scope()` returning the names the chunks need.
+   gains a registration per chunk, `function() { return import("<token>"); }`,
+   and one `_Chunk_scope()` returning the names the chunks need. The import
+   is written out with a literal specifier so a bundler can follow it;
+   `finalize` substitutes `./<base>.<hash16>.mjs`, since a bare name would
+   be a package specifier.
 7. **Finalize** (`builder Generate.finalize`): unchanged in shape from the
    worker path — render in dependency order, substitute the names of the
    chunks each chunk references, SHA-1, name `<base>.<hash16>.mjs`,
@@ -226,7 +229,7 @@ it produces today.
 
 **Emitted by the compiler**, only when the program has chunks, from
 `Generate.Chunks.runtime`: `_Chunk_reg`, `_Chunk_ready`, `_Chunk_get`, and
-a loader that `import()`s the file, memoizes the promise, applies the
+a loader that calls the chunk's import thunk, memoizes the promise, applies the
 default export to `_Chunk_scope()`, and keeps the returned record.
 `_Chunk_get` returns that record, or throws `{ elmChunk: promise }`.
 `_Chunk_load` is the loader on its own, and `_Chunk_program` builds the

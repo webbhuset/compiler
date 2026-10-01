@@ -557,11 +557,11 @@ appExport =
 
 runtime :: B.Builder
 runtime =
-  "function _Chunk_reg(url) { return { u: url, e: null, p: null }; }\n\
-  \function _Chunk_ready(exports) { return { u: null, e: exports, p: null }; }\n\
+  "function _Chunk_reg(load) { return { l: load, e: null, p: null }; }\n\
+  \function _Chunk_ready(exports) { return { l: null, e: exports, p: null }; }\n\
   \function _Chunk_load(c) {\n\
   \\tif (!c.p) {\n\
-  \\t\tc.p = import(new URL(c.u, _Elm_baseUrl)).then(function(m) {\n\
+  \\t\tc.p = c.l().then(function(m) {\n\
   \\t\t\tc.e = m.default(_Chunk_scope());\n\
   \\t\t});\n\
   \\t}\n\
@@ -627,11 +627,17 @@ readyRegistration home exports =
   <> "});\n"
 
 
--- `var _Chunk$author$project$Big = _Chunk_reg("<token>");`
+-- `var _Chunk$author$project$Big = _Chunk_reg(function() { return import("<token>"); });`
+--
+-- The import is spelled out at each registration, with the file name as a
+-- literal, so that a bundler can see it: esbuild, Rollup and webpack only
+-- follow an `import()` whose argument is a string. A relative specifier
+-- resolves against the importing module's own URL, so unbundled this is
+-- the same as resolving against import.meta.url.
 registration :: ModuleName.Canonical -> B.Builder
 registration home =
-  "var " <> JsName.toBuilder (JsName.fromChunk home) <> " = _Chunk_reg(\""
-  <> tokenBuilder home <> "\");\n"
+  "var " <> JsName.toBuilder (JsName.fromChunk home)
+  <> " = _Chunk_reg(function() { return import(\"" <> tokenBuilder home <> "\"); });\n"
 
 
 

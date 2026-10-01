@@ -561,6 +561,10 @@ as usual, and `async` remains a legal variable name.
   one anyway stays in the module.
 - `--optimize` works normally: one `elm make` means one field-rename
   table, so values cross between the files unchanged.
+- Each chunk is loaded with `import("./app.<hash>.mjs")`, the name
+  written out as a literal, so a bundler sees the split. `esbuild
+  --bundle --splitting --format=esm` follows each import and emits the
+  chunks as its own split points.
 - Compile errors for a reference that would be forced when the bundle
   loads (a top-level definition written without arguments), for
   `import async` in a package, for non-ESM output, and for an async

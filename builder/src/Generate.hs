@@ -228,24 +228,27 @@ prod format stuff details (Build.Artifacts pkg _ roots modules) =
 finalize :: String -> Bundles -> ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
 finalize base (Bundles js css workers _ chunks _) =
   let
-    emit toToken (table, files) global builder =
+    -- A worker's name is resolved with `new URL(name, import.meta.url)`,
+    -- which takes a bare name. A chunk's is an `import()` specifier, where
+    -- a bare name would mean a package, so it has to start with `./`.
+    emit toToken prefix (table, files) global builder =
       let
         bytes = substitute table (render builder)
         hash = take 16 (SHA.showDigest (SHA.sha1 (LBS.fromStrict bytes)))
         name = base ++ "." ++ hash ++ ".mjs"
       in
-      ( (toToken global, BS_UTF8.fromString name) : table
+      ( (toToken global, BS_UTF8.fromString (prefix ++ name)) : table
       , (name, bytes) : files
       )
 
     afterWorkers =
       List.foldl'
-        (\acc (WorkerBundle global builder) -> emit Workers.token acc global builder)
+        (\acc (WorkerBundle global builder) -> emit Workers.token "" acc global builder)
         ([], []) workers
 
     (finalTable, revFiles) =
       List.foldl'
-        (\acc (ChunkBundle home builder) -> emit Chunks.token acc home builder)
+        (\acc (ChunkBundle home builder) -> emit Chunks.token "./" acc home builder)
         afterWorkers chunks
   in
   ( reverse revFiles
