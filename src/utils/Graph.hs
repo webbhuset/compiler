@@ -182,7 +182,7 @@ withMinimalCycle (RootSelector selector) (Component node nodes) extract cont =
     case newByteArray# size                    s0 of { (# s1, backEdges #) ->
     case setByteArray# backEdges 0# size 0xFF# s1 of {    s2               ->
     case bfs backEdges (Queue [root] [])       s2 of { (# s3, I# final  #) ->
-    case toPath backEdges final []             s3 of { (# s4, (i,is)    #) ->
+    case toCycle backEdges final               s3 of { (# s4, (i,is)    #) ->
       (# s4, cont rootInfo (MinimalCycle (finalize i) (List.map finalize is)) #)
     }}}}
   where
@@ -207,6 +207,13 @@ withMinimalCycle (RootSelector selector) (Component node nodes) extract cont =
       else
         case enqueue backEdges i edges queue1 s0 of
           (# s1, queue2 #) -> bfs backEdges queue2 s1
+
+    -- A node with an edge to itself is a cycle of one, and the root has no
+    -- back edge to follow.
+    toCycle backEdges final s0 =
+      if isTrue# (final ==# root#)
+      then (# s0, (root, []) #)
+      else toPath backEdges final [] s0
 
     toPath backEdges i path s0 =
       case readWord32Array# backEdges i s0 of
@@ -259,12 +266,13 @@ dequeue (Queue front back) =
 
 find :: (Eq k) => k -> Array.Array Int (Node k v) -> Int
 find key vertices =
-    loop zero
+    loop lo
   where
-    (zero, len) = Array.bounds vertices
+    -- the bounds are inclusive
+    (lo, hi) = Array.bounds vertices
 
     loop i =
-      if i < len
+      if i <= hi
       then
         if _key (vertices ! i) == key
         then i
