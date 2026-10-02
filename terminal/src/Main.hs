@@ -97,6 +97,7 @@ tool =
       flags Tool.Flags
         |-- onOff "json" "Print the result as JSON."
         |-- onOff "all" "Include private declarations."
+        |-- onOff "diff" "Compare two files written by `elm tool sizes --json`."
 
     word =
       Parser

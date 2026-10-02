@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Tool.Async
   ( run
+  , bundle
+  , moduleToChars
+  , kB
   )
   where
 
@@ -85,6 +88,15 @@ data ModuleInfo =
     }
 
 
+-- Every global an --optimize build of the program would contain.
+bundle :: Opt.GlobalGraph -> ModuleName.Canonical -> Opt.Main -> Set.Set Opt.Global
+bundle (Opt.GlobalGraph nodes _) home main =
+  let
+    edges g = maybe [] (if isDebugger g then const [] else edgesOf g) (Map.lookup g nodes)
+  in
+  closure (map fst . edges) (Opt.Global home N.main : map fst (mainRefs main))
+
+
 analyze :: Opt.GlobalGraph -> (Opt.Global -> Int) -> ModuleName.Canonical -> Opt.Main -> Analysis
 analyze (Opt.GlobalGraph nodes _) sizeOf home main =
   let
@@ -96,18 +108,18 @@ analyze (Opt.GlobalGraph nodes _) sizeOf home main =
     edges = Map.mapWithKey (\g n -> if isDebugger g then [] else edgesOf g n) nodes
     edgesFrom g = Map.findWithDefault [] g edges
 
-    bundle = closure (map fst . edgesFrom) roots
+    inBundle = closure (map fst . edgesFrom) roots
     direct = closure (\g -> [ d | (d, Nothing) <- edgesFrom g ]) roots
 
     moduleOf (Opt.Global m _) = m
-    sizes = Map.fromSet sizeOf bundle
+    sizes = Map.fromSet sizeOf inBundle
     own = Map.fromListWith (+) [ (moduleOf g, n) | (g, n) <- Map.toList sizes ]
     total = sum (Map.elems own)
 
     moduleEdges =
       Map.fromListWith Set.union
         [ (moduleOf g, Set.singleton (moduleOf d))
-        | g <- Set.toList bundle, (d, _) <- edgesFrom g, moduleOf d /= moduleOf g
+        | g <- Set.toList inBundle, (d, _) <- edgesFrom g, moduleOf d /= moduleOf g
         ]
 
     importersOf =
@@ -159,10 +171,10 @@ analyze (Opt.GlobalGraph nodes _) sizeOf home main =
 
     asyncTargets =
       Map.fromListWith Set.union
-        [ (moduleOf a, Set.singleton a) | g <- Set.toList bundle, a <- asyncRefsOf (Map.lookup g nodes) ]
+        [ (moduleOf a, Set.singleton a) | g <- Set.toList inBundle, a <- asyncRefsOf (Map.lookup g nodes) ]
 
     chunkSize targets =
-      sum [ sizeOf g | g <- Set.toList (closure (map fst . edgesFrom) (Set.toList targets)), Set.notMember g bundle ]
+      sum [ sizeOf g | g <- Set.toList (closure (map fst . edgesFrom) (Set.toList targets)), Set.notMember g inBundle ]
   in
   Analysis
     { _total = total
