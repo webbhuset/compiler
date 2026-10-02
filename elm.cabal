@@ -86,6 +86,7 @@ executable elm
         Tool.Index
         Tool.Interface
         Tool.Module
+        Tool.Move
         Tool.Outline
         Tool.Package
         Tool.Place
