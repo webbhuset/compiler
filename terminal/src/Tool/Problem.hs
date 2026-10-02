@@ -29,6 +29,7 @@ data Problem
   | ModuleNotFound Module.Name [FilePath]
   | FileNotFound FilePath
   | NothingAt String
+  | CannotMove String String
   | ModuleInPackage Module.Name String
   | NotFound String String [String]
   | BadModule R.Root Error.Module
@@ -73,6 +74,11 @@ toReport problem =
     FileNotFound path ->
       Help.report "FILE NOT FOUND" Nothing
         ("I cannot find a file at " ++ path ++ ".")
+        []
+
+    CannotMove what why ->
+      Help.report "CANNOT MOVE" Nothing
+        ("I cannot move " ++ what ++ ": " ++ why ++ ".")
         []
 
     NothingAt position ->

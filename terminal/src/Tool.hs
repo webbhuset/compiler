@@ -19,6 +19,7 @@ import qualified Tool.Decoder as Decoder
 import qualified Tool.Docs as Docs
 import qualified Tool.Graph as Graph
 import qualified Tool.Hole as Hole
+import qualified Tool.Move as Move
 import qualified Tool.Outline as Outline
 import Tool.Output (Output(..))
 import Tool.Problem (Problem(..))
@@ -65,6 +66,7 @@ commands =
   , ("sizes", "elm tool sizes src/Main.elm", "Print the bytes each module and definition adds to an --optimize build. Save the --json output of two builds and compare them with `elm tool sizes --diff before.json after.json`.")
   , ("decoder", "elm tool decoder Some.Module.decoder", "Print the shape of the JSON a Json.Decode decoder accepts, or with --sample a document it accepts.")
   , ("rename", "elm tool rename Some.Module.old new", "Rename a value, type, or constructor everywhere in the project, then check it. Add --dry-run to see the changes without making them.")
+  , ("move", "elm tool move Some.Module.name Other.Module", "Move a top level definition to another module and fix the imports, then check the project. Add --dry-run to see the changes without making them.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -92,6 +94,7 @@ run (command, arguments) (Flags json everything compareFiles sample dryRun) =
           ("cases", [target])   -> Cases.run target
           ("decoder", [target]) -> Decoder.run sample target
           ("rename", [target, new]) -> Rename.run dryRun target new
+          ("move", [target, to]) -> Move.run dryRun target to
           ("sizes", [a, b]) | compareFiles -> Sizes.diff a b
           ("sizes", [target]) | not compareFiles -> Sizes.run target
           _ ->

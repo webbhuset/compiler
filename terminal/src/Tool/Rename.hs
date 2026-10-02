@@ -71,18 +71,13 @@ run dryRun target newName =
                   return (Left problem)
 
                 Right (root, edits) ->
-                  do  places <- Place.withSource root (Place.sortPlaces (map toPlace edits))
+                  do  places <- Place.withSource root (Place.sortPlaces (map Edit.toPlace edits))
                       if dryRun
                         then return (Right (report "Would change" places Nothing))
                         else
                           do  Edit.apply root edits
                               checked <- Project.check []
                               return (Right (report "Changed" places (Just checked)))
-
-
-toPlace :: Edit -> Place
-toPlace (Edit path line col endCol replacement) =
-  Place path line col line endCol "edit" ("-> " ++ replacement) ""
 
 
 report :: String -> [Place] -> Maybe (Either Problem Int) -> Output
