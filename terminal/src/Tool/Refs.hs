@@ -41,7 +41,7 @@ run target =
       return (Left (BadName "a value like `Page.Home.view` or a type like `Page.Home.Model`" target))
 
     Just (home, name) ->
-      Project.withProject $ \root modules ->
+      Project.withProject $ \root _ modules ->
         case checkExists home name modules of
           Just suggestions ->
             return $ Left $ NotFound ("anything in " ++ Module.toChars home) name suggestions

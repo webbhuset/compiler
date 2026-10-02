@@ -92,6 +92,7 @@ executable elm
         Tool.Render
         Tool.Summary
         Tool.Type
+        Tool.Unused
 
         -- terminal args
         Terminal
