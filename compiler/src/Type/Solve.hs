@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings, TemplateHaskell #-}
 module Type.Solve
   ( run
+  , runProbing
+  , Probed(..)
   )
   where
 
@@ -38,10 +40,10 @@ run :: Can.Overloads -> Constraint -> IO (Either (NE.List Error.Error) (Map.Map 
 run overloads constraint =
   do  pools <- MVector.replicate 8 []
 
-      (State env _ errors _ _ _) <-
+      (State env _ errors _ _ _ _) <-
         settleWidens outermostRank pools =<<
           settlePending outermostRank pools =<<
-            solve Map.empty outermostRank pools (emptyState overloads) constraint
+            solve Map.empty outermostRank pools (emptyState overloads Nothing) constraint
 
       case errors of
         [] ->
@@ -51,10 +53,61 @@ run overloads constraint =
           return $ Left (NE.List e es)
 
 
+-- Like run, but also gives the type the solver settled on for every
+-- expression and every name a pattern or definition binds, by region. This
+-- is what `elm tool at` reports; a build never pays for it.
+runProbing :: Can.Overloads -> Constraint -> IO (Either (NE.List Error.Error) (Map.Map N.Name Can.Annotation, [Probed]))
+runProbing overloads constraint =
+  do  pools <- MVector.replicate 8 []
 
-emptyState :: Can.Overloads -> State
-emptyState overloads =
-  State Map.empty (nextMark noMark) [] overloads [] []
+      (State env _ errors _ _ _ probes) <-
+        settleWidens outermostRank pools =<<
+          settlePending outermostRank pools =<<
+            solve Map.empty outermostRank pools (emptyState overloads (Just [])) constraint
+
+      case errors of
+        [] ->
+          do  annotations <- traverse Type.toAnnotation env
+              probed <- traverse toProbed (maybe [] id probes)
+              return $ Right (annotations, probed)
+
+        e:es ->
+          return $ Left (NE.List e es)
+
+
+emptyState :: Can.Overloads -> Maybe [Probe] -> State
+emptyState overloads probes =
+  State Map.empty (nextMark noMark) [] overloads [] [] probes
+
+
+
+-- PROBES
+
+
+data Probe =
+  Probe A.Region (Maybe N.Name) Variable
+
+
+-- The name is there when the region is where a name is bound.
+data Probed =
+  Probed A.Region (Maybe N.Name) Can.Annotation
+
+
+probe :: A.Region -> Maybe N.Name -> Variable -> State -> State
+probe region name variable state =
+  case _probes state of
+    Nothing -> state
+    Just ps -> state { _probes = Just (Probe region name variable : ps) }
+
+
+probeLocals :: Map.Map N.Name (A.Located Variable) -> State -> State
+probeLocals locals state =
+  Map.foldrWithKey (\name (A.At region variable) -> probe region (Just name) variable) state locals
+
+
+toProbed :: Probe -> IO Probed
+toProbed (Probe region name variable) =
+  Probed region name <$> Type.toAnnotation variable
 
 
 
@@ -82,6 +135,8 @@ data State =
     -- `widen` sites whose row inclusion is still to be checked, most recent
     -- first. Settled before a definition generalizes; see settleWidens.
     , _widens :: [Widen]
+    -- Only collected for runProbing.
+    , _probes :: Maybe [Probe]
     }
 
 
@@ -107,11 +162,11 @@ solve env rank pools state constraint =
           case answer of
             Unify.Ok vars ->
               do  introduce rank pools vars
-                  return state
+                  return (probe region Nothing actual state)
 
             Unify.Err vars actualType expectedType ->
               do  introduce rank pools vars
-                  return $ addError state $
+                  return $ addError (probe region Nothing actual state) $
                     Error.BadExpr region category actualType $
                       Error.typeReplace expectation expectedType
 
@@ -122,11 +177,11 @@ solve env rank pools state constraint =
           case answer of
             Unify.Ok vars ->
               do  introduce rank pools vars
-                  return state
+                  return (probe region Nothing actual state)
 
             Unify.Err vars actualType expectedType ->
               do  introduce rank pools vars
-                  return $ addError state $
+                  return $ addError (probe region Nothing actual state) $
                     Error.BadExpr region (Error.Local name) actualType $
                       Error.typeReplace expectation expectedType
 
@@ -137,11 +192,11 @@ solve env rank pools state constraint =
           case answer of
             Unify.Ok vars ->
               do  introduce rank pools vars
-                  return state
+                  return (probe region Nothing actual state)
 
             Unify.Err vars actualType expectedType ->
               do  introduce rank pools vars
-                  return $ addError state $
+                  return $ addError (probe region Nothing actual state) $
                     Error.BadExpr region (Error.Foreign name) actualType $
                       Error.typeReplace expectation expectedType
 
@@ -152,11 +207,11 @@ solve env rank pools state constraint =
           case answer of
             Unify.Ok vars ->
               do  introduce rank pools vars
-                  return state
+                  return (probe region Nothing actual state)
 
             Unify.Err vars actualType expectedType ->
               do  introduce rank pools vars
-                  return $ addError state $
+                  return $ addError (probe region Nothing actual state) $
                     Error.BadExpr region (Error.Operator op) actualType $
                       Error.typeReplace expectation expectedType
 
@@ -194,7 +249,7 @@ solve env rank pools state constraint =
       do  state1 <- settleWidens rank pools =<< settlePending rank pools =<< solve env rank pools state headerCon
           locals <- traverse (A.traverse (typeToVariable rank pools)) header
           let newEnv = Map.union env (Map.map A.toValue locals)
-          state2 <- solve newEnv rank pools state1 subCon
+          state2 <- solve newEnv rank pools (probeLocals locals state1) subCon
           foldM occurs state2 $ Map.toList locals
 
     CLet rigids flexs header headerCon subCon ->
@@ -216,7 +271,7 @@ solve env rank pools state constraint =
 
           -- run solver in next pool
           locals <- traverse (A.traverse (typeToVariable nextRank nextPools)) header
-          (State savedEnv mark errors overloads pending widens) <-
+          (State savedEnv mark errors overloads pending widens probes) <-
             settleWidens nextRank nextPools =<<
               settlePending nextRank nextPools =<<
                 solve env nextRank nextPools state headerCon
@@ -233,7 +288,7 @@ solve env rank pools state constraint =
           mapM_ isGeneric rigids
 
           let newEnv = Map.union env (Map.map A.toValue locals)
-          let tempState = State savedEnv finalMark errors overloads pending widens
+          let tempState = probeLocals locals (State savedEnv finalMark errors overloads pending widens probes)
           newState <- solve newEnv rank nextPools tempState subCon
 
           foldM occurs newState (Map.toList locals)

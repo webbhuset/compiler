@@ -2,6 +2,7 @@
 module Compile
   ( Artifacts(..)
   , compile
+  , probe
   )
   where
 
@@ -54,6 +55,25 @@ compile pkg ifaces modul =
       ()          <- nitpick canonical
       objects     <- optimize modul annotations canonical
       return (Artifacts canonical annotations objects (Comparable._atoms comparables))
+
+
+
+-- PROBE
+--
+-- Type check a module and keep the type of every expression and binding,
+-- for `elm tool at`. Stops after type checking.
+
+
+probe :: Pkg.Name -> Map.Map Module.Name I.Interface -> Src.Module -> Either E.Error (Can.Module, Map.Map N.Name Can.Annotation, [Type.Probed])
+probe pkg ifaces modul =
+  do  canonical@(Can.Module _ _ _ _ _ _ _ overloads _ _ _) <- canonicalize pkg ifaces modul
+      let comparables = Comparable.compute ifaces canonical
+      case unsafePerformIO (Comparable.register comparables >> (Type.runProbing overloads =<< Type.constrain canonical)) of
+        Right (annotations, probed) ->
+          Right (canonical, annotations, probed)
+
+        Left errors ->
+          Left (E.BadTypes (Localizer.fromModule modul) errors)
 
 
 

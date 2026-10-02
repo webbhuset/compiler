@@ -27,6 +27,8 @@ data Problem
   | BadArgs String String
   | BadName String String
   | ModuleNotFound Module.Name [FilePath]
+  | FileNotFound FilePath
+  | NothingAt String
   | ModuleInPackage Module.Name String
   | NotFound String String [String]
   | BadModule R.Root Error.Module
@@ -66,6 +68,17 @@ toReport problem =
         ("I cannot find a `" ++ Module.toChars name ++ "` module. I looked for "
           ++ Module.toFilePath name ++ ".elm in these source directories:")
         [ D.indent 4 (D.vcat (map D.fromChars dirs)) ]
+
+    FileNotFound path ->
+      Help.report "FILE NOT FOUND" Nothing
+        ("I cannot find a file at " ++ path ++ ".")
+        []
+
+    NothingAt position ->
+      Help.report "NOTHING THERE" Nothing
+        ("There is no expression at " ++ position ++ ". Lines and columns count from 1,\
+        \ and the position has to be inside a definition.")
+        []
 
     ModuleInPackage name pkg ->
       Help.report "MODULE IN A PACKAGE" Nothing
