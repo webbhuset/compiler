@@ -10,6 +10,7 @@ module AST.Utils.Type
 import qualified Data.Map as Map
 
 import AST.Canonical (Type(..), AliasType(..), FieldType(..))
+import qualified AST.Prim.Name as N
 import qualified AST.Prim.TypeVar as T
 
 
@@ -29,8 +30,6 @@ delambda tipe =
 
 
 -- DEALIAS
---
--- TODO BUG record extensions seem to be skipped during dealiasing
 
 
 dealias :: [(T.Var, Type)] -> AliasType -> Type
@@ -48,13 +47,26 @@ dealiasHelp typeTable =
       case tipe of
         TLambda a b     -> TLambda (go a) (go b)
         TVar x          -> Map.findWithDefault tipe x typeTable
-        TRecord fs e    -> TRecord (Map.map (dealiasField typeTable) fs) e
+        TRecord fs e    -> dealiasRecord typeTable (Map.map (dealiasField typeTable) fs) e
         TAlias h n xs t -> TAlias h n (map (fmap go) xs) t
         TType  h n xs   -> TType  h n (map go xs)
         TUnit           -> TUnit
         TPair   a b     -> TPair (go a) (go b)
         TTriple a b c   -> TTriple (go a) (go b) (go c)
         TTagRow ts e    -> TTagRow (Map.map (map go) ts) e
+
+
+dealiasRecord :: Map.Map T.Var Type -> Map.Map N.Name FieldType -> Maybe T.Var -> Type
+dealiasRecord typeTable fields ext =
+  case ext >>= \x -> Map.lookup x typeTable of
+    Nothing ->
+      TRecord fields ext
+
+    Just extType ->
+      case iteratedDealias extType of
+        TRecord subFields subExt -> TRecord (Map.union subFields fields) subExt
+        TVar x                   -> TRecord fields (Just x)
+        _                        -> TRecord fields ext
 
 
 dealiasField :: Map.Map T.Var Type -> FieldType -> FieldType
