@@ -22,6 +22,7 @@ import Tool.Output (Output(..))
 import Tool.Problem (Problem(..))
 import qualified Tool.Problem as Problem
 import qualified Tool.Refs as Refs
+import qualified Tool.Sizes as Sizes
 import qualified Tool.Type as Type
 import qualified Tool.Unused as Unused
 
@@ -34,6 +35,7 @@ data Flags =
   Flags
     { _asJson :: Bool
     , _everything :: Bool
+    , _diff :: Bool
     }
 
 
@@ -54,6 +56,7 @@ commands =
   , ("why", "elm tool why Some.Module", "Print the shortest chain of imports from each module with a `main` to a module, which may come from a package.")
   , ("unused", "elm tool unused", "Print the values, constructors, types, imports, and modules nothing in the project uses.")
   , ("cases", "elm tool cases Some.Module.Type", "Print every `case` on a custom type, with the constructors a wildcard branch covers without naming them, and every place the type is built.")
+  , ("sizes", "elm tool sizes src/Main.elm", "Print the bytes each module and definition adds to an --optimize build. Save the --json output of two builds and compare them with `elm tool sizes --diff before.json after.json`.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -63,7 +66,7 @@ commands =
 
 
 run :: (String, [String]) -> Flags -> IO ()
-run (command, arguments) (Flags json everything) =
+run (command, arguments) (Flags json everything compareFiles) =
   do  style <- if json then return Reporting.json else Reporting.terminal
       output <- Reporting.attemptWithStyle style Problem.toReport $
         case (command, arguments) of
@@ -78,6 +81,8 @@ run (command, arguments) (Flags json everything) =
           ("why", [target])     -> Graph.why target
           ("unused", [])        -> Unused.run
           ("cases", [target])   -> Cases.run target
+          ("sizes", [a, b]) | compareFiles -> Sizes.diff a b
+          ("sizes", [target]) | not compareFiles -> Sizes.run target
           _ ->
             return $ Left $
               case [ usage | (name, usage, _) <- commands, name == command ] of

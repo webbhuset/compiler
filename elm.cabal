@@ -91,6 +91,7 @@ executable elm
         Tool.Project
         Tool.Refs
         Tool.Render
+        Tool.Sizes
         Tool.Summary
         Tool.Type
         Tool.Unused
