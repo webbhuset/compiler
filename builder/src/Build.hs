@@ -4,6 +4,7 @@ module Build
   , fromPaths
   , fromRepl
   , fromModule
+  , fromProject
   , Checked(..)
   , Artifacts(..)
   , Root(..)
@@ -901,6 +902,8 @@ data Checked =
     , _checked_canonical :: Can.Module
     , _checked_annotations :: Map.Map N.Name Can.Annotation
     , _checked_objects :: Opt.LocalGraph
+    , _checked_interfaces :: Map.Map Module.Name I.Interface
+      -- of everything the module imports
     }
 
 
@@ -909,7 +912,7 @@ fromModule writer root stuff details source =
   fromSource writer root stuff details source $ \pkg modul _ ifaces ->
     case Compile.compile pkg ifaces modul of
       Right (Compile.Artifacts canonical annotations objects _) ->
-        return $ Right $ Checked modul canonical annotations objects
+        return $ Right $ Checked modul canonical annotations objects ifaces
 
       Left errors ->
         return $ Left $ Exit.ReplBadInput root source errors
@@ -953,25 +956,101 @@ fromSource writer root stuff details source compileInput =
                       results <- traverse Fork.await resultMVars
                       writeDetails writer stuff details results
                       depsStatus <- checkDeps stuff resultMVars deps Details.zero
-                      let pkg = projectTypeToPkg projectType
-                      case depsStatus of
-                        DepsChange ifaces ->
-                          compileInput pkg modul results ifaces
+                      withInterfaces env source imports resultMVars results depsStatus $
+                        compileInput (projectTypeToPkg projectType) modul results
 
-                        DepsSame same cached ->
-                          do  maybeLoaded <- loadInterfaces stuff same cached
-                              case maybeLoaded of
-                                Just ifaces -> compileInput pkg modul results ifaces
-                                Nothing     -> return $ Left $ Exit.ReplBadCache
 
-                        DepsBlock ->
-                          case Map.foldr addErrors [] results of
-                            []   -> return $ Left $ Exit.ReplBlocked
-                            e:es -> return $ Left $ Exit.ReplBadLocalDeps root e es
 
-                        DepsNotFound problems ->
-                          return $ Left $ Exit.ReplBadInput root source $ Error.BadImports $
-                            toImportErrors env resultMVars imports problems
+-- FROM PROJECT
+--
+-- Every module of the project type checked, for the `elm tool` commands that
+-- look across modules. The modules are built as usual first, which brings the
+-- cache up to date, and then compiled once more to keep what a build drops.
+
+
+fromProject :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Details.Details -> [Module.Name] -> IO (Either Exit.Repl [(FilePath, Checked)])
+fromProject writer root stuff details names =
+  do  env@(Env _ _ _ projectType _ _ _ _) <- makeEnv Reporting.ignorer root stuff details
+      dmvar <- Details.loadInterfaces stuff details
+      mvar <- newMVar Map.empty
+      crawlDeps env mvar names ()
+
+      statuses <- traverse Fork.await =<< readMVar mvar
+      midpoint <- checkMidpoint dmvar statuses
+
+      case midpoint of
+        Left problem ->
+          return $ Left $ Exit.ReplProjectProblem problem
+
+        Right foreigns ->
+          do  rmvar <- newEmptyMVar
+              resultMVars <- Fork.forkWithKey (checkModule writer env foreigns rmvar) statuses
+              putMVar rmvar resultMVars
+              results <- traverse Fork.await resultMVars
+              writeDetails writer stuff details results
+              case Map.foldr addErrors [] results of
+                e:es ->
+                  return $ Left $ Exit.ReplBadLocalDeps root e es
+
+                [] ->
+                  do  let paths = Map.mapMaybe localPath statuses
+                      mvars <- traverse (Fork.fork_ . recheck env projectType resultMVars results) paths
+                      checked <- traverse Fork.await mvars
+                      return $ fmap Map.elems $ sequence $
+                        Map.intersectionWith (\path c -> (,) path <$> c) paths checked
+
+
+localPath :: Status -> Maybe FilePath
+localPath status =
+  case status of
+    SCached (Details.Local path _ _ _ _ _)      -> Just path
+    SChanged (Details.Local path _ _ _ _ _) _ _ _ -> Just path
+    _                                           -> Nothing
+
+
+recheck :: Env -> Parse.ProjectType -> ResultDict -> Map.Map Module.Name Result -> FilePath -> IO (Either Exit.Repl Checked)
+recheck env@(Env _ root _ _ _ _ _ _) projectType resultMVars results path =
+  do  source <- File.readUtf8 path
+      parsed <- Parse.fromByteString projectType source
+      case parsed of
+        Left err ->
+          return $ Left $ Exit.ReplBadInput root source (Error.BadSyntax err)
+
+        Right modul@(Src.Module _ _ _ imports _ _ _ _ _ _ _) ->
+          do  depsStatus <- checkDeps (_stuff env) resultMVars (map Src.getImportName imports) Details.zero
+              withInterfaces env source imports resultMVars results depsStatus $ \ifaces ->
+                case Compile.compile (projectTypeToPkg projectType) ifaces modul of
+                  Right (Compile.Artifacts canonical annotations objects _) ->
+                    return $ Right $ Checked modul canonical annotations objects ifaces
+
+                  Left errors ->
+                    return $ Left $ Exit.ReplBadInput root source errors
+
+
+-- The interfaces of what a module imports, once its imports are built.
+withInterfaces
+  :: Env -> B.ByteString -> [Src.Import] -> ResultDict -> Map.Map Module.Name Result -> DepsStatus
+  -> (Map.Map Module.Name I.Interface -> IO (Either Exit.Repl a))
+  -> IO (Either Exit.Repl a)
+withInterfaces env@(Env _ root stuff _ _ _ _ _) source imports resultMVars results depsStatus callback =
+  case depsStatus of
+    DepsChange ifaces ->
+      callback ifaces
+
+    DepsSame same cached ->
+      do  maybeLoaded <- loadInterfaces stuff same cached
+          case maybeLoaded of
+            Just ifaces -> callback ifaces
+            Nothing     -> return $ Left $ Exit.ReplBadCache
+
+    DepsBlock ->
+      case Map.foldr addErrors [] results of
+        []   -> return $ Left $ Exit.ReplBlocked
+        e:es -> return $ Left $ Exit.ReplBadLocalDeps root e es
+
+    DepsNotFound problems ->
+      return $ Left $ Exit.ReplBadInput root source $ Error.BadImports $
+        toImportErrors env resultMVars imports problems
 
 
 
