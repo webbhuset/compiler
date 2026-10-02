@@ -5,6 +5,8 @@ module Build
   , fromRepl
   , fromModule
   , fromProject
+  , probeModule
+  , Probed(..)
   , Checked(..)
   , Artifacts(..)
   , Root(..)
@@ -62,6 +64,7 @@ import qualified Reporting.Error.Import as Import
 import qualified Reporting.Exit as Exit
 import qualified Reporting.Render.Type.Localizer as L
 import qualified Root as R
+import qualified Type.Solve as Solve
 
 
 
@@ -913,6 +916,33 @@ fromModule writer root stuff details source =
     case Compile.compile pkg ifaces modul of
       Right (Compile.Artifacts canonical annotations objects _) ->
         return $ Right $ Checked modul canonical annotations objects ifaces
+
+      Left errors ->
+        return $ Left $ Exit.ReplBadInput root source errors
+
+
+
+-- PROBE MODULE
+--
+-- One module type checked with the type of every expression and binding
+-- kept, for `elm tool at`.
+
+
+data Probed =
+  Probed
+    { _probed_source :: Src.Module
+    , _probed_canonical :: Can.Module
+    , _probed_annotations :: Map.Map N.Name Can.Annotation
+    , _probed_types :: [Solve.Probed]
+    }
+
+
+probeModule :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Details.Details -> B.ByteString -> IO (Either Exit.Repl Probed)
+probeModule writer root stuff details source =
+  fromSource writer root stuff details source $ \pkg modul _ ifaces ->
+    case Compile.probe pkg ifaces modul of
+      Right (canonical, annotations, probed) ->
+        return $ Right $ Probed modul canonical annotations probed
 
       Left errors ->
         return $ Left $ Exit.ReplBadInput root source errors

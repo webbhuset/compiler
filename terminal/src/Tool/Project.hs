@@ -1,12 +1,14 @@
 module Tool.Project
   ( withModule
   , withProject
+  , withProbe
   , parseModuleName
   , parseValueName
   )
   where
 
 
+import qualified Data.ByteString as BS
 import qualified Data.Char as Char
 import qualified Data.List as List
 import qualified Data.Map as Map
@@ -86,6 +88,42 @@ withModule everything name callback =
                                 case result of
                                   Left problem -> return (Left problem)
                                   Right summary -> callback summary
+
+
+-- Type check one file, keeping the type of every expression in it.
+withProbe :: FilePath -> (BS.ByteString -> Build.Probed -> IO (Either Problem a)) -> IO (Either Problem a)
+withProbe path callback =
+  do  maybeRoot <- R.findRoot
+      exists <- Dir.doesFileExist path
+      case maybeRoot of
+        Nothing ->
+          return (Left NoOutline)
+
+        Just _ | not exists ->
+          return (Left (FileNotFound path))
+
+        Just root ->
+          R.withRootLock root $ \writer stuff ->
+            do  eitherDetails <- Details.load writer Reporting.silent root stuff
+                case eitherDetails of
+                  Left problem ->
+                    return (Left (BadDetails problem))
+
+                  Right details ->
+                    do  source <- File.readUtf8 path
+                        result <- Build.probeModule writer root stuff details source
+                        case result of
+                          Right probed ->
+                            callback source probed
+
+                          Left (Exit.ReplBadInput _ _ err) ->
+                            do  time <- File.getTime path
+                                absolute <- Dir.makeAbsolute path
+                                return $ Left $ BadModule root $
+                                  Error.Module (ModuleName.fromString (S.fromChars path)) absolute time source err
+
+                          Left problem ->
+                            return (Left (BadBuild problem))
 
 
 -- Type check every module in the source directories.
