@@ -22,6 +22,7 @@ import qualified Init
 import qualified Install
 import qualified Make
 import qualified Repl
+import qualified Tool
 
 
 
@@ -38,6 +39,7 @@ main =
     , install
     , bump
     , diff
+    , tool
     ]
 
 
@@ -66,6 +68,55 @@ outro =
     "Be sure to ask on the Elm slack if you run into trouble! Folks are friendly and\
     \ happy to help out. They hang out there because it is fun, so be kind to get the\
     \ best results!"
+
+
+
+-- TOOL
+
+
+tool :: Terminal.Command
+tool =
+  let
+    summary =
+      "Look up the types, docs, and outline of modules in this project and its\
+      \ dependencies. Made for editors and coding agents."
+
+    details =
+      "The `tool` command answers questions about the code of an Elm project:"
+
+    example =
+      stack
+        ( reflow "The commands are:"
+        : [ P.vcat [ P.indent 4 (P.green (P.text usage)), P.indent 8 (reflow what) ]
+          | (_, usage, what) <- Tool.commands
+          ]
+        ++ [ reflow "Every command takes --json to print JSON instead of text." ]
+        )
+
+    toolFlags =
+      flags Tool.Flags
+        |-- onOff "json" "Print the result as JSON."
+        |-- onOff "all" "Include private declarations."
+
+    word =
+      Parser
+        { _singular = "argument"
+        , _plural = "arguments"
+        , _parser = Just
+        , _suggest = \_ -> return []
+        , _examples = \_ -> return []
+        }
+
+    command =
+      Parser
+        { _singular = "command"
+        , _plural = "commands"
+        , _parser = Just
+        , _suggest = \_ -> return [ name | (name, _, _) <- Tool.commands ]
+        , _examples = \_ -> return [ name | (name, _, _) <- Tool.commands ]
+        }
+  in
+  Terminal.Command "tool" (Common summary) details example (oneOf [args (,) ! command ... word]) toolFlags Tool.run
 
 
 
