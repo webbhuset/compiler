@@ -9,6 +9,7 @@ module Generate
   , debug
   , dev
   , prod
+  , analyze
   , repl
   )
   where
@@ -215,6 +216,23 @@ prod format stuff details (Build.Artifacts pkg _ roots modules) =
       let mains = gatherMains pkg objects roots
       let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
       toBundles format mode graph mains
+
+
+
+-- ANALYZE
+--
+-- The optimized program, its mains, and the size each global has in an
+-- --optimize build, for `elm tool async`. Debug uses are allowed, so the
+-- sizes are an estimate for a program that still has some.
+
+
+analyze :: R.Stuff -> Details.Details -> Build.Artifacts -> Task (Opt.GlobalGraph, Map.Map ModuleName.Canonical Opt.Main, Opt.Global -> Int)
+analyze stuff details (Build.Artifacts pkg _ roots modules) =
+  do  objects <- finalizeObjects =<< loadObjects stuff details modules
+      let graph = objectsToGlobalGraph objects
+      let mains = gatherMains pkg objects roots
+      let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
+      return (graph, mains, JS.sizeOf mode (Opt._g_nodes graph))
 
 
 

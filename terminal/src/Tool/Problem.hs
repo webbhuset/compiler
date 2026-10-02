@@ -33,6 +33,7 @@ data Problem
   | NotFound String String [String]
   | BadModule R.Root Error.Module
   | BadBuild Exit.Repl
+  | BadMake Exit.Make
 
 
 toReport :: Problem -> Help.Report
@@ -102,3 +103,6 @@ toReport problem =
 
     BadBuild repl ->
       Exit.replToReport repl
+
+    BadMake make ->
+      Exit.makeToReport make
