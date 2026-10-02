@@ -65,18 +65,18 @@ commands =
   , ("outline", "elm tool outline Some.Module", "Print one line per declaration of a module, with the lines it covers.")
   , ("at", "elm tool at src/Some/File.elm:LINE:COLUMN", "Print the type of the expression at a position, and the type of every local name in scope there.")
   , ("hole", "elm tool hole src/Some/File.elm:LINE:COLUMN", "Print the type a place needs, say a `Debug.todo`, and the names in scope that fit there, as they are or with more arguments.")
-  , ("async", "elm tool async src/Main.elm", "Print how many bytes each module adds to an --optimize build, whether the program always needs it or only under some branch, and which modules look worth an `import async`.")
-  , ("check", "elm tool check [src/Some/File.elm ...]", "Type check the given files, or every module in the source directories, without generating code.")
+  , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
+  , ("cases", "elm tool cases Some.Module.Type", "Print every `case` on a custom type, with the constructors a wildcard branch covers without naming them, and every place the type is built.")
+  , ("unused", "elm tool unused", "Print the values, constructors, types, imports, and modules nothing in the project uses.")
   , ("graph", "elm tool graph [Some.Module]", "Print every project module with what it imports, or what one module imports and what imports it.")
   , ("why", "elm tool why Some.Module", "Print the shortest chain of imports from each module with a `main` to a module, which may come from a package.")
-  , ("unused", "elm tool unused", "Print the values, constructors, types, imports, and modules nothing in the project uses.")
-  , ("cases", "elm tool cases Some.Module.Type", "Print every `case` on a custom type, with the constructors a wildcard branch covers without naming them, and every place the type is built.")
+  , ("async", "elm tool async src/Main.elm", "Print how many bytes each module adds to an --optimize build, whether the program always needs it or only under some branch, and which modules look worth an `import async`.")
   , ("sizes", "elm tool sizes src/Main.elm", "Print the bytes each module and definition adds to an --optimize build. Save the --json output of two builds and compare them with `elm tool sizes --diff before.json after.json`.")
   , ("decoder", "elm tool decoder Some.Module.decoder", "Print the shape of the JSON a Json.Decode decoder accepts, or with --sample a document it accepts.")
   , ("rename", "elm tool rename Some.Module.old new", "Rename a value, type, or constructor everywhere in the project, then check it. Add --dry-run to see the changes without making them.")
   , ("move", "elm tool move Some.Module.name Other.Module", "Move a top level definition to another module and fix the imports, then check the project. Add --dry-run to see the changes without making them.")
+  , ("check", "elm tool check [src/Some/File.elm ...]", "Type check the given files, or every module in the source directories, without generating code.")
   , ("serve", "elm tool serve", "Answer requests until stdin closes: one JSON object per line like {\"id\": 1, \"command\": \"type\", \"args\": [\"Main.view\"]}, one JSON response per line.")
-  , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
 
