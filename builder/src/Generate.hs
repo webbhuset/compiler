@@ -87,6 +87,8 @@ data Bundles =
       -- rendered chunks; only ESM output can host them, so this is empty in
       -- every other format even when the program has async imports
     , _hasChunks :: Bool
+    , _nodes :: Map.Map Opt.Global Opt.Node
+      -- what the source map markers' indices count; see Generate.SourceMap
     }
 
 
@@ -154,7 +156,7 @@ toBundles format marks mode graph mains =
           else
             case format of
               Iife -> Task.throw Exit.GenerateWorkerNotAProgram
-              Esm  -> return (Bundles (JS.generateWorkerBundle marks mode graph (Opt.Global home N.main)) Nothing workers False [] False)
+              Esm  -> return (Bundles (JS.generateWorkerBundle marks mode graph (Opt.Global home N.main)) Nothing workers False [] False (Opt._g_nodes graph))
 
         Nothing ->
           let
@@ -169,13 +171,13 @@ toBundles format marks mode graph mains =
                   (js, css, chunkJs) =
                     JS.generateEsmWithChunks marks mode graph mains workerRoots chunkPlan
                 in
-                return (Bundles js css workers isScript (map (uncurry ChunkBundle) chunkJs) True)
+                return (Bundles js css workers isScript (map (uncurry ChunkBundle) chunkJs) True (Opt._g_nodes graph))
 
               _ ->
                 let
                   (js, css) = generateWith format marks mode graph mains workerRoots
                 in
-                return (Bundles js css workers isScript [] (Maybe.isJust maybePlan))
+                return (Bundles js css workers isScript [] (Maybe.isJust maybePlan) (Opt._g_nodes graph))
 
 
 chunkRoots :: Maybe Chunks.Plan -> [Opt.Global]
@@ -231,7 +233,7 @@ prod format marks stuff details (Build.Artifacts pkg _ roots modules) =
 
 
 finalize :: String -> Bundles -> ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
-finalize base (Bundles js css workers _ chunks _) =
+finalize base (Bundles js css workers _ chunks _ _) =
   let
     -- A worker's name is resolved with `new URL(name, import.meta.url)`,
     -- which takes a bare name. A chunk's is an `import()` specifier, where
@@ -274,26 +276,30 @@ finalizeMapped
   -> FilePath
   -> Bundles
   -> IO ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
-finalizeMapped resolve base mainName (Bundles js css workers _ chunks _) =
+finalizeMapped resolve base mainName (Bundles js css workers _ chunks _ nodes) =
   do  let stripped builder = SourceMap.strip (render builder)
           workerFiles = [ (global, stripped builder) | WorkerBundle global builder <- workers ]
           chunkFiles = [ (home, stripped builder) | ChunkBundle home builder <- chunks ]
           mainFile = stripped js
-          origins =
-            List.nub $ concatMap (\(_, starts) -> [ o | (_, Just o) <- starts ])
+          originAt index = SourceMap.origin (fst (Map.elemAt index nodes))
+          indices =
+            Set.toList $ Set.fromList $ concatMap (\(_, starts) -> [ i | (_, Just i) <- starts ])
               (map snd workerFiles ++ map snd chunkFiles ++ [mainFile])
+          origins = map originAt indices
 
       (sources, targets) <- resolve origins
+      let sourceAt = Map.fromList (zip [0 :: Int ..] sources)
+          targetAt = Map.fromList [ (i, t) | (i, o) <- zip indices origins, Just t <- [Map.lookup o targets] ]
 
       -- each map lists only the sources its own lines go to
       let mapFor name (bytes, starts) =
             let
-              resolved = [ (line, maybeOrigin >>= (`Map.lookup` targets)) | (line, maybeOrigin) <- starts ]
-              used = List.nub [ SourceMap._source t | (_, Just t) <- resolved ]
+              resolved = [ (line, maybeIndex >>= (`Map.lookup` targetAt)) | (line, maybeIndex) <- starts ]
+              used = Set.toList (Set.fromList [ SourceMap._source t | (_, Just t) <- resolved ])
               renumber = Map.fromList (zip used [0..])
               local t = t { SourceMap._source = Map.findWithDefault 0 (SourceMap._source t) renumber }
             in
-            SourceMap.encode name (map (sources !!) used) (BSC.count '\n' bytes + 1)
+            SourceMap.encode name (map (sourceAt Map.!) used) bytes
               [ (line, fmap local target) | (line, target) <- resolved ]
 
           withComment name bytes =
@@ -333,7 +339,7 @@ finalizeWith
   -> (ModuleName.Canonical -> Maybe String)
   -> Bundles
   -> Either (Either Opt.Global ModuleName.Canonical) (BS.ByteString, Maybe BS.ByteString, [(ModuleName.Canonical, BS.ByteString)])
-finalizeWith nameOfWorker nameOfChunk (Bundles js css workers _ chunks _) =
+finalizeWith nameOfWorker nameOfChunk (Bundles js css workers _ chunks _ _) =
   do  workerTable <- traverse workerEntry workers
       chunkTable <- traverse chunkEntry chunks
       let table = workerTable ++ chunkTable

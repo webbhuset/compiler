@@ -29,6 +29,12 @@ Error: TODO in module `Heavy` on line 7
     at init (src/Main.elm:10:1)
 ```
 
+Top level functions are also named in the map, by module and name, so the
+Performance panel in Chrome DevTools shows `Import.Gitlab.rows` for the
+frame V8 calls `$author$project$Import$Gitlab$rows`. Anonymous functions
+inside a definition stay anonymous, and kernel functions keep their
+JavaScript names.
+
 Package code is mapped the same way, and kernel JavaScript is mapped line
 by line to its `.js` file, since it is copied over almost as written.
 Constructors map to their line in the custom type, and a group of mutually

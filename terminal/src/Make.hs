@@ -97,7 +97,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs sourcemap
                     [name] ->
                       do  noSourceMap sourcemap
                           bundles <- noWorkers =<< toBuilder Generate.Iife False stuff details desiredMode artifacts
-                          let (Generate.Bundles builder css _ _ _ _) = bundles
+                          let (Generate.Bundles builder css _ _ _ _ _) = bundles
                           generate writer style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
@@ -105,7 +105,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs sourcemap
                           if sourcemap
                             then writeBundles writer style (Just (root, details)) "elm.js" bundles (NE.List name names)
                             else
-                              do  let (Generate.Bundles builder css _ _ _ _) = bundles
+                              do  let (Generate.Bundles builder css _ _ _ _ _) = bundles
                                   writeCss writer "elm.js" css
                                   generate writer style "elm.js" builder (NE.List name names)
 
@@ -123,7 +123,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs sourcemap
                                   if sourcemap
                                     then writeBundles writer style (if sourcemap then Just (root, details) else Nothing) target checked (Build.getRootNames artifacts)
                                     else
-                                      do  let (Generate.Bundles builder css _ _ _ _) = checked
+                                      do  let (Generate.Bundles builder css _ _ _ _ _) = checked
                                           writeCss writer target css
                                           generate writer style target builder (Build.getRootNames artifacts)
 
@@ -143,7 +143,7 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs sourcemap
                   do  noSourceMap sourcemap
                       name <- hasOneMain artifacts
                       bundles <- noWorkers =<< toBuilder Generate.Iife False stuff details desiredMode artifacts
-                      let (Generate.Bundles builder css _ _ _ _) = bundles
+                      let (Generate.Bundles builder css _ _ _ _ _) = bundles
                       generate writer style target (Html.sandwich name css builder) (NE.List name [])
 
 
@@ -281,7 +281,7 @@ generate writer style target builder names =
 -- are files loaded relative to the bundle, and only an ES module knows its
 -- own URL (import.meta).
 noWorkers :: Generate.Bundles -> Task Generate.Bundles
-noWorkers bundles@(Generate.Bundles _ _ workers isScript _ hasChunks) =
+noWorkers bundles@(Generate.Bundles _ _ workers isScript _ hasChunks _) =
   if isScript then
     Task.throw (Exit.MakeBadGenerate Exit.GenerateScriptBadOutput)
   else if not (null workers) then

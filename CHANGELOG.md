@@ -181,12 +181,16 @@ definition the code came from.
   definition starts on, in project and package code alike. Kernel
   JavaScript maps line by line to its `.js` file.
 - The Elm sources are embedded, so DevTools shows them without a server.
+- Top level functions are named by module and name, `Main.update`, so a
+  DevTools performance profile shows Elm names.
 - Bundlers compose the maps into their own, so the Elm lines survive
   esbuild, Rollup or webpack, minified or not.
 - The JavaScript is unchanged apart from a `sourceMappingURL` comment at
   the end, and content-hashed file names stay the same.
 - Needs `--output=something.js` or `something.mjs`; HTML output inlines
   the script and has nothing to map.
+- `elm reactor` serves `.map` files as JSON, so a build it serves from
+  the project directory shows its Elm sources in DevTools.
 
 
 ## Compiled pieces in elm reactor

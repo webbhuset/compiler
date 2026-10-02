@@ -5,11 +5,13 @@ module SourceMaps
   where
 
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, readMVar)
+import qualified Control.Exception as Exception
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.NonEmptyList as NE
+import qualified Data.Set as Set
 import qualified System.Directory as Dir
 import System.FilePath ((</>), (<.>))
 import qualified System.FilePath as FP
@@ -46,8 +48,8 @@ resolver root details outputDir origins =
   do  versions <- packageVersions root details
       cache <- R.getPackageCache
       outDir <- Dir.makeAbsolute outputDir
-      let modules = List.nub [ (SourceMap._package o, SourceMap._module o) | o <- origins ]
-      found <- traverse (locate root details versions cache outDir) modules
+      let modules = Set.toList $ Set.fromList [ (SourceMap._package o, SourceMap._module o) | o <- origins ]
+      found <- concurrently (locate root details versions cache outDir) modules
       let located = [ (key, file) | (key, Just file) <- zip modules found ]
           sources = [ SourceMap.Source label content | (_, (label, content, _)) <- located ]
           index = Map.fromList (zip (map fst located) [0..])
@@ -57,8 +59,8 @@ resolver root details outputDir origins =
                 i <- Map.lookup key index
                 starts <- Map.lookup key lines'
                 case starts of
-                  Kernel line -> Just (SourceMap.Target i line True)
-                  Elm table   -> (\l -> SourceMap.Target i l False) <$> Map.lookup (unprefixed (SourceMap._name o)) table
+                  Kernel line -> Just (SourceMap.Target i line True Nothing)
+                  Elm table   -> (\l -> SourceMap.Target i l False (Just (SourceMap._module o))) <$> Map.lookup (unprefixed (SourceMap._name o)) table
       return (sources, Map.fromList [ (o, t) | o <- origins, Just t <- [target o] ])
 
 
@@ -141,7 +143,9 @@ locate root details@(Details.Details _ outline _ _ _ _) versions cache outDir (p
                 then return (Just (label, content, Kernel (headerEnd content)))
                 else
                   do  parsed <- Parse.fromByteString projectType content
-                      return $ Just (label, content, Elm (either (const Map.empty) definitionLines parsed))
+                      -- forced here, so that it is done on this module's thread
+                      starts <- Exception.evaluate (forceLines (either (const Map.empty) definitionLines parsed))
+                      return $ Just (label, content, Elm starts)
 
 
 -- `../src/Main.elm` from the output directory.
@@ -179,6 +183,12 @@ definitionLines (Src.Module _ _ _ _ values unions aliases tags _ _ effects) =
 
 
 
+forceLines :: Map.Map String Int -> Map.Map String Int
+forceLines table =
+  Map.foldl' (flip seq) () table `seq` table
+
+
+
 -- PROJECT
 
 
@@ -203,6 +213,21 @@ packageVersions root (Details.Details _ validOutline _ _ _ _) =
                 Map.unions [direct, indirect, testDirect, testIndirect]
               _ ->
                 Map.empty
+
+
+-- Every module is read and parsed on a thread of its own.
+concurrently :: (a -> IO b) -> [a] -> IO [b]
+concurrently work xs =
+  do  vars <- traverse fork xs
+      traverse (\var -> either rethrow return =<< readMVar var) vars
+  where
+    fork x =
+      do  var <- newEmptyMVar
+          _ <- forkIO (putMVar var =<< Exception.try (work x))
+          return var
+
+    rethrow :: Exception.SomeException -> IO b
+    rethrow = Exception.throwIO
 
 
 filterM' :: (a -> IO Bool) -> [a] -> IO [a]

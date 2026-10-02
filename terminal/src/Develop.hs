@@ -164,21 +164,21 @@ compile path =
   build path $ \_ stuff details artifacts ->
     do  bundles <- generate Generate.Iife stuff details artifacts
         case bundles of
-          Generate.Bundles _ _ _ True _ _ ->
+          Generate.Bundles _ _ _ True _ _ _ ->
             Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
           -- spawns workers, or splits code across chunks: only a module knows
           -- its own URL, so the page loads the program from the .mjs endpoint
           -- instead of inlining it
-          Generate.Bundles _ css (_:_) _ _ _ ->
+          Generate.Bundles _ css (_:_) _ _ _ _ ->
             do  let (NE.List name _) = Build.getRootNames artifacts
                 return $ Html.sandwichModule name css (B.stringUtf8 ('/' : path ++ ".mjs"))
 
-          Generate.Bundles _ css _ _ _ True ->
+          Generate.Bundles _ css _ _ _ True _ ->
             do  let (NE.List name _) = Build.getRootNames artifacts
                 return $ Html.sandwichModule name css (B.stringUtf8 ('/' : path ++ ".mjs"))
 
-          Generate.Bundles javascript css [] _ _ False ->
+          Generate.Bundles javascript css [] _ _ False _ ->
             do  let (NE.List name _) = Build.getRootNames artifacts
                 return $ Html.sandwich name css javascript
 
@@ -289,20 +289,20 @@ compilePieceIn served root stuff details artifacts piece wanted path =
     Js ->
       do  bundles <- generate Generate.Iife stuff details artifacts
           case bundles of
-            Generate.Bundles _ _ _ True _ _ ->
+            Generate.Bundles _ _ _ True _ _ _ ->
               Task.throw (Exit.ReactorBadGenerate Exit.GenerateScriptBadOutput)
 
-            Generate.Bundles _ _ (_:_) _ _ _ ->
+            Generate.Bundles _ _ (_:_) _ _ _ _ ->
               Task.throw (Exit.ReactorBadGenerate Exit.GenerateWorkersRequireEsm)
 
-            Generate.Bundles _ _ _ _ _ True ->
+            Generate.Bundles _ _ _ _ _ True _ ->
               Task.throw (Exit.ReactorBadGenerate Exit.GenerateChunksRequireEsm)
 
-            Generate.Bundles javascript _ [] _ _ False ->
+            Generate.Bundles javascript _ [] _ _ False _ ->
               return (toBytes javascript)
 
     Css ->
-      do  Generate.Bundles _ css _ _ _ _ <- generate Generate.Iife stuff details artifacts
+      do  Generate.Bundles _ css _ _ _ _ _ <- generate Generate.Iife stuff details artifacts
           return (maybe BS.empty toBytes css)
 
     Mjs ->
@@ -432,6 +432,7 @@ mimeTypeDict =
     , ".mjs"     ==> "text/javascript"
     , ".json"    ==> "application/json"
     , ".m3u"     ==> "audio/x-mpegurl"
+    , ".map"     ==> "application/json"
     , ".mov"     ==> "video/quicktime"
     , ".mp3"     ==> "audio/mpeg"
     , ".mp4"     ==> "video/mp4"

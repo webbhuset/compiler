@@ -459,22 +459,22 @@ addGlobalHelp mode graph global state =
   in
   case $(Map.require 'addGlobalHelp) global graph globalToChars of
     Opt.Define expr deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         JS.Block (Expr.generateTopLevel mode global expr)
       )
 
     Opt.DefineTailFunc argNames body deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         JS.Block (Expr.generateTopLevelTailDef mode global argNames body)
       )
 
     Opt.Ctor index arity ->
-      addStmtFor global state (
+      addStmtFor graph global state (
         var global (Expr.generateCtor mode global index arity)
       )
 
     Opt.Tag arity ->
-      addStmtFor global state (
+      addStmtFor graph global state (
         var global (Expr.generateTagCtor global arity)
       )
 
@@ -482,7 +482,7 @@ addGlobalHelp mode graph global state =
       addGlobal mode graph state linkedGlobal
 
     Opt.Cycle names values functions deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         generateCycle mode global names values functions
       )
 
@@ -493,30 +493,30 @@ addGlobalHelp mode graph global state =
       if isDebugger global && not (Mode.isDebug mode) then
         state
       else
-        addKernelFor global (addDeps deps state) (generateKernel mode chunks)
+        addKernelFor graph global (addDeps deps state) (generateKernel mode chunks)
 
     Opt.Enum index ->
-      addStmtFor global state (
+      addStmtFor graph global state (
         generateEnum mode global index
       )
 
     Opt.Box ->
-      addStmtFor global (addGlobal mode graph state identity) (
+      addStmtFor graph global (addGlobal mode graph state identity) (
         generateBox mode global
       )
 
     Opt.PortIncoming decoder deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         generatePort mode global [N.ascii|incomingPort|] decoder
       )
 
     Opt.PortOutgoing encoder deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         generatePort mode global [N.ascii|outgoingPort|] encoder
       )
 
     Opt.PortTask encoder decoder deps ->
-      addStmtFor global (addDeps deps state) (
+      addStmtFor graph global (addDeps deps state) (
         generateTaskPort mode global encoder decoder
       )
 
@@ -537,19 +537,20 @@ addKernel (State revKernels revBuilders seen marks) kernel =
 
 
 -- The code of one global, after its source map marker when there is one.
-addStmtFor :: Opt.Global -> State -> JS.Stmt -> State
-addStmtFor global state stmt =
-  addBuilder state (markFor global state <> JS.stmtToBuilder stmt)
+addStmtFor :: Graph -> Opt.Global -> State -> JS.Stmt -> State
+addStmtFor graph global state stmt =
+  addBuilder state (markFor graph global state <> JS.stmtToBuilder stmt)
 
 
-addKernelFor :: Opt.Global -> State -> B.Builder -> State
-addKernelFor global state kernel =
-  addKernel state (markFor global state <> kernel)
+addKernelFor :: Graph -> Opt.Global -> State -> B.Builder -> State
+addKernelFor graph global state kernel =
+  addKernel state (markFor graph global state <> kernel)
 
 
-markFor :: Opt.Global -> State -> B.Builder
-markFor global state =
-  if _marks state then SourceMap.marker global else mempty
+-- Markers name a global by its index in the graph; see Generate.SourceMap.
+markFor :: Graph -> Opt.Global -> State -> B.Builder
+markFor graph global state =
+  if _marks state then maybe mempty SourceMap.marker (Map.lookupIndex global graph) else mempty
 
 
 var :: Opt.Global -> Expr.Code -> JS.Stmt
