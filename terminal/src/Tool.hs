@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Tool
   ( Flags(..)
   , run
@@ -6,10 +7,17 @@ module Tool
   where
 
 
+import qualified Control.Exception as Exception
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Builder as B
 import qualified System.IO as IO
 
+import qualified Data.Utf8 as Utf8
+import qualified Json.Decode as D
 import qualified Json.Encode as E
+import Json.Encode ((==>))
+import qualified Reporting.Exit.Help as Help
 import qualified Reporting
 import qualified Tool.Async as Async
 import qualified Tool.At as At
@@ -67,6 +75,7 @@ commands =
   , ("decoder", "elm tool decoder Some.Module.decoder", "Print the shape of the JSON a Json.Decode decoder accepts, or with --sample a document it accepts.")
   , ("rename", "elm tool rename Some.Module.old new", "Rename a value, type, or constructor everywhere in the project, then check it. Add --dry-run to see the changes without making them.")
   , ("move", "elm tool move Some.Module.name Other.Module", "Move a top level definition to another module and fix the imports, then check the project. Add --dry-run to see the changes without making them.")
+  , ("serve", "elm tool serve", "Answer requests until stdin closes: one JSON object per line like {\"id\": 1, \"command\": \"type\", \"args\": [\"Main.view\"]}, one JSON response per line.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -76,33 +85,124 @@ commands =
 
 
 run :: (String, [String]) -> Flags -> IO ()
-run (command, arguments) (Flags json everything compareFiles sample dryRun) =
-  do  style <- if json then return Reporting.json else Reporting.terminal
-      output <- Reporting.attemptWithStyle style Problem.toReport $
-        case (command, arguments) of
-          ("type", [target])    -> Type.run everything target
-          ("docs", [target])    -> Docs.run everything target
-          ("outline", [target]) -> Outline.run target
-          ("refs", [target])    -> Refs.run target
-          ("at", [target])      -> At.run target
-          ("hole", [target])    -> Hole.run target
-          ("async", [target])   -> Async.run target
-          ("check", files)      -> Check.run files
-          ("graph", targets)    -> Graph.graph targets
-          ("why", [target])     -> Graph.why target
-          ("unused", [])        -> Unused.run
-          ("cases", [target])   -> Cases.run target
-          ("decoder", [target]) -> Decoder.run sample target
-          ("rename", [target, new]) -> Rename.run dryRun target new
-          ("move", [target, to]) -> Move.run dryRun target to
-          ("sizes", [a, b]) | compareFiles -> Sizes.diff a b
-          ("sizes", [target]) | not compareFiles -> Sizes.run target
-          _ ->
-            return $ Left $
-              case [ usage | (name, usage, _) <- commands, name == command ] of
-                usage : _ -> BadArgs command usage
-                []        -> UnknownCommand command
-
-      if json
+run (command, arguments) flags =
+  if command == "serve" && null arguments then serve else
+  do  style <- if _asJson flags then return Reporting.json else Reporting.terminal
+      output <- Reporting.attemptWithStyle style Problem.toReport (dispatch (command, arguments) flags)
+      if _asJson flags
         then B.hPutBuilder IO.stdout (E.encodeUgly (_json output) <> B.char7 '\n')
         else IO.putStr (_text output)
+
+
+dispatch :: (String, [String]) -> Flags -> IO (Either Problem Output)
+dispatch (command, arguments) (Flags _ everything compareFiles sample dryRun) =
+  case (command, arguments) of
+    ("type", [target])    -> Type.run everything target
+    ("docs", [target])    -> Docs.run everything target
+    ("outline", [target]) -> Outline.run target
+    ("refs", [target])    -> Refs.run target
+    ("at", [target])      -> At.run target
+    ("hole", [target])    -> Hole.run target
+    ("async", [target])   -> Async.run target
+    ("check", files)      -> Check.run files
+    ("graph", targets)    -> Graph.graph targets
+    ("why", [target])     -> Graph.why target
+    ("unused", [])        -> Unused.run
+    ("cases", [target])   -> Cases.run target
+    ("decoder", [target]) -> Decoder.run sample target
+    ("rename", [target, new]) -> Rename.run dryRun target new
+    ("move", [target, to]) -> Move.run dryRun target to
+    ("sizes", [a, b]) | compareFiles -> Sizes.diff a b
+    ("sizes", [target]) | not compareFiles -> Sizes.run target
+    _ ->
+      return $ Left $
+        case [ usage | (name, usage, _) <- commands, name == command ] of
+          usage : _ -> BadArgs command usage
+          []        -> UnknownCommand command
+
+
+
+-- SERVE
+--
+-- One JSON request per line on stdin, one JSON response per line on stdout:
+--
+--   {"id": 1, "command": "type", "args": ["Page.Home.view"]}
+--   {"id":1,"ok":true,"result":{"name":"view","signature":"view : Model -> Html Msg","annotated":true}}
+--
+-- A request can also set "all", "diff", "sample" and "dryRun". Every
+-- request reads the project again, through the same caches `elm make`
+-- uses, so answers follow the files as they change.
+
+
+serve :: IO ()
+serve =
+  do  IO.hSetBuffering IO.stdout IO.LineBuffering
+      loop
+  where
+    loop =
+      do  eof <- IO.isEOF
+          if eof then return () else
+            do  line <- BSC.getLine
+                if BS.null line then loop else
+                  do  response <- answer line
+                      B.hPutBuilder IO.stdout (E.encodeUgly response <> B.char7 '\n')
+                      IO.hFlush IO.stdout
+                      loop
+
+
+data Request =
+  Request
+    { _id :: E.Value
+    , _command :: String
+    , _args :: [String]
+    , _flags :: Flags
+    }
+
+
+answer :: BS.ByteString -> IO E.Value
+answer line =
+  do  decoded <- D.fromByteString request line
+      case decoded of
+        Left _ ->
+          return $ E.object
+            [ "ok" ==> E.bool False
+            , "error" ==> E.chars "Expected a JSON object with a \"command\" and a list of \"args\"."
+            ]
+
+        Right (Request requestId command args flags)
+          | command == "serve" ->
+              return (failure requestId (E.chars "Already serving."))
+
+          | otherwise ->
+              do  result <- Exception.try (dispatch (command, args) flags)
+                  return $
+                    case result of
+                      Right (Right output) ->
+                        E.object [ "id" ==> requestId, "ok" ==> E.bool True, "result" ==> _json output ]
+
+                      Right (Left problem) ->
+                        failure requestId (Help.reportToJson (Problem.toReport problem))
+
+                      Left exception ->
+                        failure requestId (E.chars (show (exception :: Exception.SomeException)))
+
+
+failure :: E.Value -> E.Value -> E.Value
+failure requestId err =
+  E.object [ "id" ==> requestId, "ok" ==> E.bool False, "error" ==> err ]
+
+
+request :: D.Decoder () Request
+request =
+  Request
+    <$> D.oneOf [ E.int <$> D.field "id" D.int, E.chars . Utf8.toChars <$> D.field "id" D.jsonString, pure E.null ]
+    <*> D.field "command" (Utf8.toChars <$> D.jsonString)
+    <*> D.oneOf [ D.field "args" (D.list (Utf8.toChars <$> D.jsonString)), pure [] ]
+    <*> ( Flags True
+            <$> flag "all"
+            <*> flag "diff"
+            <*> flag "sample"
+            <*> flag "dryRun"
+        )
+  where
+    flag name = D.oneOf [ D.field name D.bool, pure False ]
