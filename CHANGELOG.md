@@ -543,7 +543,9 @@ as usual, and `async` remains a legal variable name.
   catch it, wait, and call again. That is safe because Elm is pure:
   nothing the first call produced was kept. While a file is in flight the
   app pauses rather than showing a partial state, and messages that arrive
-  meanwhile are handled in order once it lands.
+  meanwhile are handled in order once it lands. A file that cannot be
+  loaded is retried with backoff until it arrives, and each failure is
+  reported as an `elmchunkerror` event.
 - A chunk takes whatever only it needs, transitively, packages included —
   a chart library used by one screen leaves the initial download
   entirely. Code a second chunk also needs is hoisted into the main

@@ -50,6 +50,27 @@ state, and messages that arrive meanwhile are handled in order once it
 lands. If you want a spinner, load the chunk from a message that also sets
 a "loading" flag, rather than expecting one for free.
 
+A chunk that cannot be loaded, because the network is down or the file is
+missing after a deploy, is asked for again after 1s, 2s, 4s and so on, up
+to 30s between tries, for as long as the page is open. The app keeps
+waiting and queueing messages, and carries on as soon as the file arrives.
+Every failed try is logged with `console.error` and dispatched as an
+`elmchunkerror` event on the global object, so the page can tell its user:
+
+```js
+addEventListener("elmchunkerror", (e) => {
+  // e.detail: { url, error, attempt, retryIn } -- retryIn in milliseconds
+  showBanner("Lost connection, retrying...");
+});
+```
+
+Chromium remembers that an import of a URL failed and fails every later
+import of it without asking the network, so from the second try the
+runtime also asks for the file with a query added (`?elm-retry=2`). That
+file is looked up next to the main bundle, so after a bundler has renamed
+the chunks only the bundler's own import is retried, which works in
+browsers that follow the current spec and do not remember failures.
+
 
 ## What goes in a chunk
 

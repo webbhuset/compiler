@@ -545,6 +545,18 @@ appExport =
 -- purpose: `__name` in a kernel file is a token the kernel preprocessor
 -- rewrites, and the two sides have to agree on one literal name.
 --
+-- A chunk that does not arrive is asked for again, after 1s, 2s, 4s and so
+-- on up to 30s between tries, for as long as the page is open, while the
+-- program waits and messages queue up behind it. The promise a marker
+-- carries settles only once the chunk is in: a rejected one would send the
+-- runtime straight back into the code that reads the chunk, which throws a
+-- marker with the same promise, and the page would spin without ever
+-- returning to the event loop. Each failure is logged and dispatched as an
+-- `elmchunkerror` event, so a page can tell its user. Chromium remembers a
+-- failed import of a URL and fails every later import of it without asking
+-- the network, so from the second try a failing import is followed by one
+-- of the same file with a query added.
+--
 -- An application that lives in a chunk is started through _Chunk_program.
 -- Its `init` cannot wait: host pages call `app.ports.x.send` on the very
 -- next line. So it returns an app object at once whose ports are known
@@ -557,15 +569,40 @@ appExport =
 
 runtime :: B.Builder
 runtime =
-  "function _Chunk_reg(load) { return { l: load, e: null, p: null }; }\n\
-  \function _Chunk_ready(exports) { return { l: null, e: exports, p: null }; }\n\
+  "function _Chunk_reg(load, url) { return { l: load, u: url, e: null, p: null }; }\n\
+  \function _Chunk_ready(exports) { return { l: null, u: null, e: exports, p: null }; }\n\
   \function _Chunk_load(c) {\n\
   \\tif (!c.p) {\n\
-  \\t\tc.p = c.l().then(function(m) {\n\
-  \\t\t\tc.e = m.default(_Chunk_scope());\n\
+  \\t\tc.p = new Promise(function(resolve) {\n\
+  \\t\t\tvar attempt = 0;\n\
+  \\t\t\tfunction tryLoad() {\n\
+  \\t\t\t\tattempt++;\n\
+  \\t\t\t\tvar n = attempt;\n\
+  \\t\t\t\tvar loading = n === 1 ? c.l() : c.l().catch(function() {\n\
+  \\t\t\t\t\treturn import(new URL(c.u, _Elm_baseUrl).href + \"?elm-retry=\" + n);\n\
+  \\t\t\t\t});\n\
+  \\t\t\t\tloading.then(function(m) {\n\
+  \\t\t\t\t\ttry { c.e = m.default(_Chunk_scope()); }\n\
+  \\t\t\t\t\tcatch (error) { _Chunk_report(c, error, n, null); return; }\n\
+  \\t\t\t\t\tresolve();\n\
+  \\t\t\t\t}, function(error) {\n\
+  \\t\t\t\t\tvar delay = Math.min(1000 * Math.pow(2, n - 1), 30000);\n\
+  \\t\t\t\t\t_Chunk_report(c, error, n, delay);\n\
+  \\t\t\t\t\tsetTimeout(tryLoad, delay);\n\
+  \\t\t\t\t});\n\
+  \\t\t\t}\n\
+  \\t\t\ttryLoad();\n\
   \\t\t});\n\
   \\t}\n\
   \\treturn c.p;\n\
+  \}\n\
+  \function _Chunk_report(c, error, attempt, retryIn) {\n\
+  \\tconsole.error(retryIn === null\n\
+  \\t\t? \"Loaded \" + c.u + \" but could not start it, so the program cannot go on. This is a bug, please report it.\"\n\
+  \\t\t: \"Could not load \" + c.u + \" (attempt \" + attempt + \"), trying again in \" + retryIn / 1000 + \"s.\", error);\n\
+  \\tif (typeof dispatchEvent === \"function\" && typeof CustomEvent === \"function\") {\n\
+  \\t\tdispatchEvent(new CustomEvent(\"elmchunkerror\", { detail: { url: c.u, error: error, attempt: attempt, retryIn: retryIn } }));\n\
+  \\t}\n\
   \}\n\
   \function _Chunk_get(c) {\n\
   \\tif (c.e) { return c.e; }\n\
@@ -627,7 +664,7 @@ readyRegistration home exports =
   <> "});\n"
 
 
--- `var _Chunk$author$project$Big = _Chunk_reg(function() { return import("<token>"); });`
+-- `var _Chunk$author$project$Big = _Chunk_reg(function() { return import("<token>"); }, "<token>");`
 --
 -- The import is spelled out at each registration, with the file name as a
 -- literal, so that a bundler can see it: esbuild, Rollup and webpack only
@@ -637,7 +674,7 @@ readyRegistration home exports =
 registration :: ModuleName.Canonical -> B.Builder
 registration home =
   "var " <> JsName.toBuilder (JsName.fromChunk home)
-  <> " = _Chunk_reg(function() { return import(\"" <> tokenBuilder home <> "\"); });\n"
+  <> " = _Chunk_reg(function() { return import(\"" <> tokenBuilder home <> "\"); }, \"" <> tokenBuilder home <> "\");\n"
 
 
 
