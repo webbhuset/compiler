@@ -80,6 +80,7 @@ executable elm
         Tool.Check
         Tool.Decoder
         Tool.Docs
+        Tool.Edit
         Tool.Graph
         Tool.Hole
         Tool.Index
@@ -92,6 +93,7 @@ executable elm
         Tool.Problem
         Tool.Project
         Tool.Refs
+        Tool.Rename
         Tool.Render
         Tool.Sizes
         Tool.Summary
