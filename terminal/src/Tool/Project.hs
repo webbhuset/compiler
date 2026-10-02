@@ -315,7 +315,9 @@ packageVersions root (Details.Details _ validOutline _ _ _ _) =
 
 
 -- Type check every module in the source directories.
-withProject :: (FilePath -> [(FilePath, Build.Checked)] -> IO (Either Problem a)) -> IO (Either Problem a)
+-- The callback gets the project root, the exposed modules when the project
+-- is a package, and every module with its path.
+withProject :: (FilePath -> Maybe [ModuleName.Name] -> [(FilePath, Build.Checked)] -> IO (Either Problem a)) -> IO (Either Problem a)
 withProject callback =
   do  maybeRoot <- R.findRoot
       case maybeRoot of
@@ -337,7 +339,14 @@ withProject callback =
                             return (Left (BadBuild problem))
 
                           Right modules ->
-                            callback (R.toAbsolutePath root (R.Relative "")) [ (relative root path, c) | (path, c) <- modules ]
+                            callback (R.toAbsolutePath root (R.Relative "")) (exposedModules details) [ (relative root path, c) | (path, c) <- modules ]
+
+
+exposedModules :: Details.Details -> Maybe [ModuleName.Name]
+exposedModules (Details.Details _ outline _ _ _ _) =
+  case outline of
+    Details.ValidPkg _ exposed _ -> Just exposed
+    Details.ValidApp _           -> Nothing
 
 
 sourceDirs :: R.Root -> Details.Details -> [FilePath]

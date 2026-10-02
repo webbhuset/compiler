@@ -22,6 +22,7 @@ import Tool.Problem (Problem(..))
 import qualified Tool.Problem as Problem
 import qualified Tool.Refs as Refs
 import qualified Tool.Type as Type
+import qualified Tool.Unused as Unused
 
 
 
@@ -50,6 +51,7 @@ commands =
   , ("check", "elm tool check [src/Some/File.elm ...]", "Type check the given files, or every module in the source directories, without generating code.")
   , ("graph", "elm tool graph [Some.Module]", "Print every project module with what it imports, or what one module imports and what imports it.")
   , ("why", "elm tool why Some.Module", "Print the shortest chain of imports from each module with a `main` to a module, which may come from a package.")
+  , ("unused", "elm tool unused", "Print the values, constructors, types, imports, and modules nothing in the project uses.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -72,6 +74,7 @@ run (command, arguments) (Flags json everything) =
           ("check", files)      -> Check.run files
           ("graph", targets)    -> Graph.graph targets
           ("why", [target])     -> Graph.why target
+          ("unused", [])        -> Unused.run
           _ ->
             return $ Left $
               case [ usage | (name, usage, _) <- commands, name == command ] of
