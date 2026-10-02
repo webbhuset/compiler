@@ -13,6 +13,7 @@ import qualified Json.Encode as E
 import qualified Reporting
 import qualified Tool.Async as Async
 import qualified Tool.At as At
+import qualified Tool.Cases as Cases
 import qualified Tool.Check as Check
 import qualified Tool.Docs as Docs
 import qualified Tool.Graph as Graph
@@ -52,6 +53,7 @@ commands =
   , ("graph", "elm tool graph [Some.Module]", "Print every project module with what it imports, or what one module imports and what imports it.")
   , ("why", "elm tool why Some.Module", "Print the shortest chain of imports from each module with a `main` to a module, which may come from a package.")
   , ("unused", "elm tool unused", "Print the values, constructors, types, imports, and modules nothing in the project uses.")
+  , ("cases", "elm tool cases Some.Module.Type", "Print every `case` on a custom type, with the constructors a wildcard branch covers without naming them, and every place the type is built.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -75,6 +77,7 @@ run (command, arguments) (Flags json everything) =
           ("graph", targets)    -> Graph.graph targets
           ("why", [target])     -> Graph.why target
           ("unused", [])        -> Unused.run
+          ("cases", [target])   -> Cases.run target
           _ ->
             return $ Left $
               case [ usage | (name, usage, _) <- commands, name == command ] of
