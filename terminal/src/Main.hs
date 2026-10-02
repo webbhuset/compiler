@@ -98,6 +98,7 @@ tool =
         |-- onOff "json" "Print the result as JSON."
         |-- onOff "all" "Include private declarations."
         |-- onOff "diff" "Compare two files written by `elm tool sizes --json`."
+        |-- onOff "sample" "Print a JSON document a decoder accepts."
 
     word =
       Parser

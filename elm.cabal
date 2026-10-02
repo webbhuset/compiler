@@ -78,6 +78,7 @@ executable elm
         Tool.At
         Tool.Cases
         Tool.Check
+        Tool.Decoder
         Tool.Docs
         Tool.Graph
         Tool.Index
