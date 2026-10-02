@@ -11,6 +11,7 @@ import qualified System.IO as IO
 
 import qualified Json.Encode as E
 import qualified Reporting
+import qualified Tool.Async as Async
 import qualified Tool.At as At
 import qualified Tool.Docs as Docs
 import qualified Tool.Outline as Outline
@@ -43,6 +44,7 @@ commands =
   , ("docs", "elm tool docs Some.Module", "Print the module comment and exposed API of a module as Markdown. Add --all to include private declarations.")
   , ("outline", "elm tool outline Some.Module", "Print one line per declaration of a module, with the lines it covers.")
   , ("at", "elm tool at src/Some/File.elm:LINE:COLUMN", "Print the type of the expression at a position, and the type of every local name in scope there.")
+  , ("async", "elm tool async src/Main.elm", "Print how many bytes each module adds to an --optimize build, whether the program always needs it or only under some branch, and which modules look worth an `import async`.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -61,6 +63,7 @@ run (command, arguments) (Flags json everything) =
           ("outline", [target]) -> Outline.run target
           ("refs", [target])    -> Refs.run target
           ("at", [target])      -> At.run target
+          ("async", [target])   -> Async.run target
           _ ->
             return $ Left $
               case [ usage | (name, usage, _) <- commands, name == command ] of

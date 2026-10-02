@@ -1,6 +1,7 @@
 {-# LANGUAGE ExtendedLiterals, OverloadedStrings, QuasiQuotes, TemplateHaskell #-}
 module Generate.JavaScript
   ( generate
+  , sizeOf
   , hasScriptMain
   , generateEsm
   , generateEsmWithChunks
@@ -467,6 +468,21 @@ stateToBuilder (State revKernels revBuilders _ marks) =
 prependBuilders :: [B.Builder] -> B.Builder -> B.Builder
 prependBuilders revBuilders monolith =
   List.foldl' (\m b -> b <> m) monolith revBuilders
+
+
+
+-- SIZES
+
+
+-- The size of the code generated for one global alone, without the globals
+-- it depends on. For `elm tool async`.
+sizeOf :: Mode.Mode -> Graph -> Opt.Global -> Int
+sizeOf mode graph global =
+  let
+    alone = State mempty [] (Map.keysSet graph) False
+  in
+  fromIntegral $ LBS.length $ B.toLazyByteString $ stateToBuilder $
+    addGlobalHelp mode graph global alone
 
 
 

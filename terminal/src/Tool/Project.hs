@@ -2,6 +2,7 @@ module Tool.Project
   ( withModule
   , withProject
   , withProbe
+  , withMain
   , parseModuleName
   , parseValueName
   )
@@ -22,7 +23,10 @@ import qualified ThreadSafe.Fork as Fork
 
 import qualified AST.Prim.Module as ModuleName
 import qualified AST.Prim.Name as N
+import qualified AST.Optimized as Opt
 import qualified Build
+import qualified Generate
+import qualified Reporting.Task as Task
 import qualified Elm.Details as Details
 import qualified Elm.Interface as I
 import qualified Elm.ModuleName as Canonical
@@ -124,6 +128,42 @@ withProbe path callback =
 
                           Left problem ->
                             return (Left (BadBuild problem))
+
+
+-- Build a program the way `elm make` would, and hand over the optimized
+-- program with the size of each global in it.
+withMain :: FilePath -> (Opt.GlobalGraph -> Map.Map Canonical.Canonical Opt.Main -> (Opt.Global -> Int) -> IO (Either Problem a)) -> IO (Either Problem a)
+withMain path callback =
+  do  maybeRoot <- R.findRoot
+      exists <- Dir.doesFileExist path
+      case maybeRoot of
+        Nothing ->
+          return (Left NoOutline)
+
+        Just _ | not exists ->
+          return (Left (FileNotFound path))
+
+        Just root ->
+          R.withRootLock root $ \writer stuff ->
+            do  eitherDetails <- Details.load writer Reporting.silent root stuff
+                case eitherDetails of
+                  Left problem ->
+                    return (Left (BadDetails problem))
+
+                  Right details ->
+                    do  built <- Build.fromPaths writer Reporting.silent root stuff details (NE.List path [])
+                        case built of
+                          Left problem ->
+                            return (Left (BadMake (Exit.MakeCannotBuild problem)))
+
+                          Right artifacts ->
+                            do  analyzed <- Task.run (Generate.analyze stuff details artifacts)
+                                case analyzed of
+                                  Left problem ->
+                                    return (Left (BadMake (Exit.MakeBadGenerate problem)))
+
+                                  Right (graph, mains, sizeOf) ->
+                                    callback graph mains sizeOf
 
 
 -- Type check every module in the source directories.
