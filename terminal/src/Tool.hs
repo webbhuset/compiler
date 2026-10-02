@@ -24,6 +24,7 @@ import Tool.Output (Output(..))
 import Tool.Problem (Problem(..))
 import qualified Tool.Problem as Problem
 import qualified Tool.Refs as Refs
+import qualified Tool.Rename as Rename
 import qualified Tool.Sizes as Sizes
 import qualified Tool.Type as Type
 import qualified Tool.Unused as Unused
@@ -39,6 +40,7 @@ data Flags =
     , _everything :: Bool
     , _diff :: Bool
     , _sample :: Bool
+    , _dryRun :: Bool
     }
 
 
@@ -62,6 +64,7 @@ commands =
   , ("cases", "elm tool cases Some.Module.Type", "Print every `case` on a custom type, with the constructors a wildcard branch covers without naming them, and every place the type is built.")
   , ("sizes", "elm tool sizes src/Main.elm", "Print the bytes each module and definition adds to an --optimize build. Save the --json output of two builds and compare them with `elm tool sizes --diff before.json after.json`.")
   , ("decoder", "elm tool decoder Some.Module.decoder", "Print the shape of the JSON a Json.Decode decoder accepts, or with --sample a document it accepts.")
+  , ("rename", "elm tool rename Some.Module.old new", "Rename a value, type, or constructor everywhere in the project, then check it. Add --dry-run to see the changes without making them.")
   , ("refs", "elm tool refs Some.Module.name", "Print where a value, type, or constructor is defined and every place in the project that uses it.")
   ]
 
@@ -71,7 +74,7 @@ commands =
 
 
 run :: (String, [String]) -> Flags -> IO ()
-run (command, arguments) (Flags json everything compareFiles sample) =
+run (command, arguments) (Flags json everything compareFiles sample dryRun) =
   do  style <- if json then return Reporting.json else Reporting.terminal
       output <- Reporting.attemptWithStyle style Problem.toReport $
         case (command, arguments) of
@@ -88,6 +91,7 @@ run (command, arguments) (Flags json everything compareFiles sample) =
           ("unused", [])        -> Unused.run
           ("cases", [target])   -> Cases.run target
           ("decoder", [target]) -> Decoder.run sample target
+          ("rename", [target, new]) -> Rename.run dryRun target new
           ("sizes", [a, b]) | compareFiles -> Sizes.diff a b
           ("sizes", [target]) | not compareFiles -> Sizes.run target
           _ ->

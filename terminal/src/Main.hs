@@ -99,6 +99,7 @@ tool =
         |-- onOff "all" "Include private declarations."
         |-- onOff "diff" "Compare two files written by `elm tool sizes --json`."
         |-- onOff "sample" "Print a JSON document a decoder accepts."
+        |-- onOff "dry-run" "Print the changes `rename` or `move` would make without making them."
 
     word =
       Parser
