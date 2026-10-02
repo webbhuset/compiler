@@ -103,6 +103,7 @@ executable elm
         Reporting.Exit.Help
         Reporting.Task
         Root
+        SourceMaps
 
         -- Elm things
         Elm.Outline
@@ -171,6 +172,7 @@ executable elm
         Generate.JavaScript.Name
         Generate.JavaScript.Scope
         Generate.Mode
+        Generate.SourceMap
         Generate.Workers
         Nitpick.AsyncImports
         Nitpick.Debug

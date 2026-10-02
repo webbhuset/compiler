@@ -39,6 +39,7 @@ import qualified Generate.Css as GenCss
 import qualified Generate.JavaScript.Scope as Scope
 import qualified Generate.JavaScript.Name as JsName
 import qualified Generate.Mode as Mode
+import qualified Generate.SourceMap as SourceMap
 import qualified Reporting.Doc as D
 import qualified Reporting.Render.Type as RT
 import qualified Reporting.Render.Type.Localizer as L
@@ -52,10 +53,10 @@ type Graph = Map.Map Opt.Global Opt.Node
 type Mains = Map.Map ModuleName.Canonical Opt.Main
 
 
-generate :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
-generate mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
+generate :: Bool -> Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
+generate marks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
   let
-    state = Map.foldrWithKey (addMain mode graph) emptyState mains
+    state = Map.foldrWithKey (addMain mode graph) (startState marks) mains
 
     javascript =
       case scriptHome mains of
@@ -121,10 +122,10 @@ toScriptRunner home =
 -- Everything lives in module scope, which is already strict and does not
 -- leak, so no IIFE is needed. The `scope` parameter is only ever used by
 -- _Platform_export, which is never called in this mode.
-generateEsm :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
-generateEsm mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
+generateEsm :: Bool -> Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
+generateEsm marks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots =
   let
-    state = Map.foldrWithKey (addMain mode graph) emptyState mains
+    state = Map.foldrWithKey (addMain mode graph) (startState marks) mains
 
     javascript =
       case scriptHome mains of
@@ -169,12 +170,12 @@ metaUrlLine =
 
 
 generateEsmWithChunks
-  :: Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> Chunks.Plan
+  :: Bool -> Mode.Mode -> Opt.GlobalGraph -> Mains -> [Opt.Global] -> Chunks.Plan
   -> (B.Builder, Maybe B.Builder, [(ModuleName.Canonical, B.Builder)])
-generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots (Chunks.Plan chunks planned) =
+generateEsmWithChunks marks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoots (Chunks.Plan chunks planned) =
   let
-    mainState@(State _ _ mainSeen) =
-      List.foldl' (addGlobal mode graph) emptyState
+    mainState@(State _ _ mainSeen _) =
+      List.foldl' (addGlobal mode graph) (startState marks)
         (filter (\global -> Map.member global graph) (Set.toList planned))
 
     mainBody =
@@ -197,7 +198,7 @@ generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoo
       let
         home = Chunks._home chunk
       in
-      case generateChunkBundle mode graph mainSeen mainDefined chunk of
+      case generateChunkBundle marks mode graph mainSeen mainDefined chunk of
         Left exports ->
           (revBundles, Chunks.readyRegistration home exports : revRegs, needed, apps)
 
@@ -238,12 +239,12 @@ generateEsmWithChunks mode globalGraph@(Opt.GlobalGraph graph _) mains workerRoo
 -- async import. There is no file to write; the caller registers the chunk
 -- as already loaded, with these exports.
 generateChunkBundle
-  :: Mode.Mode -> Graph -> Set.Set Opt.Global -> Set.Set BS.ByteString -> Chunks.Chunk
+  :: Bool -> Mode.Mode -> Graph -> Set.Set Opt.Global -> Set.Set BS.ByteString -> Chunks.Chunk
   -> Either [B.Builder] (Set.Set BS.ByteString, B.Builder)
-generateChunkBundle mode graph mainSeen mainDefined (Chunks.Chunk home roots maybeProgram) =
+generateChunkBundle marks mode graph mainSeen mainDefined (Chunks.Chunk home roots maybeProgram) =
   let
-    state@(State _ _ seen) =
-      List.foldl' (addGlobal mode graph) (State mempty [] mainSeen)
+    state@(State _ _ seen _) =
+      List.foldl' (addGlobal mode graph) (State mempty [] mainSeen marks)
         (filter (\global -> Map.member global graph) (Set.toList roots))
 
     body = stateToBuilder state
@@ -298,10 +299,10 @@ render builder =
 -- worker program via the _Worker_run harness (webbhuset/worker kernel).
 -- The program's dependency graph necessarily includes that kernel, since
 -- worker programs are built with Worker.worker.
-generateWorkerBundle :: Mode.Mode -> Opt.GlobalGraph -> Opt.Global -> B.Builder
-generateWorkerBundle mode (Opt.GlobalGraph graph _) root@(Opt.Global home name) =
+generateWorkerBundle :: Bool -> Mode.Mode -> Opt.GlobalGraph -> Opt.Global -> B.Builder
+generateWorkerBundle marks mode (Opt.GlobalGraph graph _) root@(Opt.Global home name) =
   let
-    state = addGlobal mode graph emptyState root
+    state = addGlobal mode graph (startState marks) root
   in
   metaUrlLine
   <> Functions.functions
@@ -408,17 +409,25 @@ data State =
     { _revKernels :: [B.Builder]
     , _revBuilders :: [B.Builder]
     , _seenGlobals :: Set.Set Opt.Global
+    , _marks :: Bool
+      -- put a source map marker in front of each global's code; see
+      -- Generate.SourceMap
     }
 
 
 emptyState :: State
 emptyState =
-  State mempty [] Set.empty
+  State mempty [] Set.empty False
+
+
+startState :: Bool -> State
+startState marks =
+  State mempty [] Set.empty marks
 
 
 stateToBuilder :: State -> B.Builder
-stateToBuilder (State revKernels revBuilders _) =
-  prependBuilders revKernels (prependBuilders revBuilders mempty)
+stateToBuilder (State revKernels revBuilders _ marks) =
+  prependBuilders revKernels (prependBuilders revBuilders (if marks then SourceMap.endMarker else mempty))
 
 
 prependBuilders :: [B.Builder] -> B.Builder -> B.Builder
@@ -431,12 +440,12 @@ prependBuilders revBuilders monolith =
 
 
 addGlobal :: Mode.Mode -> Graph -> State -> Opt.Global -> State
-addGlobal mode graph state@(State revKernels builders seen) global =
+addGlobal mode graph state@(State revKernels builders seen marks) global =
   if Set.member global seen then
     state
   else
     addGlobalHelp mode graph global $
-      State revKernels builders (Set.insert global seen)
+      State revKernels builders (Set.insert global seen) marks
 
 
 addGlobalHelp :: Mode.Mode -> Graph -> Opt.Global -> State -> State
@@ -450,22 +459,22 @@ addGlobalHelp mode graph global state =
   in
   case $(Map.require 'addGlobalHelp) global graph globalToChars of
     Opt.Define expr deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         JS.Block (Expr.generateTopLevel mode global expr)
       )
 
     Opt.DefineTailFunc argNames body deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         JS.Block (Expr.generateTopLevelTailDef mode global argNames body)
       )
 
     Opt.Ctor index arity ->
-      addStmt state (
+      addStmtFor global state (
         var global (Expr.generateCtor mode global index arity)
       )
 
     Opt.Tag arity ->
-      addStmt state (
+      addStmtFor global state (
         var global (Expr.generateTagCtor global arity)
       )
 
@@ -473,7 +482,7 @@ addGlobalHelp mode graph global state =
       addGlobal mode graph state linkedGlobal
 
     Opt.Cycle names values functions deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         generateCycle mode global names values functions
       )
 
@@ -484,47 +493,63 @@ addGlobalHelp mode graph global state =
       if isDebugger global && not (Mode.isDebug mode) then
         state
       else
-        addKernel (addDeps deps state) (generateKernel mode chunks)
+        addKernelFor global (addDeps deps state) (generateKernel mode chunks)
 
     Opt.Enum index ->
-      addStmt state (
+      addStmtFor global state (
         generateEnum mode global index
       )
 
     Opt.Box ->
-      addStmt (addGlobal mode graph state identity) (
+      addStmtFor global (addGlobal mode graph state identity) (
         generateBox mode global
       )
 
     Opt.PortIncoming decoder deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         generatePort mode global [N.ascii|incomingPort|] decoder
       )
 
     Opt.PortOutgoing encoder deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         generatePort mode global [N.ascii|outgoingPort|] encoder
       )
 
     Opt.PortTask encoder decoder deps ->
-      addStmt (addDeps deps state) (
+      addStmtFor global (addDeps deps state) (
         generateTaskPort mode global encoder decoder
       )
 
 
 addStmt :: State -> JS.Stmt -> State
 addStmt state stmt =
-  addBuilder state (JS.stmtToBuilder stmt)
+  addBuilder state ((if _marks state then SourceMap.endMarker else mempty) <> JS.stmtToBuilder stmt)
 
 
 addBuilder :: State -> B.Builder -> State
-addBuilder (State revKernels revBuilders seen) builder =
-  State revKernels (builder:revBuilders) seen
+addBuilder (State revKernels revBuilders seen marks) builder =
+  State revKernels (builder:revBuilders) seen marks
 
 
 addKernel :: State -> B.Builder -> State
-addKernel (State revKernels revBuilders seen) kernel =
-  State (kernel:revKernels) revBuilders seen
+addKernel (State revKernels revBuilders seen marks) kernel =
+  State (kernel:revKernels) revBuilders seen marks
+
+
+-- The code of one global, after its source map marker when there is one.
+addStmtFor :: Opt.Global -> State -> JS.Stmt -> State
+addStmtFor global state stmt =
+  addBuilder state (markFor global state <> JS.stmtToBuilder stmt)
+
+
+addKernelFor :: Opt.Global -> State -> B.Builder -> State
+addKernelFor global state kernel =
+  addKernel state (markFor global state <> kernel)
+
+
+markFor :: Opt.Global -> State -> B.Builder
+markFor global state =
+  if _marks state then SourceMap.marker global else mempty
 
 
 var :: Opt.Global -> Expr.Code -> JS.Stmt

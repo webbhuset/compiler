@@ -202,7 +202,7 @@ build path continue =
 
 generate :: Generate.Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task.Task Exit.Reactor Generate.Bundles
 generate format stuff details artifacts =
-  Task.mapError Exit.ReactorBadGenerate $ Generate.dev format stuff details artifacts
+  Task.mapError Exit.ReactorBadGenerate $ Generate.dev format False stuff details artifacts
 
 
 

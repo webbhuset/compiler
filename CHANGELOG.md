@@ -14,6 +14,7 @@ tooling (elm-format, elm-test, editors).
   - [Git dependencies — private packages](#git-dependencies--private-packages)
   - [Kernel code in git dependencies](#kernel-code-in-git-dependencies)
   - [ES module output](#es-module-output)
+  - [Source maps](#source-maps)
   - [Compiled pieces in elm reactor](#compiled-pieces-in-elm-reactor)
   - [Direct function calls](#direct-function-calls)
   - [Record update by spread](#record-update-by-spread)
@@ -166,6 +167,27 @@ Elm.Main.init({ node: ... });
   chunk per async-imported module and `Worker.spawn` one bundle per worker
   program. All of these resolve their files against `import.meta.url`,
   which is why they need this mode.
+
+## Source maps
+
+*[docs](docs/sourcemaps.md)*
+
+`elm make src/Main.elm --sourcemap --output=main.mjs` writes a source map
+next to every JavaScript file the build produces, main bundle, chunks and
+workers, so profilers, stack traces and debuggers point at the Elm
+definition the code came from.
+
+- Every line of a top level definition's code maps to the line the
+  definition starts on, in project and package code alike. Kernel
+  JavaScript maps line by line to its `.js` file.
+- The Elm sources are embedded, so DevTools shows them without a server.
+- Bundlers compose the maps into their own, so the Elm lines survive
+  esbuild, Rollup or webpack, minified or not.
+- The JavaScript is unchanged apart from a `sourceMappingURL` comment at
+  the end, and content-hashed file names stay the same.
+- Needs `--output=something.js` or `something.mjs`; HTML output inlines
+  the script and has nothing to map.
+
 
 ## Compiled pieces in elm reactor
 

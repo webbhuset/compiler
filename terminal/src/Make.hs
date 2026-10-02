@@ -28,6 +28,7 @@ import qualified Reporting
 import qualified Reporting.Exit as Exit
 import qualified Reporting.Task as Task
 import qualified Root as R
+import qualified SourceMaps
 import Terminal (Parser(..))
 
 
@@ -42,6 +43,7 @@ data Flags =
     , _output :: Maybe Output
     , _report :: Maybe ReportType
     , _docs :: Maybe FilePath
+    , _sourcemap :: Bool
     }
 
 
@@ -64,7 +66,7 @@ type Task a = Task.Task Exit.Make a
 
 
 run :: [FilePath] -> Flags -> IO ()
-run paths flags@(Flags _ _ _ report _) =
+run paths flags@(Flags _ _ _ report _ _) =
   do  style <- getStyle report
       maybeRoot <- R.findRoot
       Reporting.attemptWithStyle style Exit.makeToReport $
@@ -74,7 +76,7 @@ run paths flags@(Flags _ _ _ report _) =
 
 
 runHelp :: R.Root -> [FilePath] -> Reporting.Style -> Flags -> IO (Either Exit.Make ())
-runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
+runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs sourcemap) =
   R.withRootLock root $ \writer stuff ->
   Task.run $
   do  desiredMode <- getMode debug optimize
@@ -93,15 +95,19 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                       return ()
 
                     [name] ->
-                      do  bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
+                      do  noSourceMap sourcemap
+                          bundles <- noWorkers =<< toBuilder Generate.Iife False stuff details desiredMode artifacts
                           let (Generate.Bundles builder css _ _ _ _) = bundles
                           generate writer style "index.html" (Html.sandwich name css builder) (NE.List name [])
 
                     name:names ->
-                      do  bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
-                          let (Generate.Bundles builder css _ _ _ _) = bundles
-                          writeCss writer "elm.js" css
-                          generate writer style "elm.js" builder (NE.List name names)
+                      do  bundles <- noWorkers =<< toBuilder Generate.Iife sourcemap stuff details desiredMode artifacts
+                          if sourcemap
+                            then writeBundles writer style (Just (root, details)) "elm.js" bundles (NE.List name names)
+                            else
+                              do  let (Generate.Bundles builder css _ _ _ _) = bundles
+                                  writeCss writer "elm.js" css
+                                  generate writer style "elm.js" builder (NE.List name names)
 
                 Just DevNull ->
                   return ()
@@ -109,14 +115,17 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (JS target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  bundles <- toBuilder Generate.Iife stuff details desiredMode artifacts
+                      do  bundles <- toBuilder Generate.Iife sourcemap stuff details desiredMode artifacts
                           if Generate._isScript bundles
-                            then writeBundles writer style target bundles (Build.getRootNames artifacts)
+                            then writeBundles writer style (if sourcemap then Just (root, details) else Nothing) target bundles (Build.getRootNames artifacts)
                             else
                               do  checked <- noWorkers bundles
-                                  let (Generate.Bundles builder css _ _ _ _) = checked
-                                  writeCss writer target css
-                                  generate writer style target builder (Build.getRootNames artifacts)
+                                  if sourcemap
+                                    then writeBundles writer style (if sourcemap then Just (root, details) else Nothing) target checked (Build.getRootNames artifacts)
+                                    else
+                                      do  let (Generate.Bundles builder css _ _ _ _) = checked
+                                          writeCss writer target css
+                                          generate writer style target builder (Build.getRootNames artifacts)
 
                     name:names ->
                       Task.throw (Exit.MakeNonMainFilesIntoJavaScript name names)
@@ -124,15 +133,16 @@ runHelp root paths style (Flags debug optimize maybeOutput _ maybeDocs) =
                 Just (Esm target) ->
                   case getNoMains artifacts of
                     [] ->
-                      do  bundles <- toBuilder Generate.Esm stuff details desiredMode artifacts
-                          writeBundles writer style target bundles (Build.getRootNames artifacts)
+                      do  bundles <- toBuilder Generate.Esm sourcemap stuff details desiredMode artifacts
+                          writeBundles writer style (if sourcemap then Just (root, details) else Nothing) target bundles (Build.getRootNames artifacts)
 
                     name:names ->
                       Task.throw (Exit.MakeNonMainFilesIntoJavaScript name names)
 
                 Just (Html target) ->
-                  do  name <- hasOneMain artifacts
-                      bundles <- noWorkers =<< toBuilder Generate.Iife stuff details desiredMode artifacts
+                  do  noSourceMap sourcemap
+                      name <- hasOneMain artifacts
+                      bundles <- noWorkers =<< toBuilder Generate.Iife False stuff details desiredMode artifacts
                       let (Generate.Bundles builder css _ _ _ _) = bundles
                       generate writer style target (Html.sandwich name css builder) (NE.List name [])
 
@@ -284,13 +294,19 @@ noWorkers bundles@(Generate.Bundles _ _ workers isScript _ hasChunks) =
 
 -- ESM output: the main bundle, its .css sidecar, and one .mjs file per
 -- spawned worker program and per async-imported module, each named by
--- content hash.
-writeBundles :: File.Writer R.PROJECT -> Reporting.Style -> FilePath -> Generate.Bundles -> NE.List Module.Name -> Task ()
-writeBundles writer style target bundles names =
+-- content hash. With source maps, every file gets a `.map` beside it.
+writeBundles :: File.Writer R.PROJECT -> Reporting.Style -> Maybe (R.Root, Details.Details) -> FilePath -> Generate.Bundles -> NE.List Module.Name -> Task ()
+writeBundles writer style maps target bundles names =
   Task.io $
     do  let dir = FP.takeDirectory target
         Dir.createDirectoryIfMissing True dir
-        let (extraFiles, mainBytes, cssBytes) = Generate.finalize (FP.takeBaseName target) bundles
+        (extraFiles, mainBytes, cssBytes) <-
+          case maps of
+            Nothing ->
+              return (Generate.finalize (FP.takeBaseName target) bundles)
+
+            Just (root, details) ->
+              Generate.finalizeMapped (SourceMaps.resolver root details dir) (FP.takeBaseName target) (FP.takeFileName target) bundles
         mapM_ (\(name, bytes) -> File.writeBuilder writer (dir FP.</> name) (B.byteString bytes)) extraFiles
         maybe (return ()) (File.writeBuilder writer (target ++ ".css") . B.byteString) cssBytes
         File.writeBuilder writer target (B.byteString mainBytes)
@@ -330,13 +346,20 @@ writeCss writer target maybeCss =
 data DesiredMode = Debug | Dev | Prod
 
 
-toBuilder :: Generate.Format -> R.Stuff -> Details.Details -> DesiredMode -> Build.Artifacts -> Task Generate.Bundles
-toBuilder format stuff details desiredMode artifacts =
+toBuilder :: Generate.Format -> Bool -> R.Stuff -> Details.Details -> DesiredMode -> Build.Artifacts -> Task Generate.Bundles
+toBuilder format sourcemap stuff details desiredMode artifacts =
   Task.mapError Exit.MakeBadGenerate $
     case desiredMode of
-      Debug -> Generate.debug format stuff details artifacts
-      Dev   -> Generate.dev   format stuff details artifacts
-      Prod  -> Generate.prod  format stuff details artifacts
+      Debug -> Generate.debug format sourcemap stuff details artifacts
+      Dev   -> Generate.dev   format sourcemap stuff details artifacts
+      Prod  -> Generate.prod  format sourcemap stuff details artifacts
+
+
+-- A source map goes beside a .js or .mjs file. HTML output inlines the
+-- script, so there is no file for a map to describe.
+noSourceMap :: Bool -> Task ()
+noSourceMap sourcemap =
+  if sourcemap then Task.throw Exit.MakeSourceMapNeedsJs else return ()
 
 
 

@@ -1690,6 +1690,7 @@ data Make
   | MakeNonMainFilesIntoJavaScript Module.Name [Module.Name]
   | MakeCannotBuild BuildProblem
   | MakeBadGenerate Generate
+  | MakeSourceMapNeedsJs
 
 
 makeToReport :: Make -> Help.Report
@@ -1718,6 +1719,13 @@ makeToReport make =
 
     MakeBadDetails detailsProblem ->
       toDetailsReport detailsProblem
+
+    MakeSourceMapNeedsJs ->
+      Help.report "NO FILE TO MAP" Nothing
+        "A source map describes a JavaScript file, but this would write HTML with the\
+        \ script inside it. Ask for a JavaScript file instead, like this:"
+        [ D.indent 4 $ D.green "elm make src/Main.elm --sourcemap --output=main.mjs"
+        ]
 
     MakeAppNeedsFileNames ->
       Help.report "NO INPUT" Nothing

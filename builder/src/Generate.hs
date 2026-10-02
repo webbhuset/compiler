@@ -6,6 +6,7 @@ module Generate
   , ChunkBundle(..)
   , finalize
   , finalizeWith
+  , finalizeMapped
   , debug
   , dev
   , prod
@@ -19,6 +20,7 @@ import Control.Concurrent (readMVar)
 import Control.Monad (liftM2)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.UTF8 as BS_UTF8
 import qualified Data.Digest.Pure.SHA as SHA
@@ -44,6 +46,7 @@ import qualified File
 import qualified Generate.Css as GenCss
 import qualified Generate.JavaScript as JS
 import qualified Generate.Mode as Mode
+import qualified Generate.SourceMap as SourceMap
 import qualified Generate.Chunks as Chunks
 import qualified Generate.Workers as Workers
 import qualified Nitpick.Debug as Nitpick
@@ -104,15 +107,17 @@ data ChunkBundle =
     }
 
 
-generateWith :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
+generateWith :: Format -> Bool -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> [Opt.Global] -> (B.Builder, Maybe B.Builder)
 generateWith format =
   case format of
     Iife -> JS.generate
     Esm  -> JS.generateEsm
 
 
-toBundles :: Format -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Task Bundles
-toBundles format mode graph mains =
+-- With `marks`, every top level definition's code is preceded by a source
+-- map marker, which finalizeMapped takes out again.
+toBundles :: Format -> Bool -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Task Bundles
+toBundles format marks mode graph mains =
   do  -- Several applications in one ES module each get a chunk of their
       -- own, fetched when the application is started; the module itself
       -- keeps what they share. Only ESM output can host the files.
@@ -137,7 +142,7 @@ toBundles format mode graph mains =
         Just home -> Task.throw (Exit.GenerateChunkInWorker (Chunks.homeToChars home))
         Nothing -> return ()
 
-      let workers = map (\g -> WorkerBundle g (JS.generateWorkerBundle mode graph g)) workerRoots
+      let workers = map (\g -> WorkerBundle g (JS.generateWorkerBundle marks mode graph g)) workerRoots
 
       case workerHome mains of
         -- A worker program compiled as the root: the main bundle IS a worker
@@ -149,7 +154,7 @@ toBundles format mode graph mains =
           else
             case format of
               Iife -> Task.throw Exit.GenerateWorkerNotAProgram
-              Esm  -> return (Bundles (JS.generateWorkerBundle mode graph (Opt.Global home N.main)) Nothing workers False [] False)
+              Esm  -> return (Bundles (JS.generateWorkerBundle marks mode graph (Opt.Global home N.main)) Nothing workers False [] False)
 
         Nothing ->
           let
@@ -162,13 +167,13 @@ toBundles format mode graph mains =
               (Esm, Just chunkPlan) ->
                 let
                   (js, css, chunkJs) =
-                    JS.generateEsmWithChunks mode graph mains workerRoots chunkPlan
+                    JS.generateEsmWithChunks marks mode graph mains workerRoots chunkPlan
                 in
                 return (Bundles js css workers isScript (map (uncurry ChunkBundle) chunkJs) True)
 
               _ ->
                 let
-                  (js, css) = generateWith format mode graph mains workerRoots
+                  (js, css) = generateWith format marks mode graph mains workerRoots
                 in
                 return (Bundles js css workers isScript [] (Maybe.isJust maybePlan))
 
@@ -187,34 +192,34 @@ workerHome mains =
     []       -> Nothing
 
 
-debug :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
-debug format stuff details (Build.Artifacts pkg ifaces roots modules) =
+debug :: Format -> Bool -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
+debug format marks stuff details (Build.Artifacts pkg ifaces roots modules) =
   do  loading <- loadObjects stuff details modules
       types   <- loadTypes stuff ifaces modules
       objects <- finalizeObjects loading
       let graph = objectsToGlobalGraph objects
       let mode = Mode.Dev (Mode.callees (Opt._g_nodes graph)) (Just types)
       let mains = gatherMains pkg objects roots
-      toBundles format mode graph mains
+      toBundles format marks mode graph mains
 
 
-dev :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
-dev format stuff details (Build.Artifacts pkg _ roots modules) =
+dev :: Format -> Bool -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
+dev format marks stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       let graph = objectsToGlobalGraph objects
       let mode = Mode.Dev (Mode.callees (Opt._g_nodes graph)) Nothing
       let mains = gatherMains pkg objects roots
-      toBundles format mode graph mains
+      toBundles format marks mode graph mains
 
 
-prod :: Format -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
-prod format stuff details (Build.Artifacts pkg _ roots modules) =
+prod :: Format -> Bool -> R.Stuff -> Details.Details -> Build.Artifacts -> Task Bundles
+prod format marks stuff details (Build.Artifacts pkg _ roots modules) =
   do  objects <- finalizeObjects =<< loadObjects stuff details modules
       checkForDebugUses objects
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
       let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
-      toBundles format mode graph mains
+      toBundles format marks mode graph mains
 
 
 
@@ -255,6 +260,68 @@ finalize base (Bundles js css workers _ chunks _) =
   , substitute finalTable (render js)
   , fmap render css
   )
+
+
+-- Like finalize, for bundles generated with source map marks: each file
+-- comes with a `.map` beside it, and ends with a comment pointing at it.
+-- The markers are taken out before names are substituted and files hashed,
+-- so every file has the name and content it has without source maps. The
+-- resolver is given every definition the files contain, and says where
+-- each one is in which source.
+finalizeMapped
+  :: ([SourceMap.Origin] -> IO ([SourceMap.Source], Map.Map SourceMap.Origin SourceMap.Target))
+  -> String
+  -> FilePath
+  -> Bundles
+  -> IO ([(FilePath, BS.ByteString)], BS.ByteString, Maybe BS.ByteString)
+finalizeMapped resolve base mainName (Bundles js css workers _ chunks _) =
+  do  let stripped builder = SourceMap.strip (render builder)
+          workerFiles = [ (global, stripped builder) | WorkerBundle global builder <- workers ]
+          chunkFiles = [ (home, stripped builder) | ChunkBundle home builder <- chunks ]
+          mainFile = stripped js
+          origins =
+            List.nub $ concatMap (\(_, starts) -> [ o | (_, Just o) <- starts ])
+              (map snd workerFiles ++ map snd chunkFiles ++ [mainFile])
+
+      (sources, targets) <- resolve origins
+
+      -- each map lists only the sources its own lines go to
+      let mapFor name (bytes, starts) =
+            let
+              resolved = [ (line, maybeOrigin >>= (`Map.lookup` targets)) | (line, maybeOrigin) <- starts ]
+              used = List.nub [ SourceMap._source t | (_, Just t) <- resolved ]
+              renumber = Map.fromList (zip used [0..])
+              local t = t { SourceMap._source = Map.findWithDefault 0 (SourceMap._source t) renumber }
+            in
+            SourceMap.encode name (map (sources !!) used) (BSC.count '\n' bytes + 1)
+              [ (line, fmap local target) | (line, target) <- resolved ]
+
+          withComment name bytes =
+            BS.concat [bytes, BSC.pack (if BS.null bytes || BSC.last bytes == '\n' then "" else "\n"), BSC.pack ("//# sourceMappingURL=" ++ name ++ ".map\n")]
+
+          emit toToken prefix (table, files) key file@(bytes, _) =
+            let
+              substituted = substitute table bytes
+              hash = take 16 (SHA.showDigest (SHA.sha1 (LBS.fromStrict substituted)))
+              name = base ++ "." ++ hash ++ ".mjs"
+            in
+            ( (toToken key, BS_UTF8.fromString (prefix ++ name)) : table
+            , (name ++ ".map", mapFor name file) : (name, withComment name substituted) : files
+            )
+
+          afterWorkers =
+            List.foldl' (\acc (global, file) -> emit Workers.token "" acc global file) ([], []) workerFiles
+
+          (finalTable, revFiles) =
+            List.foldl' (\acc (home, file) -> emit Chunks.token "./" acc home file) afterWorkers chunkFiles
+
+          mainBytes = substitute finalTable (fst mainFile)
+
+      return
+        ( reverse ((mainName ++ ".map", mapFor mainName mainFile) : revFiles)
+        , withComment mainName mainBytes
+        , fmap render css
+        )
 
 
 -- Like finalize, but the caller names the worker and chunk files. The
