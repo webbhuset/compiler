@@ -81,6 +81,7 @@ executable elm
         Tool.Decoder
         Tool.Docs
         Tool.Graph
+        Tool.Hole
         Tool.Index
         Tool.Interface
         Tool.Module
@@ -95,6 +96,7 @@ executable elm
         Tool.Sizes
         Tool.Summary
         Tool.Type
+        Tool.Unify
         Tool.Unused
 
         -- terminal args

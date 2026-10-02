@@ -934,6 +934,7 @@ data Probed =
     , _probed_canonical :: Can.Module
     , _probed_annotations :: Map.Map N.Name Can.Annotation
     , _probed_types :: [Solve.Probed]
+    , _probed_interfaces :: Map.Map Module.Name I.Interface
     }
 
 
@@ -942,7 +943,7 @@ probeModule writer root stuff details source =
   fromSource writer root stuff details source $ \pkg modul _ ifaces ->
     case Compile.probe pkg ifaces modul of
       Right (canonical, annotations, probed) ->
-        return $ Right $ Probed modul canonical annotations probed
+        return $ Right $ Probed modul canonical annotations probed ifaces
 
       Left errors ->
         return $ Left $ Exit.ReplBadInput root source errors

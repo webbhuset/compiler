@@ -1,6 +1,12 @@
 {-# LANGUAGE MagicHash, OverloadedStrings #-}
 module Tool.At
   ( run
+  , parseTarget
+  , scopeAt
+  , bindingType
+  , inside
+  , size
+  , excerpt
   )
   where
 
@@ -45,7 +51,7 @@ run target =
       return (Left (BadName "a position like `src/Main.elm:42:17`" target))
 
     Just (path, pos) ->
-      Project.withProbe path $ \source (Build.Probed src can _ probes) ->
+      Project.withProbe path $ \source (Build.Probed src can _ probes _) ->
         let
           ns = Render.names src
           render ann = Render.oneLine (Render.annotation ns (Render.normalize ann))

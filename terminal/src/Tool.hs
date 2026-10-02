@@ -18,6 +18,7 @@ import qualified Tool.Check as Check
 import qualified Tool.Decoder as Decoder
 import qualified Tool.Docs as Docs
 import qualified Tool.Graph as Graph
+import qualified Tool.Hole as Hole
 import qualified Tool.Outline as Outline
 import Tool.Output (Output(..))
 import Tool.Problem (Problem(..))
@@ -52,6 +53,7 @@ commands =
   , ("docs", "elm tool docs Some.Module", "Print the module comment and exposed API of a module as Markdown. Add --all to include private declarations.")
   , ("outline", "elm tool outline Some.Module", "Print one line per declaration of a module, with the lines it covers.")
   , ("at", "elm tool at src/Some/File.elm:LINE:COLUMN", "Print the type of the expression at a position, and the type of every local name in scope there.")
+  , ("hole", "elm tool hole src/Some/File.elm:LINE:COLUMN", "Print the type a place needs, say a `Debug.todo`, and the names in scope that fit there, as they are or with more arguments.")
   , ("async", "elm tool async src/Main.elm", "Print how many bytes each module adds to an --optimize build, whether the program always needs it or only under some branch, and which modules look worth an `import async`.")
   , ("check", "elm tool check [src/Some/File.elm ...]", "Type check the given files, or every module in the source directories, without generating code.")
   , ("graph", "elm tool graph [Some.Module]", "Print every project module with what it imports, or what one module imports and what imports it.")
@@ -78,6 +80,7 @@ run (command, arguments) (Flags json everything compareFiles sample) =
           ("outline", [target]) -> Outline.run target
           ("refs", [target])    -> Refs.run target
           ("at", [target])      -> At.run target
+          ("hole", [target])    -> Hole.run target
           ("async", [target])   -> Async.run target
           ("check", files)      -> Check.run files
           ("graph", targets)    -> Graph.graph targets
