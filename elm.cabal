@@ -76,11 +76,15 @@ executable elm
         Tool
         Tool.Async
         Tool.At
+        Tool.Check
         Tool.Docs
+        Tool.Graph
+        Tool.Index
         Tool.Interface
         Tool.Module
         Tool.Outline
         Tool.Package
+        Tool.Place
         Tool.Output
         Tool.Problem
         Tool.Project

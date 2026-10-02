@@ -3,6 +3,9 @@ module Tool.Project
   , withProject
   , withProbe
   , withMain
+  , check
+  , Graph(..)
+  , withGraph
   , parseModuleName
   , parseValueName
   )
@@ -11,6 +14,7 @@ module Tool.Project
 
 import qualified Data.ByteString as BS
 import qualified Data.Char as Char
+import qualified Data.IORef as IORef
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.NonEmptyList as NE
@@ -38,6 +42,9 @@ import qualified Json.Decode as JD
 import qualified Reporting
 import qualified Reporting.Error as Error
 import qualified Reporting.Exit as Exit
+import qualified AST.Source as Src
+import qualified Parse.Module as Parse
+import qualified Reporting.Annotation as A
 import qualified Root as R
 import Tool.Problem (Problem(..))
 import qualified Tool.Module as Module
@@ -166,6 +173,147 @@ withMain path callback =
                                     callback graph mains sizeOf
 
 
+-- Build the given files, or every module in the source directories, the way
+-- `elm make --output=/dev/null` would. The number of modules checked.
+check :: [FilePath] -> IO (Either Problem Int)
+check paths =
+  do  maybeRoot <- R.findRoot
+      case maybeRoot of
+        Nothing ->
+          return (Left NoOutline)
+
+        Just root ->
+          R.withRootLock root $ \writer stuff ->
+            do  eitherDetails <- Details.load writer Reporting.silent root stuff
+                case eitherDetails of
+                  Left problem ->
+                    return (Left (BadDetails problem))
+
+                  Right details ->
+                    do  files <-
+                          case paths of
+                            [] -> concat <$> traverse (\dir -> map (\n -> dir </> ModuleName.toFilePath n <.> "elm") <$> findModules dir) (sourceDirs root details)
+                            _  -> return paths
+                        case files of
+                          [] ->
+                            return (Right 0)
+
+                          f : fs ->
+                            do  built <- Build.fromPaths writer Reporting.silent root stuff details (NE.List f fs)
+                                case built of
+                                  Left problem -> return (Left (BadMake (Exit.MakeCannotBuild problem)))
+                                  Right _      -> return (Right (length files))
+
+
+-- The import graph, from the sources alone: nothing is type checked. The
+-- imports of a package module come from its source in the package cache,
+-- parsed the first time they are asked for.
+data Graph =
+  Graph
+    { _locals :: Map.Map ModuleName.Name FilePath
+    , _mains :: [ModuleName.Name]
+    , _importsOf :: ModuleName.Name -> IO [ModuleName.Name]
+    , _packageOf :: ModuleName.Name -> Maybe Pkg.Name
+    }
+
+
+withGraph :: (Graph -> IO (Either Problem a)) -> IO (Either Problem a)
+withGraph callback =
+  do  maybeRoot <- R.findRoot
+      case maybeRoot of
+        Nothing ->
+          return (Left NoOutline)
+
+        Just root ->
+          R.withRootLock root $ \writer stuff ->
+            do  eitherDetails <- Details.load writer Reporting.silent root stuff
+                case eitherDetails of
+                  Left problem ->
+                    return (Left (BadDetails problem))
+
+                  Right details@(Details.Details _ outline _ _ foreigns _) ->
+                    do  let dirs = sourceDirs root details
+                        found <- traverse (\dir -> map (\n -> (n, dir </> ModuleName.toFilePath n <.> "elm")) <$> findModules dir) dirs
+                        let locals = Map.fromList (concat found)
+                        versions <- packageVersions root details
+                        cache <- R.getPackageCache
+                        memo <- IORef.newIORef Map.empty
+
+                        let projectType =
+                              case outline of
+                                Details.ValidPkg pkg _ _ -> Parse.Package pkg
+                                Details.ValidApp _       -> Parse.Application
+
+                            fileOf name =
+                              case Map.lookup name locals of
+                                Just path -> Just (projectType, path)
+                                Nothing ->
+                                  do  Details.Foreign pkg _ <- Map.lookup name foreigns
+                                      vsn <- Map.lookup pkg versions
+                                      Just (Parse.Package pkg, R.package cache pkg vsn </> "src" </> ModuleName.toFilePath name <.> "elm")
+
+                            parse name =
+                              do  known <- IORef.readIORef memo
+                                  case Map.lookup name known of
+                                    Just m -> return m
+                                    Nothing ->
+                                      do  m <- parseFile (fileOf name)
+                                          IORef.modifyIORef memo (Map.insert name m)
+                                          return m
+
+                        parsed <- traverse (\name -> (,) name <$> parse name) (Map.keys locals)
+                        let mains = [ name | (name, Just m) <- parsed, hasMain m ]
+                        callback $ Graph
+                          { _locals = Map.map (relative root) locals
+                          , _mains = mains
+                          , _importsOf = \name -> maybe [] explicitImports <$> parse name
+                          , _packageOf = \name -> (\(Details.Foreign pkg _) -> pkg) <$> Map.lookup name foreigns
+                          }
+
+
+parseFile :: Maybe (Parse.ProjectType, FilePath) -> IO (Maybe Src.Module)
+parseFile file =
+  case file of
+    Nothing -> return Nothing
+    Just (projectType, path) ->
+      do  exists <- Dir.doesFileExist path
+          if not exists then return Nothing else
+            do  source <- File.readUtf8 path
+                either (const Nothing) Just <$> Parse.fromByteString projectType source
+
+
+-- The imports written in the source, without the ones every module gets.
+explicitImports :: Src.Module -> [ModuleName.Name]
+explicitImports (Src.Module _ _ _ imports _ _ _ _ _ _ _) =
+  [ name | Src.Import (A.At region name) _ _ _ <- imports, not (isZero region) ]
+
+
+isZero :: A.Region -> Bool
+isZero (A.Region s e) =
+  A.toEditorRowCol s == A.toEditorRowCol e
+
+
+hasMain :: Src.Module -> Bool
+hasMain (Src.Module _ _ _ _ values _ _ _ _ _ _) =
+  or [ N.toChars n == "main" | A.At _ (Src.Value (A.At _ n) _ _ _) <- values ]
+
+
+packageVersions :: R.Root -> Details.Details -> IO (Map.Map Pkg.Name V.Version)
+packageVersions root (Details.Details _ validOutline _ _ _ _) =
+  case validOutline of
+    Details.ValidPkg _ _ vs ->
+      return vs
+
+    Details.ValidApp _ ->
+      do  result <- Outline.read root
+          return $
+            case result of
+              Right (Outline.App (Outline.AppOutline _ _ direct indirect testDirect testIndirect _)) ->
+                Map.unions [direct, indirect, testDirect, testIndirect]
+              _ ->
+                Map.empty
+
+
 -- Type check every module in the source directories.
 withProject :: (FilePath -> [(FilePath, Build.Checked)] -> IO (Either Problem a)) -> IO (Either Problem a)
 withProject callback =
@@ -258,20 +406,8 @@ findModule root details@(Details.Details _ _ _ _ foreigns _) name =
 
 
 loadPackage :: R.Root -> R.Stuff -> Details.Details -> Pkg.Name -> ModuleName.Name -> IO (Either Problem Summary)
-loadPackage root stuff details@(Details.Details _ validOutline _ _ _ _) pkg name =
-  do  versions <-
-        case validOutline of
-          Details.ValidPkg _ _ vs ->
-            return vs
-
-          Details.ValidApp _ ->
-            do  result <- Outline.read root
-                return $
-                  case result of
-                    Right (Outline.App (Outline.AppOutline _ _ direct indirect testDirect testIndirect _)) ->
-                      Map.unions [direct, indirect, testDirect, testIndirect]
-                    _ ->
-                      Map.empty
+loadPackage root stuff details pkg name =
+  do  versions <- packageVersions root details
 
       let location = Pkg.toChars pkg ++ maybe "" ((" " ++) . V.toChars) (Map.lookup pkg versions)
       fromDocs <- traverse (loadDocs pkg name) (Map.lookup pkg versions)
