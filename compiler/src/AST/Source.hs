@@ -235,7 +235,7 @@ data Manager
 
 
 data Docs
-  = NoDocs A.Region
+  = NoDocs A.Region [(N.Name, Comment)] [(T.Name, Comment)]
   | YesDocs Comment [(N.Name, Comment)] [(T.Name, Comment)]
 
 

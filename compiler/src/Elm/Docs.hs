@@ -95,7 +95,7 @@ fromModule modul@(Can.Module _ exports docs _ _ _ _ _ _ _ _) =
 
     Can.Export ts vs bs ->
       case docs of
-        Src.NoDocs region ->
+        Src.NoDocs region _ _ ->
           return $ Left $ E.NoDocs region
 
         Src.YesDocs overview vcs tcs ->

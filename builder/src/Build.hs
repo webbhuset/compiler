@@ -3,6 +3,8 @@ module Build
   ( fromExposed
   , fromPaths
   , fromRepl
+  , fromModule
+  , Checked(..)
   , Artifacts(..)
   , Root(..)
   , Module(..)
@@ -871,6 +873,59 @@ data ReplArtifacts =
 
 fromRepl :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Details.Details -> B.ByteString -> IO (Either Exit.Repl ReplArtifacts)
 fromRepl writer root stuff details source =
+  fromSource writer root stuff details source $ \pkg modul results ifaces ->
+    case Compile.compile pkg ifaces modul of
+      Right (Compile.Artifacts canonical annotations objects comparables) ->
+        let
+          h = Can._name canonical
+          m = Fresh (Src.getName modul) (I.fromModule pkg canonical annotations comparables) objects
+          ms = Map.foldrWithKey addInside [] results
+        in
+        return $ Right $ ReplArtifacts h (m:ms) (L.fromModule modul) annotations
+
+      Left errors ->
+        return $ Left $ Exit.ReplBadInput root source errors
+
+
+
+-- FROM MODULE
+--
+-- One module type checked against the rest of the project, keeping what a
+-- build throws away: the canonical AST, and the inferred type of every top
+-- level definition, exposed or not. This is what `elm tool` inspects.
+
+
+data Checked =
+  Checked
+    { _checked_source :: Src.Module
+    , _checked_canonical :: Can.Module
+    , _checked_annotations :: Map.Map N.Name Can.Annotation
+    , _checked_objects :: Opt.LocalGraph
+    }
+
+
+fromModule :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Details.Details -> B.ByteString -> IO (Either Exit.Repl Checked)
+fromModule writer root stuff details source =
+  fromSource writer root stuff details source $ \pkg modul _ ifaces ->
+    case Compile.compile pkg ifaces modul of
+      Right (Compile.Artifacts canonical annotations objects _) ->
+        return $ Right $ Checked modul canonical annotations objects
+
+      Left errors ->
+        return $ Left $ Exit.ReplBadInput root source errors
+
+
+
+-- FROM SOURCE
+
+
+-- Compile everything a source file imports and hand its interfaces to the
+-- callback, which compiles the file itself.
+fromSource
+  :: File.Writer R.PROJECT -> R.Root -> R.Stuff -> Details.Details -> B.ByteString
+  -> (Pkg.Name -> Src.Module -> Map.Map Module.Name Result -> Map.Map Module.Name I.Interface -> IO (Either Exit.Repl a))
+  -> IO (Either Exit.Repl a)
+fromSource writer root stuff details source compileInput =
   do  env@(Env _ _ _ projectType _ _ _ _) <- makeEnv Reporting.ignorer root stuff details
       result <- Parse.fromByteString projectType source
       case result of
@@ -898,46 +953,25 @@ fromRepl writer root stuff details source =
                       results <- traverse Fork.await resultMVars
                       writeDetails writer stuff details results
                       depsStatus <- checkDeps stuff resultMVars deps Details.zero
-                      finalizeReplArtifacts env source modul depsStatus resultMVars results
+                      let pkg = projectTypeToPkg projectType
+                      case depsStatus of
+                        DepsChange ifaces ->
+                          compileInput pkg modul results ifaces
 
+                        DepsSame same cached ->
+                          do  maybeLoaded <- loadInterfaces stuff same cached
+                              case maybeLoaded of
+                                Just ifaces -> compileInput pkg modul results ifaces
+                                Nothing     -> return $ Left $ Exit.ReplBadCache
 
-finalizeReplArtifacts :: Env -> B.ByteString -> Src.Module -> DepsStatus -> ResultDict -> Map.Map Module.Name Result -> IO (Either Exit.Repl ReplArtifacts)
-finalizeReplArtifacts env@(Env _ root stuff projectType _ _ _ _) source modul@(Src.Module _ _ _ imports _ _ _ _ _ _ _) depsStatus resultMVars results =
-  let
-    pkg =
-      projectTypeToPkg projectType
+                        DepsBlock ->
+                          case Map.foldr addErrors [] results of
+                            []   -> return $ Left $ Exit.ReplBlocked
+                            e:es -> return $ Left $ Exit.ReplBadLocalDeps root e es
 
-    compileInput ifaces =
-      case Compile.compile pkg ifaces modul of
-        Right (Compile.Artifacts canonical annotations objects comparables) ->
-          let
-            h = Can._name canonical
-            m = Fresh (Src.getName modul) (I.fromModule pkg canonical annotations comparables) objects
-            ms = Map.foldrWithKey addInside [] results
-          in
-          return $ Right $ ReplArtifacts h (m:ms) (L.fromModule modul) annotations
-
-        Left errors ->
-          return $ Left $ Exit.ReplBadInput root source errors
-  in
-  case depsStatus of
-    DepsChange ifaces ->
-      compileInput ifaces
-
-    DepsSame same cached ->
-      do  maybeLoaded <- loadInterfaces stuff same cached
-          case maybeLoaded of
-            Just ifaces -> compileInput ifaces
-            Nothing     -> return $ Left $ Exit.ReplBadCache
-
-    DepsBlock ->
-      case Map.foldr addErrors [] results of
-        []   -> return $ Left $ Exit.ReplBlocked
-        e:es -> return $ Left $ Exit.ReplBadLocalDeps root e es
-
-    DepsNotFound problems ->
-      return $ Left $ Exit.ReplBadInput root source $ Error.BadImports $
-        toImportErrors env resultMVars imports problems
+                        DepsNotFound problems ->
+                          return $ Left $ Exit.ReplBadInput root source $ Error.BadImports $
+                            toImportErrors env resultMVars imports problems
 
 
 

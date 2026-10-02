@@ -121,7 +121,7 @@ checkModuleHelp projectType maybeHeader imports infixes decls =
 
     Nothing ->
       Right $
-        Src.Module Nothing (A.At A.zero Src.Open) (Src.NoDocs A.zero) imports values unions aliases tags overloads infixes $
+        Src.Module Nothing (A.At A.zero Src.Open) (Src.NoDocs A.zero [] []) imports values unions aliases tags overloads infixes $
           case ports of
             [] -> Src.NoEffects
             _:_ -> Src.Ports ports
@@ -183,24 +183,26 @@ categorizeDecls values unions aliases tags overloads ports decls =
 toDocs :: Either A.Region Src.Comment -> [Decl.Decl] -> Src.Docs
 toDocs comment decls0 =
   case comment of
-    Right overview -> go overview decls0 [] []
-    Left region    -> Src.NoDocs region
+    Right overview -> go (Src.YesDocs overview) decls0 [] []
+    Left region    -> go (Src.NoDocs region) decls0 [] []
   where
-    go overview decls vs ts =
+    -- Comments on declarations are kept without a module comment too, for
+    -- `elm tool docs` on application modules.
+    go finish decls vs ts =
       case decls of
-        [] -> Src.YesDocs overview vs ts
+        [] -> finish vs ts
 
         d:ds ->
           case d of
-            Decl.Port  c (       (Src.Port  n _    )) -> go overview ds (cons c n vs) ts
-            Decl.Value c (A.At _ (Src.Value n _ _ _)) -> go overview ds (cons c n vs) ts
-            Decl.Union c (A.At _ (Src.Union n _ _  )) -> go overview ds vs (cons c n ts)
-            Decl.Alias c (A.At _ (Src.Alias n _ _  )) -> go overview ds vs (cons c n ts)
-            Decl.TagDecl c (A.At _ (Src.TagDecl n _)) -> go overview ds (cons c n vs) ts
+            Decl.Port  c (       (Src.Port  n _    )) -> go finish ds (cons c n vs) ts
+            Decl.Value c (A.At _ (Src.Value n _ _ _)) -> go finish ds (cons c n vs) ts
+            Decl.Union c (A.At _ (Src.Union n _ _  )) -> go finish ds vs (cons c n ts)
+            Decl.Alias c (A.At _ (Src.Alias n _ _  )) -> go finish ds vs (cons c n ts)
+            Decl.TagDecl c (A.At _ (Src.TagDecl n _)) -> go finish ds (cons c n vs) ts
             -- Overloads are not documented yet, and their bare name can collide
             -- with an ordinary value's, so their comments are dropped rather than
             -- attached to the wrong entry.
-            Decl.Overload _ _ -> go overview ds vs ts
+            Decl.Overload _ _ -> go finish ds vs ts
 
     cons maybeComment (A.At _ n) comments =
       case maybeComment of

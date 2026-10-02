@@ -73,6 +73,18 @@ executable elm
         Make
         Publish
         Repl
+        Tool
+        Tool.Docs
+        Tool.Interface
+        Tool.Module
+        Tool.Outline
+        Tool.Package
+        Tool.Output
+        Tool.Problem
+        Tool.Project
+        Tool.Render
+        Tool.Summary
+        Tool.Type
 
         -- terminal args
         Terminal
