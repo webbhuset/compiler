@@ -76,6 +76,7 @@ executable elm
         Tool
         Tool.Async
         Tool.At
+        Tool.Cases
         Tool.Check
         Tool.Docs
         Tool.Graph
