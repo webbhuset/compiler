@@ -1,5 +1,6 @@
 module Tool.Project
   ( withModule
+  , withProject
   , parseModuleName
   , parseValueName
   )
@@ -87,6 +88,63 @@ withModule everything name callback =
                                   Right summary -> callback summary
 
 
+-- Type check every module in the source directories.
+withProject :: (FilePath -> [(FilePath, Build.Checked)] -> IO (Either Problem a)) -> IO (Either Problem a)
+withProject callback =
+  do  maybeRoot <- R.findRoot
+      case maybeRoot of
+        Nothing ->
+          return (Left NoOutline)
+
+        Just root ->
+          R.withRootLock root $ \writer stuff ->
+            do  eitherDetails <- Details.load writer Reporting.silent root stuff
+                case eitherDetails of
+                  Left problem ->
+                    return (Left (BadDetails problem))
+
+                  Right details ->
+                    do  names <- concat <$> traverse findModules (sourceDirs root details)
+                        result <- Build.fromProject writer root stuff details names
+                        case result of
+                          Left problem ->
+                            return (Left (BadBuild problem))
+
+                          Right modules ->
+                            callback (R.toAbsolutePath root (R.Relative "")) [ (relative root path, c) | (path, c) <- modules ]
+
+
+sourceDirs :: R.Root -> Details.Details -> [FilePath]
+sourceDirs root (Details.Details _ outline _ _ _ _) =
+  case outline of
+    Details.ValidApp dirs  -> map (R.toAbsolutePath root) (NE.toList dirs)
+    Details.ValidPkg _ _ _ -> [R.toAbsolutePath root (R.Relative "src")]
+
+
+-- The modules under a source directory, named by their paths.
+findModules :: FilePath -> IO [ModuleName.Name]
+findModules dir =
+  go []
+  where
+    go segments =
+      do  let here = foldl (</>) dir segments
+          exists <- Dir.doesDirectoryExist here
+          entries <- if exists then Dir.listDirectory here else return []
+          found <- traverse (visit segments here) (List.sort entries)
+          return (concat found)
+
+    visit segments here entry =
+      do  isDir <- Dir.doesDirectoryExist (here </> entry)
+          if isDir
+            then if isUpperSegment entry then go (segments ++ [entry]) else return []
+            else
+              case FP.splitExtension entry of
+                (base, ".elm") | isUpperSegment base ->
+                  return [ModuleName.fromString (S.fromChars (List.intercalate "." (segments ++ [base])))]
+                _ ->
+                  return []
+
+
 relative :: R.Root -> FilePath -> FilePath
 relative root path =
   FP.makeRelative (R.toAbsolutePath root (R.Relative "")) path
@@ -98,12 +156,9 @@ data Found
 
 
 findModule :: R.Root -> Details.Details -> ModuleName.Name -> IO (Either Problem Found)
-findModule root (Details.Details _ outline _ _ foreigns _) name =
+findModule root details@(Details.Details _ _ _ _ foreigns _) name =
   let
-    srcDirs =
-      case outline of
-        Details.ValidApp dirs  -> map (R.toAbsolutePath root) (NE.toList dirs)
-        Details.ValidPkg _ _ _ -> [R.toAbsolutePath root (R.Relative "src")]
+    srcDirs = sourceDirs root details
 
     candidates =
       map (\dir -> dir </> ModuleName.toFilePath name <.> "elm") srcDirs

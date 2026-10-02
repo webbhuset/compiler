@@ -32,7 +32,7 @@ import qualified Tool.Summary as S
 
 
 summarize :: Bool -> FilePath -> Build.Checked -> IO Summary
-summarize everything path (Build.Checked src can annotations _) =
+summarize everything path (Build.Checked src can annotations _ _) =
   do  let (overview, valueDocs, typeDocs) = docsOf (Src._docs src)
       ov <- traverse comment overview
       entries <- traverse (toEntry everything src can annotations valueDocs typeDocs) (decls src)

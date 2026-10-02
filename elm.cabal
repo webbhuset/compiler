@@ -82,6 +82,7 @@ executable elm
         Tool.Output
         Tool.Problem
         Tool.Project
+        Tool.Refs
         Tool.Render
         Tool.Summary
         Tool.Type
