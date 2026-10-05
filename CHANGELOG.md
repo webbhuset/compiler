@@ -11,6 +11,7 @@ tooling (elm-format, elm-test, editors).
 
 - **[Bugfix, performance and quality of life](#bugfix-performance-and-quality-of-life)**
   - [Exponential compile time and memory with extensible records](#exponential-compile-time-and-memory-with-extensible-records)
+  - [Extensible record aliases in ports and flags](#extensible-record-aliases-in-ports-and-flags)
   - [Git dependencies — private packages](#git-dependencies--private-packages)
   - [Kernel code in git dependencies](#kernel-code-in-git-dependencies)
   - [ES module output](#es-module-output)
@@ -77,6 +78,31 @@ type alias Parts =
   canonicalization already did for written ones.
 - Documentation output and error messages are unchanged.
 
+
+## Extensible record aliases in ports and flags
+
+A closed record built from extensible record aliases was rejected as a
+port or flags type, even though nothing about it is extensible:
+
+```elm
+type alias One a = { a | one : String }
+type alias Two a = { a | two : Int }
+
+
+type alias Flags =
+    One (Two {})
+
+
+port send : One (Two {}) -> Cmd msg
+```
+
+- Upstream reported this as "an extended record" error. Dealiasing
+  substituted the alias arguments everywhere except a record's extension
+  variable, so `One (Two {})` stayed `{ a | one : String }` with `a`
+  unresolved.
+- `AST.Utils.Type.dealias` now substitutes the extension too and merges
+  the fields, giving `{ one : String, two : Int }`. A record whose
+  extension really is open is still rejected.
 
 ## Git dependencies — private packages
 
