@@ -320,10 +320,18 @@ render builder =
   LBS.toStrict (B.toLazyByteString builder)
 
 
--- A web worker bundle: an ES module with no exports that boots the given
--- worker program via the _Worker_run harness (webbhuset/worker kernel).
+-- A web worker bundle: an ES module that boots the given worker program
+-- via the _Worker_run harness (webbhuset/worker kernel).
 -- The program's dependency graph necessarily includes that kernel, since
 -- worker programs are built with Worker.worker.
+--
+-- It exports nothing, but says `export {}` all the same. A worker bundle is
+-- an ES module already -- it reads import.meta.url -- yet a file with no
+-- import or export reads as a classic script to a tool guessing from its
+-- text, and a minifier must then leave every top-level name alone, since
+-- in a script those are globals. esbuild kept them all, and a worker came
+-- out at two and a half times the size of the same code minified as the
+-- module it is.
 generateWorkerBundle :: Bool -> Mode.Mode -> Opt.GlobalGraph -> Opt.Global -> B.Builder
 generateWorkerBundle marks mode (Opt.GlobalGraph graph _) root@(Opt.Global home name) =
   let
@@ -332,7 +340,8 @@ generateWorkerBundle marks mode (Opt.GlobalGraph graph _) root@(Opt.Global home 
   metaUrlLine
   <> Functions.functions
   <> stateToBuilder state
-  <> "_Worker_run(" <> JsName.toBuilder (JsName.fromGlobal home name) <> ");"
+  <> "_Worker_run(" <> JsName.toBuilder (JsName.fromGlobal home name) <> ");\n"
+  <> "export {};\n"
 
 
 addMain :: Mode.Mode -> Graph -> ModuleName.Canonical -> Opt.Main -> State -> State

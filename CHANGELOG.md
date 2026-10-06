@@ -477,6 +477,10 @@ Worker.spawn Counter.main
 - Messages must be function-free (structured clone); violations fail at
   runtime via `onCrash`. CSS blocks inside worker code land in the same
   `.css` sidecar as the rest of the program.
+- A worker bundle ends in `export {}`. It needs no exports, but without
+  one a minifier that guesses the file's kind takes it for a classic script
+  and keeps every top-level name, which made esbuild's output 35% larger
+  gzipped for a large worker.
 - The `Browser.Worker` module ships in a patched `elm/browser` (kernel
   code plus an effect manager), consumed as a git dependency. No elm/core
   or virtual-dom patches needed.
