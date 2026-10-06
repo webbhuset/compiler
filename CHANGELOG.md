@@ -614,7 +614,11 @@ as usual, and `async` remains a legal variable name.
   replayed once the program starts. An application reachable from another
   one anyway stays in the module.
 - `--optimize` works normally: one `elm make` means one field-rename
-  table, so values cross between the files unchanged.
+  table, so values cross between the files unchanged. It also gives the
+  names that cross a file boundary short keys (`s.a` rather than
+  `s.$author$project$Shared$label`). Those are property names, which a
+  minifier such as esbuild has to leave alone, so without this every
+  shared name stayed spelled out in full in each file that used it.
 - Each chunk is loaded with `import("./app.<hash>.mjs")`, the name
   written out as a literal, so a bundler sees the split. `esbuild
   --bundle --splitting --format=esm` follows each import and emits the

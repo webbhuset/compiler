@@ -119,7 +119,7 @@ generateWith format =
 -- With `marks`, every top level definition's code is preceded by a source
 -- map marker, which finalizeMapped takes out again.
 toBundles :: Format -> Bool -> Mode.Mode -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Task Bundles
-toBundles format marks mode graph mains =
+toBundles format marks baseMode graph mains =
   do  -- Several applications in one ES module each get a chunk of their
       -- own, fetched when the application is started; the module itself
       -- keeps what they share. Only ESM output can host the files.
@@ -129,9 +129,13 @@ toBundles format marks mode graph mains =
               Iife -> False
 
       maybePlan <-
-        case Chunks.plan (Mode.isDebug mode) splitApps graph mains of
+        case Chunks.plan (Mode.isDebug baseMode) splitApps graph mains of
           Left cycleNames -> Task.throw (Exit.GenerateChunkCycle cycleNames)
           Right maybePlan -> return maybePlan
+
+      -- What crosses a chunk boundary is read by key, which the generator
+      -- can only shorten once it knows what each chunk exports.
+      let mode = maybe baseMode (\p -> Mode.withChunkExports (Chunks.exportKeys p) baseMode) maybePlan
 
       -- Worker bundles are planned over chunk code too: a `Worker.spawn`
       -- inside an async-imported module still needs its own file.
@@ -220,7 +224,7 @@ prod format marks stuff details (Build.Artifacts pkg _ roots modules) =
       checkForDebugUses objects
       let graph = objectsToGlobalGraph objects
       let mains = gatherMains pkg objects roots
-      let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains))
+      let mode = Mode.Prod (Mode.callees (Opt._g_nodes graph)) (Mode.ShortNames (Mode.shortenFieldNames graph) (GenCss.shortenNames graph mains) Map.empty)
       toBundles format marks mode graph mains
 
 

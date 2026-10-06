@@ -191,11 +191,11 @@ generate mode expression =
 
     -- A value from a module imported with `import async`: read it out of
     -- the chunk's exports, which _Chunk_get either has or suspends for.
-    Opt.AsyncRef (Opt.Global h n) ->
+    Opt.AsyncRef global@(Opt.Global h _) ->
       JsExpr $
         JS.Access
           (JS.Call (JS.Ref Chunks.getName) [ JS.Ref (JsName.fromChunk h) ])
-          (JsName.fromGlobal h n)
+          (Mode.chunkExport mode global)
 
     Opt.Css home (Css.Content _ (Css.Types classes keyframes vars)) ->
       let

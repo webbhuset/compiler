@@ -5,6 +5,9 @@ module Generate.Mode
   , ShortFieldNames
   , shortenFieldNames
   , ShortCssNames
+  , ShortChunkExports
+  , withChunkExports
+  , chunkExport
   , Callees
   , Callee(..)
   , callees
@@ -41,6 +44,7 @@ data ShortNames =
   ShortNames
     { _fields :: ShortFieldNames
     , _cssNames :: ShortCssNames
+    , _chunkExports :: ShortChunkExports
     }
 
 
@@ -49,6 +53,39 @@ data ShortNames =
 -- Generate.Css.shortenNames.
 type ShortCssNames =
   Map.Map (ModuleName.Canonical, N.Name) N.Name
+
+
+-- The key each value a chunk exports is filed under in the chunk's export
+-- record, and read back by wherever the program reaches it. Keys are only
+-- unique within one chunk. Empty until the chunks are planned, which is
+-- after the mode is made; see Generate.Chunks.exportKeys.
+type ShortChunkExports =
+  Map.Map Opt.Global JsName.Name
+
+
+withChunkExports :: ShortChunkExports -> Mode -> Mode
+withChunkExports keys mode =
+  case mode of
+    Dev _ _ ->
+      mode
+
+    Prod table (ShortNames fields cssNames _) ->
+      Prod table (ShortNames fields cssNames keys)
+
+
+-- In dev the key is the value's own global name, so the export records
+-- stay readable.
+chunkExport :: Mode -> Opt.Global -> JsName.Name
+chunkExport mode global@(Opt.Global home name) =
+  let
+    own = JsName.fromGlobal home name
+  in
+  case mode of
+    Dev _ _ ->
+      own
+
+    Prod _ shortNames ->
+      Map.findWithDefault own global (_chunkExports shortNames)
 
 
 isDebug :: Mode -> Bool

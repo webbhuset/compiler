@@ -15,6 +15,8 @@ module Generate.Chunks
   , tokenBuilder
   , homeToChars
   , runtime
+  , exportKeys
+  , scopeKeys
   , scopeDef
   , registration
   , readyRegistration
@@ -639,28 +641,65 @@ runtime =
   \}\n"
 
 
+-- SHORT KEYS
+--
+-- Everything that crosses a chunk boundary goes through an object: the main
+-- bundle's scope one way, a chunk's export record the other. A minifier
+-- renames variables but has to leave property names alone, so with
+-- --optimize the generator picks short keys itself instead of spelling out
+-- `$author$project$Page$Settings$view` in every file. It can, because it
+-- emits every read of these objects: no other code looks inside them.
+--
+-- The one key spelled by hand is appExport, which is four characters and
+-- so only reachable by JsName.fromInt after some 190,000 others.
+
+
+-- A chunk's exports are keyed by position among its roots. A global
+-- belongs to one module and so to one chunk, so a single table serves the
+-- whole program, though keys repeat from chunk to chunk.
+exportKeys :: Plan -> Map.Map Opt.Global JsName.Name
+exportKeys (Plan chunks _) =
+  Map.fromList
+    [ (global, JsName.fromInt i)
+    | chunk <- chunks
+    , (i, global) <- zip [0..] (Set.toList (_roots chunk))
+    ]
+
+
+-- Scope keys go to the names more chunks rebind first, since each of those
+-- chunks spells the key once more.
+scopeKeys :: [Set.Set BS.ByteString] -> Map.Map BS.ByteString JsName.Name
+scopeKeys neededByChunk =
+  let
+    counts = Map.unionsWith (+) (map (Map.fromSet (const (1 :: Int))) neededByChunk)
+    byUse = List.sortOn (\(name, n) -> (negate n, name)) (Map.toList counts)
+  in
+  Map.fromList (zipWith (\i (name, _) -> (name, JsName.fromInt i)) [0..] byUse)
+
+
 -- The main bundle's scope, handed to every chunk so it can rebind the
 -- names it needs as locals. Built once, on the first chunk that loads.
-scopeDef :: Set.Set BS.ByteString -> B.Builder
-scopeDef names =
+-- Each field is a key and the main bundle's name it stands for.
+scopeDef :: [(B.Builder, BS.ByteString)] -> B.Builder
+scopeDef fields =
   "var _Chunk_scopeCache;\n\
   \function _Chunk_scope() {\n\
   \\treturn _Chunk_scopeCache || (_Chunk_scopeCache = {"
-  <> mconcat (List.intersperse "," (map toField (Set.toList names)))
+  <> mconcat (List.intersperse "," (map toField fields))
   <> "});\n}\n"
   where
-    toField name =
-      let b = B.byteString name in b <> ":" <> b
+    toField (key, name) =
+      key <> ":" <> B.byteString name
 
 
 -- A module that is also reachable without crossing an async import is in
 -- the main bundle already, so there is nothing left to put in a file. The
 -- import degrades to a chunk that is born loaded: same reference sites, no
 -- request, no file.
-readyRegistration :: ModuleName.Canonical -> [B.Builder] -> B.Builder
+readyRegistration :: ModuleName.Canonical -> [(B.Builder, B.Builder)] -> B.Builder
 readyRegistration home exports =
   "var " <> JsName.toBuilder (JsName.fromChunk home) <> " = _Chunk_ready({"
-  <> mconcat (List.intersperse "," (map (\e -> e <> ":" <> e) exports))
+  <> mconcat (List.intersperse "," (map (\(key, value) -> key <> ":" <> value) exports))
   <> "});\n"
 
 

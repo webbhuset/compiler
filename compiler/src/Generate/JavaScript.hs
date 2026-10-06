@@ -194,30 +194,45 @@ generateEsmWithChunks marks mode globalGraph@(Opt.GlobalGraph graph _) mains wor
     -- An application whose chunk turned out to be born loaded is in the
     -- main bundle after all, so it is exported the ordinary way; only one
     -- that has a file of its own goes through the chunk loader.
-    step (revBundles, revRegs, needed, apps) chunk =
+    step (revBundles, revRegs, revNeeded, apps) chunk =
       let
         home = Chunks._home chunk
       in
       case generateChunkBundle marks mode graph mainSeen mainDefined chunk of
         Left exports ->
-          (revBundles, Chunks.readyRegistration home exports : revRegs, needed, apps)
+          (revBundles, Chunks.readyRegistration home exports : revRegs, revNeeded, apps)
 
-        Right (ns, builder) ->
-          ( (home, builder) : revBundles
+        Right (ns, toBuilder) ->
+          ( (home, toBuilder) : revBundles
           , Chunks.registration home : revRegs
-          , Set.union needed ns
+          , ns : revNeeded
           , maybe apps (\p -> Map.insert home p apps) (Chunks._program chunk)
           )
 
-    (revChunkBundles, revRegistrations, allNeeded, chunkedApps) =
-      List.foldl' step ([], [], Set.empty, Map.empty) chunks
+    (revChunkBundles, revRegistrations, revNeededByChunk, chunkedApps) =
+      List.foldl' step ([], [], [], Map.empty) chunks
+
+    -- Which main bundle names cross into a chunk is only known once every
+    -- chunk has been walked, so that is when they get their keys.
+    scopeKey :: BS.ByteString -> B.Builder
+    scopeKey =
+      case mode of
+        Mode.Dev _ _ ->
+          B.byteString
+
+        Mode.Prod _ _ ->
+          let keys = Chunks.scopeKeys revNeededByChunk in
+          \name -> JsName.toBuilder (keys Map.! name)
+
+    allNeeded =
+      Set.unions revNeededByChunk
 
     javascript =
       metaUrlLine
       <> mainBody
       <> perfNote mode
       <> Chunks.runtime
-      <> Chunks.scopeDef allNeeded
+      <> Chunks.scopeDef [ (scopeKey name, name) | name <- Set.toList allNeeded ]
       <> mconcat (reverse revRegistrations)
       <> toMainExportsEsm mode mains chunkedApps
 
@@ -226,21 +241,24 @@ generateEsmWithChunks marks mode globalGraph@(Opt.GlobalGraph graph _) mains wor
   in
   ( javascript
   , GenCss.generate mode globalGraph mains cssRoots
-  , reverse revChunkBundles
+  , reverse (map (fmap ($ scopeKey)) revChunkBundles)
   )
 
 
 -- One chunk: an ES module whose default export takes the main bundle's
 -- scope, rebinds every name it needs from it as a local, and returns the
--- values the rest of the program reaches it by.
+-- values the rest of the program reaches it by, keyed by Mode.chunkExport.
 --
 -- Left means the walk found nothing the main bundle does not already have,
 -- which happens when the module is also reachable without crossing an
 -- async import. There is no file to write; the caller registers the chunk
 -- as already loaded, with these exports.
+--
+-- Right carries the main bundle names the chunk needs, and its text given
+-- the key each of those names has in the scope object.
 generateChunkBundle
   :: Bool -> Mode.Mode -> Graph -> Set.Set Opt.Global -> Set.Set BS.ByteString -> Chunks.Chunk
-  -> Either [B.Builder] (Set.Set BS.ByteString, B.Builder)
+  -> Either [(B.Builder, B.Builder)] (Set.Set BS.ByteString, (BS.ByteString -> B.Builder) -> B.Builder)
 generateChunkBundle marks mode graph mainSeen mainDefined (Chunks.Chunk home roots maybeProgram) =
   let
     state@(State _ _ seen _) =
@@ -250,43 +268,50 @@ generateChunkBundle marks mode graph mainSeen mainDefined (Chunks.Chunk home roo
     body = stateToBuilder state
 
     exports =
-      map (\(Opt.Global h name) -> JsName.toBuilder (JsName.fromGlobal h name))
+      map
+        (\global@(Opt.Global h name) ->
+            ( JsName.toBuilder (Mode.chunkExport mode global)
+            , JsName.toBuilder (JsName.fromGlobal h name)
+            )
+        )
         (Set.toList roots)
 
     -- An application chunk also exports its started program, so the main
     -- bundle's `init` has nothing to build but the call.
     fields =
-      map (\e -> e <> ":" <> e) exports
+      exports
       ++ case maybeProgram of
            Nothing ->
              []
 
            Just (Chunks.Program main _ _) ->
-             [ Chunks.appExport <> ":" <> JS.exprToBuilder (Expr.generateMain mode home main) ]
+             [ (Chunks.appExport, JS.exprToBuilder (Expr.generateMain mode home main)) ]
 
     record =
-      "{" <> mconcat (List.intersperse "," fields) <> "}"
+      "{" <> mconcat (List.intersperse "," (map (\(key, value) -> key <> ":" <> value) fields)) <> "}"
 
+    -- Asked of the values only: a short key can spell a main bundle name.
     needed =
       Set.intersection
-        (Scope.mentionedNames (render (body <> record)))
+        (Scope.mentionedNames (render (body <> mconcat (List.intersperse "," (map snd fields)))))
         mainDefined
 
     scope =
       JsName.toBuilder Chunks.scopeArg
 
-    rebind name =
-      "var " <> B.byteString name <> " = " <> scope <> "." <> B.byteString name <> ";\n"
+    rebind scopeKey name =
+      "var " <> B.byteString name <> " = " <> scope <> "." <> scopeKey name <> ";\n"
   in
   if Set.size seen == Set.size mainSeen then
     Left exports
   else
     Right
       ( needed
-      , "export default function(" <> scope <> ") {\n"
-        <> mconcat (map rebind (Set.toList needed))
-        <> body
-        <> "return " <> record <> ";\n}\n"
+      , \scopeKey ->
+          "export default function(" <> scope <> ") {\n"
+          <> mconcat (map (rebind scopeKey) (Set.toList needed))
+          <> body
+          <> "return " <> record <> ";\n}\n"
       )
 
 

@@ -157,7 +157,8 @@ singleton registry.
    second chunk also wants (hoisted to main), minus `Manager` and `Kernel`
    nodes (always main). Order chunks depth-first; a cycle is an error.
 6. **Codegen**: `Opt.AsyncRef (Global h n)` emits
-   `_Chunk_get(_Chunk$author$project$Big).$author$project$Big$n`. Each
+   `_Chunk_get(_Chunk$author$project$Big).$author$project$Big$n` (with
+   `--optimize`, a short key in place of the second name; see below). Each
    chunk is walked with the main bundle's globals already marked as seen,
    so it stops at the boundary and emits only its own. The main bundle
    gains a registration per chunk, `function() { return import("<token>"); }`,
@@ -190,6 +191,25 @@ Rebinding the shared names as locals at chunk init keeps every reference
 inside the chunk a plain identifier, so chunk code pays no per-access cost
 for living in another file. Main pays one property lookup per async
 reference.
+
+With `--optimize` both objects get short keys from `JsName.fromInt`, the
+same names the field renaming uses (`Generate.Chunks`, SHORT KEYS):
+
+```js
+export default function(_Chunk_s) {
+  var $author$project$Shared$helper = _Chunk_s.a;
+  // ...
+  return { a: $author$project$Big$open, ... };
+}
+```
+
+A minifier shortens the locals but must keep property names, since it
+cannot know nothing reads them by string. The compiler does know, because
+it emits every read: a chunk's export keys are fixed from its roots when
+the chunks are planned (`Chunks.exportKeys`, carried on the mode so
+`AsyncRef` can use them), and scope keys once every chunk has been walked
+and the names they need are known (`Chunks.scopeKeys`; names more chunks
+use get the shorter keys). Dev output keeps the full names as keys.
 
 
 ## Which names cross the boundary
