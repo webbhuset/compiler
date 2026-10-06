@@ -20,6 +20,7 @@ import Json.Encode ((==>))
 import qualified Reporting.Exit.Help as Help
 import qualified Reporting
 import qualified Tool.Async as Async
+import qualified Tool.Chunks as Chunks
 import qualified Tool.At as At
 import qualified Tool.Cases as Cases
 import qualified Tool.Check as Check
@@ -71,6 +72,7 @@ commands =
   , ("graph", "elm tool graph [Some.Module]", "Print every project module with what it imports, or what one module imports and what imports it.")
   , ("why", "elm tool why Some.Module", "Print the shortest chain of imports from each module with a `main` to a module, which may come from a package.")
   , ("async", "elm tool async src/Main.elm", "Print how many bytes each module adds to an --optimize build, whether the program always needs it or only under some branch, and which modules look worth an `import async`.")
+  , ("chunks", "elm tool chunks src/Main.elm", "Print how the async imports of a program would be split into files if the code they share got bundles of its own instead of going into the main bundle, next to how `elm make` splits them today.")
   , ("sizes", "elm tool sizes src/Main.elm", "Print the bytes each module and definition adds to an --optimize build. Save the --json output of two builds and compare them with `elm tool sizes --diff before.json after.json`.")
   , ("decoder", "elm tool decoder Some.Module.decoder", "Print the shape of the JSON a Json.Decode decoder accepts, or with --sample a document it accepts.")
   , ("rename", "elm tool rename Some.Module.old new", "Rename a value, type, or constructor everywhere in the project, then check it. Add --dry-run to see the changes without making them.")
@@ -104,6 +106,7 @@ dispatch (command, arguments) (Flags _ everything compareFiles sample dryRun) =
     ("at", [target])      -> At.run target
     ("hole", [target])    -> Hole.run target
     ("async", [target])   -> Async.run target
+    ("chunks", [target])  -> Chunks.run target
     ("check", files)      -> Check.run files
     ("graph", targets)    -> Graph.graph targets
     ("why", [target])     -> Graph.why target

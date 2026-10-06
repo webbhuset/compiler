@@ -75,6 +75,7 @@ executable elm
         Repl
         Tool
         Tool.Async
+        Tool.Chunks
         Tool.At
         Tool.Cases
         Tool.Check
