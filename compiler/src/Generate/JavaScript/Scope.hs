@@ -30,11 +30,28 @@ import Data.Word (Word8)
 -- and nothing else -- while definitions must not, which is why they are
 -- anchored to column zero. Everything the compiler emits at the top level
 -- of a bundle starts there, and everything nested is indented.
+--
+-- With one exception: in dev mode the values of a recursive group are
+-- defined inside a `try` block, so that the error for a value that needs
+-- itself to exist can name the cycle. A `var` belongs to the enclosing
+-- function, not the block, so those are top-level bindings all the same,
+-- one tab in. Missing them left a chunk that used one of those values
+-- with nothing to bind it to. Only a `var`: a module is strict code, where
+-- a function declared in a block is scoped to the block.
 
 
 topLevelNames :: BS.ByteString -> Set.Set BS.ByteString
 topLevelNames bytes =
-  List.foldl' addDefinition Set.empty (BSC.lines bytes)
+  fst (List.foldl' addLine (Set.empty, False) (BSC.lines bytes))
+
+
+-- The flag says whether the line is inside a top-level `try` block.
+addLine :: (Set.Set BS.ByteString, Bool) -> BS.ByteString -> (Set.Set BS.ByteString, Bool)
+addLine (names, inTry) line
+  | line == "try {"                 = (names, True)
+  | BS.isPrefixOf "} catch (" line  = (names, False)
+  | inTry                           = (maybe names (addDefinition names) (BS.stripPrefix "\tvar " line >> BS.stripPrefix "\t" line), True)
+  | otherwise                       = (addDefinition names line, False)
 
 
 addDefinition :: Set.Set BS.ByteString -> BS.ByteString -> Set.Set BS.ByteString
