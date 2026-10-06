@@ -47,6 +47,12 @@ import qualified Tool.Project as Project
 -- counts as running it, so this is about branches, not about when a function
 -- happens to be called: a module used only by `update`, outside any branch,
 -- is still eager.
+--
+-- A module is never suggested when code the runtime calls on its own
+-- reaches it: a port subscription's function, an event decoder, an HTTP
+-- response handler, a Task callback. The runtime only waits for an async
+-- module while it runs init, update, view or subscriptions, so a reference
+-- from anywhere else fails instead of waiting.
 
 
 run :: FilePath -> IO (Either Problem Output)
@@ -71,6 +77,8 @@ data Analysis =
     , _modules :: [ModuleInfo]
     , _chunks :: [(ModuleName.Canonical, Int)]
       -- modules that are already async, with the size of their chunks
+    , _blocked :: [ModuleInfo]
+      -- modules that would be suggested but for a runtime callback
     }
 
 
@@ -85,6 +93,9 @@ data ModuleInfo =
       -- branch is in, and what the branch tests
     , _importers :: [ModuleName.Canonical]
     , _suggested :: Bool
+    , _callback :: Maybe Opt.Global
+      -- set when a runtime callback reaches the module: the definition the
+      -- callback is written in
     }
 
 
@@ -125,13 +136,13 @@ analyze (Opt.GlobalGraph nodes _) sizeOf home main =
     importersOf =
       Map.fromListWith (++) [ (to, [from]) | (from, tos) <- Map.toList moduleEdges, to <- Set.toList tos ]
 
+    -- the modules main still reaches once m is async
+    keptWithout m =
+      Set.delete m (closureSet (\x -> if x == m then [] else Set.toList (Map.findWithDefault Set.empty x moduleEdges)) [home])
+
     retainedBy m =
       if m == home then total else
-        let
-          reached = closureSet (\x -> if x == m then [] else Set.toList (Map.findWithDefault Set.empty x moduleEdges)) [home]
-          kept = sum [ Map.findWithDefault 0 x own | x <- Set.toList reached, x /= m ]
-        in
-        total - kept
+        total - sum [ Map.findWithDefault 0 x own | x <- Set.toList (keptWithout m) ]
 
     eagerModules = Set.map moduleOf direct
 
@@ -161,13 +172,40 @@ analyze (Opt.GlobalGraph nodes _) sizeOf home main =
           , _entries = List.nubBy (\a b -> fst a == fst b) (Map.findWithDefault [] m entryTable)
           , _importers = List.sort (Map.findWithDefault [] m importersOf)
           , _suggested = False
+          , _callback = callbackOf m
           }
       | (m, size) <- Map.toList own
       ]
 
-    worth i =
+    -- for every module a runtime callback can reach, the definitions
+    -- holding those callbacks
+    callbackHolders =
+      Map.fromListWith Set.union
+        [ (moduleOf g, Set.singleton holder)
+        | holder <- Set.toList inBundle
+        , root <- callbackRootsOf nodes holder
+        , g <- Set.toList (closure (map fst . edgesFrom) [root])
+        ]
+
+    -- A callback is only a problem where it outlives the async module:
+    -- one written in code that would move into the module's chunk exists
+    -- only once the chunk is in.
+    callbackOf m =
+      let
+        kept = keptWithout m
+      in
+      Maybe.listToMaybe
+        [ holder
+        | holder <- Set.toList (Map.findWithDefault Set.empty m callbackHolders)
+        , Set.member (moduleOf holder) kept
+        ]
+
+    big i =
       not (_eager i) && _retained i >= max 2048 (total `div` 50)
         && any (`Set.member` eagerModules) (_importers i)
+
+    worth i =
+      big i && Maybe.isNothing (_callback i)
 
     asyncTargets =
       Map.fromListWith Set.union
@@ -180,6 +218,7 @@ analyze (Opt.GlobalGraph nodes _) sizeOf home main =
     { _total = total
     , _home = home
     , _modules = List.sortOn (\i -> (negate (_retained i), negate (_own i))) [ i { _suggested = worth i } | i <- infos ]
+    , _blocked = [ i | i <- infos, big i, Maybe.isJust (_callback i) ]
     , _chunks = [ (m, chunkSize ts) | (m, ts) <- Map.toList asyncTargets ]
     }
 
@@ -361,6 +400,141 @@ testToChars test =
     DT.IsBool b                                     -> Just (if b then "True" else "False")
 
 
+-- CALLBACKS
+--
+-- The functions the runtime calls on its own, outside init, update, view
+-- and subscriptions, found where they are handed to it: the arguments at
+-- these positions of these calls, and the one argument of an incoming
+-- port. Only those positions: `Html.map f html` runs `f` when an event
+-- fires, but `html` was built by the view.
+
+
+callbackRootsOf :: Map.Map Opt.Global Opt.Node -> Opt.Global -> [Opt.Global]
+callbackRootsOf nodes global =
+  let
+    exprs =
+      case Map.lookup global nodes of
+        Just (Opt.Define expr _)           -> [expr]
+        Just (Opt.DefineTailFunc _ expr _) -> [expr]
+        Just (Opt.Cycle _ pairs defs _)    -> map snd pairs ++ map defExpr defs
+        _                                  -> []
+  in
+  concatMap (callbacksIn nodes Map.empty) exprs
+
+
+defExpr :: Opt.Def -> Opt.Expr
+defExpr def =
+  case def of
+    Opt.Def _ e       -> e
+    Opt.TailDef _ _ e -> e
+
+
+-- The globals reachable from a callback, with what local definitions in
+-- scope refer to, so `let toMsg v = ... in port toMsg` is followed too.
+callbacksIn :: Map.Map Opt.Global Opt.Node -> Map.Map N.Name [Opt.Global] -> Opt.Expr -> [Opt.Global]
+callbacksIn nodes locals expression =
+  let
+    go = callbacksIn nodes locals
+    refsOf e = map fst (exprRefs Nothing e) ++ concat [ Map.findWithDefault [] x locals | x <- localsOf e ]
+  in
+  case expression of
+    Opt.Call (Opt.VarGlobal g) [Opt.Record fields] | isApplication g ->
+      concat [ if N.toChars f `elem` ["onUrlRequest", "onUrlChange"] then refsOf e else go e | (f, e) <- Map.toList fields ]
+
+    Opt.Call (Opt.VarGlobal g) args ->
+      let positions = callbackPositions nodes g in
+      concat [ if i `elem` positions then refsOf arg else go arg | (i, arg) <- zip [0..] args ]
+
+    Opt.Let def body ->
+      let
+        (name, e) = case def of { Opt.Def n x -> (n, x) ; Opt.TailDef n _ x -> (n, x) }
+      in
+      go e ++ callbacksIn nodes (Map.insert name (refsOf e) locals) body
+
+    Opt.List es                 -> concatMap go es
+    Opt.Function _ body         -> go body
+    Opt.Call f args             -> concatMap go (f : args)
+    Opt.TailCall _ args         -> concatMap (go . snd) args
+    Opt.TailBuild _ _ cell args -> go cell ++ concatMap (go . snd) args
+    Opt.If branches final       -> concat [ go c ++ go b | (c, b) <- branches ] ++ go final
+    Opt.Destruct _ body         -> go body
+    Opt.Case _ _ decider jumps  -> concat [ go e | (_, Opt.Inline e) <- deciderLeaves [] decider ] ++ concatMap (go . snd) jumps
+    Opt.Access record _         -> go record
+    Opt.Update record fields    -> go record ++ concatMap go (Map.elems fields)
+    Opt.Record fields           -> concatMap go (Map.elems fields)
+    Opt.Pair a b                -> go a ++ go b
+    Opt.Triple a b c            -> go a ++ go b ++ go c
+    _                           -> []
+
+
+localsOf :: Opt.Expr -> [N.Name]
+localsOf expression =
+  let go = localsOf in
+  case expression of
+    Opt.VarLocal x              -> [x]
+    Opt.List es                 -> concatMap go es
+    Opt.Function _ body         -> go body
+    Opt.Call f args             -> concatMap go (f : args)
+    Opt.TailCall _ args         -> concatMap (go . snd) args
+    Opt.TailBuild _ _ cell args -> go cell ++ concatMap (go . snd) args
+    Opt.If branches final       -> concat [ go c ++ go b | (c, b) <- branches ] ++ go final
+    Opt.Let def body            -> go (defExpr def) ++ go body
+    Opt.Destruct _ body         -> go body
+    Opt.Case _ _ decider jumps  -> concat [ go e | (_, Opt.Inline e) <- deciderLeaves [] decider ] ++ concatMap (go . snd) jumps
+    Opt.Access record _         -> go record
+    Opt.Update record fields    -> go record ++ concatMap go (Map.elems fields)
+    Opt.Record fields           -> concatMap go (Map.elems fields)
+    Opt.Pair a b                -> go a ++ go b
+    Opt.Triple a b c            -> go a ++ go b ++ go c
+    _                           -> []
+
+
+callbackPositions :: Map.Map Opt.Global Opt.Node -> Opt.Global -> [Int]
+callbackPositions nodes global@(Opt.Global (ModuleName.Canonical pkg m) name) =
+  case Map.lookup global nodes of
+    Just (Opt.PortIncoming _ _) ->
+      [0]
+
+    _ ->
+      Map.findWithDefault [] (Pkg.toChars pkg, Module.toChars m, N.toChars name) callbackTable
+
+
+-- Its `onUrlRequest` and `onUrlChange` run when a link is clicked or the
+-- URL changes, outside update.
+isApplication :: Opt.Global -> Bool
+isApplication (Opt.Global (ModuleName.Canonical pkg m) name) =
+  Pkg.toChars pkg == "elm/browser" && Module.toChars m == "Browser" && N.toChars name == "application"
+
+
+-- (package, module, function) and the positions of its callback arguments.
+callbackTable :: Map.Map (String, String, String) [Int]
+callbackTable =
+  Map.fromList $
+    [ (("elm/html", "Html", "map"), [0])
+    , (("elm/html", "Html.Attributes", "map"), [0])
+    , (("elm/html", "Html.Events", "on"), [1])
+    , (("elm/html", "Html.Events", "stopPropagationOn"), [1])
+    , (("elm/html", "Html.Events", "preventDefaultOn"), [1])
+    , (("elm/html", "Html.Events", "custom"), [1])
+    , (("elm/html", "Html.Events", "onInput"), [0])
+    , (("elm/html", "Html.Events", "onCheck"), [0])
+    , (("elm/virtual-dom", "VirtualDom", "map"), [0])
+    , (("elm/virtual-dom", "VirtualDom", "mapAttribute"), [0])
+    , (("elm/virtual-dom", "VirtualDom", "on"), [1])
+    , (("elm/core", "Platform.Cmd", "map"), [0])
+    , (("elm/core", "Platform.Sub", "map"), [0])
+    , (("elm/core", "Time", "every"), [1])
+    ]
+    ++ [ (("elm/core", "Task", f), [0]) | f <- ["andThen", "map", "map2", "map3", "map4", "map5", "mapError", "onError", "perform", "attempt"] ]
+    ++ [ (("elm/browser", "Browser.Events", f), [0, 1]) | f <- ["onAnimationFrame", "onAnimationFrameDelta", "onKeyPress", "onKeyDown", "onKeyUp", "onClick", "onMouseMove", "onMouseDown", "onMouseUp", "onResize", "onVisibilityChange"] ]
+    ++ [ ((pkg, "Http", f), [0, 1]) | pkg <- ["elm/http", "webbhuset/elm-http"], f <- ["expectJson", "expectString", "expectWhatever", "expectBytes", "expectStringResponse", "expectBytesResponse", "stringResolver", "bytesResolver"] ]
+
+
+globalToChars :: Opt.Global -> String
+globalToChars (Opt.Global home name) =
+  moduleToChars home ++ "." ++ N.toChars name
+
+
 asyncRefsOf :: Maybe Opt.Node -> [Opt.Global]
 asyncRefsOf maybeNode =
   case maybeNode of
@@ -397,7 +571,7 @@ asyncRefs expression =
 
 
 report :: Analysis -> Output
-report analysis@(Analysis total _ modules chunks) =
+report analysis@(Analysis total _ modules chunks blocked) =
   let
     suggested = filter _suggested modules
 
@@ -409,6 +583,10 @@ report analysis@(Analysis total _ modules chunks) =
       case _entries i of
         [] -> ""
         es -> "  " ++ List.intercalate "; " (map entryToChars (take 2 es)) ++ (if length es > 2 then "; ..." else "")
+
+    blockedRow i =
+      "    " ++ moduleToChars (_name i) ++ "  -- " ++ kB (_retained i) ++ " kB, reached from a callback in "
+      ++ maybe "" globalToChars (_callback i) ++ "\n"
 
     suggestion i =
       "    import async " ++ moduleToChars (_name i) ++ "  -- " ++ kB (_retained i)
@@ -423,6 +601,12 @@ report analysis@(Analysis total _ modules chunks) =
          )
       ++ ( if null suggested then "\nNo module looks worth an `import async`.\n" else
              "\nWorth an `import async`, in every module listed after it:\n" ++ concatMap suggestion suggested
+         )
+      ++ ( if null blocked then "" else
+             "\nBig enough, but reached from code the runtime calls outside init, update, view\n\
+             \and subscriptions (a port subscription, event decoder, HTTP or Task callback),\n\
+             \where an async module that has not arrived fails instead of being waited for:\n"
+             ++ concatMap blockedRow blocked
          )
     )
     ( E.object
@@ -457,6 +641,7 @@ moduleToJson analysis i =
           E.object [ "in" ==> E.chars (Module.toChars m ++ "." ++ N.toChars name), "under" ==> E.list E.chars tests ]) (_entries i)
     , "importers" ==> E.list (E.chars . moduleToChars) (_importers i)
     , "suggested" ==> E.bool (_suggested i)
+    , "callback" ==> maybe E.null (E.chars . globalToChars) (_callback i)
     ]
 
 
