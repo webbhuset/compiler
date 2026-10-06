@@ -4,6 +4,12 @@ module Generate.Chunks
   , Chunk(..)
   , Program(..)
   , plan
+  , Discovery(..)
+  , discover
+  , closure
+  , dependencies
+  , staysInMain
+  , asyncRefs
   , insideWorkers
   , getName
   , regName
@@ -89,7 +95,48 @@ data Program =
 
 
 plan :: Bool -> Bool -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Either [String] (Maybe Plan)
-plan isDebug splitApps (Opt.GlobalGraph allNodes _) mains =
+plan isDebug splitApps graph mains =
+  let
+    Discovery nodes seed found = discover isDebug splitApps graph mains
+
+    toProgram home =
+      if splitApps then
+        fmap (program nodes home) (Map.lookup home mains)
+      else
+        Nothing
+  in
+  case Map.toList found of
+    [] ->
+      Right Nothing
+
+    chunkList ->
+      let
+        mainSeen = grow nodes seed (map snd chunkList)
+        table = Map.fromList chunkList
+      in
+      case order nodes mainSeen chunkList of
+        Left cycleNames ->
+          Left cycleNames
+
+        Right ordered ->
+          Right $ Just $ Plan
+            [ Chunk home (table Map.! home) (toProgram home) | home <- ordered ]
+            mainSeen
+
+
+-- What both planners start from: the graph as the generator will walk it,
+-- what the main bundle needs before any chunk is considered, and every
+-- chunk with the values referenced across its boundary.
+data Discovery =
+  Discovery
+    { _nodes :: Map.Map Opt.Global Opt.Node
+    , _seed :: Set.Set Opt.Global
+    , _found :: Map.Map ModuleName.Canonical (Set.Set Opt.Global)
+    }
+
+
+discover :: Bool -> Bool -> Opt.GlobalGraph -> Map.Map ModuleName.Canonical Opt.Main -> Discovery
+discover isDebug splitApps (Opt.GlobalGraph allNodes _) mains =
   let
     nodes =
       if isDebug then allNodes else Map.filterWithKey (\g _ -> not (isDebugger g)) allNodes
@@ -109,30 +156,8 @@ plan isDebug splitApps (Opt.GlobalGraph allNodes _) mains =
         ( closure nodes Set.empty mainRoots
         , Map.empty
         )
-
-    toProgram home =
-      if splitApps then
-        fmap (program nodes home) (Map.lookup home mains)
-      else
-        Nothing
   in
-  case Map.toList (settle nodes seed appRoots) of
-    [] ->
-      Right Nothing
-
-    chunkList ->
-      let
-        mainSeen = grow nodes seed (map snd chunkList)
-        table = Map.fromList chunkList
-      in
-      case order nodes mainSeen chunkList of
-        Left cycleNames ->
-          Left cycleNames
-
-        Right ordered ->
-          Right $ Just $ Plan
-            [ Chunk home (table Map.! home) (toProgram home) | home <- ordered ]
-            mainSeen
+  Discovery nodes seed (settle nodes seed appRoots)
 
 
 program :: Map.Map Opt.Global Opt.Node -> ModuleName.Canonical -> Opt.Main -> Program
@@ -368,6 +393,11 @@ addGlobal nodes seen global =
       (maybe Set.empty (nodeDeps global) (Map.lookup global nodes))
 
 
+dependencies :: Map.Map Opt.Global Opt.Node -> Opt.Global -> Set.Set Opt.Global
+dependencies nodes global =
+  maybe Set.empty (nodeDeps global) (Map.lookup global nodes)
+
+
 nodeDeps :: Opt.Global -> Opt.Node -> Set.Set Opt.Global
 nodeDeps (Opt.Global home _) node =
   case node of
@@ -403,6 +433,12 @@ managerDeps home effectsType =
 -- Flags decoders, ports and program registrations are optimized as if
 -- nothing were async (Optimize.Module.noAsyncs), so only ordinary
 -- definitions can hold one.
+
+
+-- The async-imported modules one definition refers to.
+asyncRefs :: Map.Map Opt.Global Opt.Node -> Opt.Global -> Set.Set ModuleName.Canonical
+asyncRefs nodes global =
+  maybe Set.empty (\node -> Map.keysSet (nodeAsyncRefs node Map.empty)) (Map.lookup global nodes)
 
 
 nodeAsyncRefs :: Opt.Node -> Map.Map ModuleName.Canonical (Set.Set Opt.Global) -> Map.Map ModuleName.Canonical (Set.Set Opt.Global)

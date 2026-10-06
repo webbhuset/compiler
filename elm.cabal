@@ -162,6 +162,7 @@ executable elm
         Canonicalize.Pattern
         Canonicalize.Type
         Compile
+        Generate.ChunkGroups
         Generate.Chunks
         Generate.Css
         Generate.Html
