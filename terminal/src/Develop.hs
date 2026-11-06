@@ -459,6 +459,7 @@ mimeTypeDict =
     , ".txt"     ==> "text/plain"
     , ".csv"     ==> "text/csv"
     , ".tsv"     ==> "text/csv"
+    , ".wasm"    ==> "application/wasm"
     , ".wav"     ==> "audio/x-wav"
     , ".wax"     ==> "audio/x-ms-wax"
     , ".webm"    ==> "video/webm"
