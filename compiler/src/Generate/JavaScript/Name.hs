@@ -178,7 +178,7 @@ jsReservedWords =
     [ [N.ascii|do|], [N.ascii|if|], [N.ascii|in|]
     , [N.ascii|NaN|], [N.ascii|int|], [N.ascii|for|], [N.ascii|new|], [N.ascii|try|], [N.ascii|var|], [N.ascii|let|]
     , [N.ascii|null|], [N.ascii|true|], [N.ascii|eval|], [N.ascii|byte|], [N.ascii|char|], [N.ascii|goto|], [N.ascii|long|], [N.ascii|case|], [N.ascii|else|], [N.ascii|this|], [N.ascii|void|], [N.ascii|with|], [N.ascii|enum|]
-    , [N.ascii|false|], [N.ascii|final|], [N.ascii|float|], [N.ascii|short|], [N.ascii|break|], [N.ascii|catch|], [N.ascii|throw|], [N.ascii|while|], [N.ascii|class|], [N.ascii|const|], [N.ascii|super|], [N.ascii|yield|]
+    , [N.ascii|await|], [N.ascii|false|], [N.ascii|final|], [N.ascii|float|], [N.ascii|short|], [N.ascii|break|], [N.ascii|catch|], [N.ascii|throw|], [N.ascii|while|], [N.ascii|class|], [N.ascii|const|], [N.ascii|super|], [N.ascii|yield|]
     , [N.ascii|double|], [N.ascii|native|], [N.ascii|throws|], [N.ascii|delete|], [N.ascii|return|], [N.ascii|switch|], [N.ascii|typeof|], [N.ascii|export|], [N.ascii|import|], [N.ascii|public|], [N.ascii|static|]
     , [N.ascii|boolean|], [N.ascii|default|], [N.ascii|finally|], [N.ascii|extends|], [N.ascii|package|], [N.ascii|private|]
     , [N.ascii|Infinity|], [N.ascii|abstract|], [N.ascii|volatile|], [N.ascii|function|], [N.ascii|continue|], [N.ascii|debugger|], [N.ascii|function|]
