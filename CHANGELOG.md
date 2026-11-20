@@ -896,23 +896,51 @@ describe s =
   hyphenated CSS names — camelCase keys like `style "backgroundColor"`
   (already against elm/html convention) stop working.
 - **Caches**: this fork keeps its caches in directories of its own —
-  `$ELM_HOME/webbhuset-0.19.2/` for packages (so `~/.elm/webbhuset-0.19.2/`
-  by default) and `elm-stuff/webbhuset-0.19.2/` inside a project — rather
-  than the `0.19.2/` the version number alone would give. The interface and
-  object file formats carry extra information the official compiler cannot
-  read, so this lets the two share an `ELM_HOME` and a project directory
-  without invalidating each other's caches, at the cost of downloading each
-  package once per compiler. `ELM_HOME` itself still selects the root, so an
-  existing override keeps working, and the fork's build artifacts still live
-  under `elm-stuff/`, which `.gitignore` files already cover.
+  `$ELM_HOME/webbhuset-<version>/` for packages (under `~/.elm/` by
+  default) rather than the `<version>/` the version number alone would
+  give. The interface and object file formats
+  carry extra information the official compiler cannot read, so this lets
+  the two share an `ELM_HOME` without invalidating each other's caches, at
+  the cost of downloading each package once per compiler. `ELM_HOME` itself
+  still selects the root, so an existing override keeps working.
+- **Compiled files per build**: compiled output is named after the build
+  that made it — `elm-stuff/webbhuset-<version>-<build>/` inside a
+  project, and `artifacts-<build>.dat` next to each package's sources —
+  because builds of one version can generate different code. A compiler
+  built from a clean checkout, such as a release, is named after its
+  commit, so several released compilers can share an `ELM_HOME` without
+  rebuilding each other's packages. Any other compiler (uncommitted
+  changes, a jj workspace nested in another checkout, no git) is a dev
+  build, named after its own binary (modification time, size and path):
+  each rebuild of it gets a new name, so nothing compiled before a change
+  to the compiler is reused. A dev build deletes other dev builds' caches
+  that nothing has used for an hour, so abandoned ones don't pile up. Dev
+  compilers running at the same time in parallel workspaces keep their
+  project folders; their package files count as used only while a project
+  sets up its dependencies, so another dev build may delete them, and the
+  next setup compiles those packages again. Package sources, `registry.dat`, git clones, the repl folder (with its history) and each package's `docs.json` stay
+  shared; `docs.json` is only read by `elm diff`, `elm bump` and the
+  reactor. Each `elm-stuff/webbhuset-<version>-<build>/` holds an
+  `origin.txt` naming the build that created it (build number, commit,
+  the tag if there was one, and whether the checkout was clean;
+  `elm --help` shows the same), as a label only. Caches of earlier
+  released compilers are left behind, and all of them are caches:
+  `rm -rf elm-stuff` in a project and
+  `find ~/.elm/webbhuset-* -name 'artifacts*.dat' -delete` reclaim the
+  space, at the cost of one full compile. Everything stays under
+  `elm-stuff/`, which `.gitignore` files already cover.
+
+  A compiler built with a bare `cabal build` keeps the stamp of the last
+  `make` (see the `Makefile`). If that `make` ran on a clean checkout, the
+  new binary uses that commit's name and its compiled output even though
+  the sources changed since; run the two commands above once after using
+  such a build.
 - **Object files**: task ports add a node kind, CSS blocks, web workers,
   async imports and tail recursion modulo cons each add an expression kind,
   and command line scripts add a main kind to the `.elmo` format; stale `elm-stuff` from other compilers is
-  detected and rebuilt. Moving between *builds of this fork* that changed
-  the format is noisier: the package artifacts in `ELM_HOME` are reported
-  as corrupt before being rebuilt.
-  `find ~/.elm/webbhuset-* -name artifacts.dat -delete` once, after
-  upgrading, avoids the warning.
+  detected and rebuilt. Each build of this fork keeps its own compiled
+  files (see above), so moving between builds that
+  changed the format rebuilds them quietly.
 - **Interfaces**: overloading adds a per-module table of abstract names and
   definitions to the interface format, which is what makes a definition in
   one module reachable from a use site in another.

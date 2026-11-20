@@ -21,12 +21,14 @@ executable worker
         ../builder/src
         ../src/utils
         ../terminal/src
+        ../gen
 
     main-is:
         Main.hs
 
     other-modules:
         Artifacts
+        BuildCount
         Cors
         Endpoint.Compile
         Endpoint.Quotes

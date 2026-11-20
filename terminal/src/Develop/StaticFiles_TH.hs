@@ -33,6 +33,7 @@ buildReactorFrontEnd =
   fmap bsToExp $ runIO $
   Dir.withCurrentDirectory "reactor" $
   do  root <- R.pwd
+      R.clearDevCaches root
       R.withRootLock root $ \writer stuff ->
         runTaskUnsafe $
         do  details    <- Task.eio Exit.ReactorBadDetails $ Details.load writer Reporting.silent root stuff

@@ -22,6 +22,7 @@ import qualified Init
 import qualified Install
 import qualified Make
 import qualified Repl
+import qualified Root as R
 
 
 
@@ -30,7 +31,7 @@ import qualified Repl
 
 main :: IO ()
 main =
-  Terminal.app intro outro
+  R.readBuildId >> Terminal.app intro outro
     [ repl
     , init
     , reactor
@@ -50,7 +51,7 @@ intro =
         ,P.green "Elm,"
         ,"based","on","Elm"
         ,P.green (P.text (V.toChars V.compiler))
-        ,P.text ("(build " ++ BuildCount.count ++ ", " ++ BuildCount.commit ++ ")")
+        ,P.text ("(" ++ BuildCount.description ++ ")")
         ]
     , ""
     , P.black "-------------------------------------------------------------------------------"

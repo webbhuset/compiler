@@ -74,7 +74,7 @@ reference that version in `elm.json`.
   discovered with `git ls-remote --tags`.
 
 Sources are cloned once into the shared package cache
-(`~/.elm/webbhuset-0.19.2/packages/author/project/version/`) with
+(`~/.elm/webbhuset-<version>/packages/author/project/version/`) with
 `git clone --depth 1 --branch <version>`. A `git-url` file in that
 directory records where the sources came from; if a project maps the same
 package name and version to a *different* URL, the build stops with an
@@ -82,7 +82,8 @@ error instead of silently reusing the wrong sources.
 
 Since the cache key is `(name, version)`, tags should be treated as
 immutable. If you move a tag, delete the corresponding directory from
-`~/.elm` (and the package's `artifacts.dat`) to force a fresh clone.
+`~/.elm` (which also holds the package's `artifacts-*.dat` files) to force
+a fresh clone.
 
 ### Numbering a fork of a published package
 

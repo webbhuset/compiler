@@ -219,12 +219,17 @@ whatever happens to be big.
 ## Upgrading
 
 The optimized-AST format gained a constructor, so artifacts written by an
-earlier build of this compiler no longer parse. Delete `elm-stuff` in your
-projects and the stale package artifacts once:
+earlier build of this compiler no longer parse. Each build keeps its own
+compiled files (`elm-stuff/webbhuset-<version>-<build>/` and
+`artifacts-<build>.dat`, named after its commit, or after its binary for a
+build from a checkout that isn't clean), so another build never reads
+them. A compiler built with a bare `cabal build` after editing a clean
+checkout keeps that commit's name (see `CHANGELOG.md`), so after using
+one, delete the stale files once:
 
 ```
 rm -rf elm-stuff
-find ~/.elm/webbhuset-* -name artifacts.dat -delete
+find ~/.elm/webbhuset-* -name 'artifacts*.dat' -delete
 ```
 
 Without it the compiler reports a corrupt cache and rebuilds anyway, which

@@ -392,7 +392,8 @@ verifyDep writer (Env key _ cache manager _ _ _) depsMVar solution pkg details@(
       if exists
         then
           do  Reporting.report key Reporting.DCached
-              maybeCache <- File.readBytes dArtifactCache (R.package cache pkg vsn </> "artifacts.dat")
+              artifactsPath <- R.getPackageArtifacts cache pkg vsn
+              maybeCache <- File.readBytes dArtifactCache artifactsPath
               case maybeCache of
                 Nothing ->
                   build writer key cache depsMVar pkg details fingerprint Set.empty
@@ -480,13 +481,13 @@ build writer key cache depsMVar pkg (Solver.Details vsn _) f fs =
 
                                 Just results ->
                                   let
-                                    path = R.package cache pkg vsn </> "artifacts.dat"
                                     ifaces = gatherInterfaces exposedDict results
                                     objects = gatherObjects results
                                     artifacts = Artifacts ifaces objects
                                     fingerprints = Set.insert f fs
                                   in
                                   do  writeDocs writer cache pkg vsn docsStatus results
+                                      path <- R.getPackageArtifacts cache pkg vsn
                                       File.writeBytes writer path eArtifactCache (ArtifactCache fingerprints artifacts)
                                       Reporting.report key Reporting.DBuilt
                                       return (Right artifacts)
