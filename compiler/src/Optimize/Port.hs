@@ -8,7 +8,6 @@ module Optimize.Port
 
 
 import Prelude hiding (maybe, null)
-import Control.Monad (foldM)
 import qualified Data.Map as Map
 
 import qualified Crash
@@ -19,6 +18,7 @@ import qualified AST.Prim.Name as N
 import qualified AST.Prim.TypeName as T
 import qualified AST.Utils.Type as Type
 import qualified Data.Index as Index
+import qualified Data.NonEmptyList as NE
 import qualified Elm.ModuleName as ModuleName
 import qualified Elm.String as ES
 import qualified Optimize.Names as Names
@@ -316,30 +316,138 @@ indexAndThen i tipe decoder =
 -- DECODE RECORDS
 
 
+-- The field decoders are combined with map..map8 in a tree rather than
+-- chained, so the generated JS nests log8(n) levels deep instead of one
+-- function per field. Engines parse nested functions recursively, and iOS
+-- gives up at a few hundred levels.
+--
+-- Fields are decoded last name first, so that a value with several bad
+-- fields reports the same one as the earlier andThen chain did.
 decodeRecord :: Map.Map N.Name Can.FieldType -> Names.Tracker Opt.Expr
 decodeRecord fields =
+  do  fieldParts <-
+        Names.registerFieldDict fields =<<
+          traverse fieldPart (reverse (Map.toList fields))
+      case fieldParts of
+        [] ->
+          do  succeed <- decode [N.ascii|succeed|]
+              return $ Opt.Call succeed [ Opt.Record Map.empty ]
+
+        first : rest ->
+          combineParts (NE.List first rest)
+
+
+fieldPart :: (N.Name, Can.FieldType) -> Names.Tracker Part
+fieldPart (key, Can.FieldType _ tipe) =
+  do  field <- decode [N.ascii|field|]
+      typeDecoder <- toDecoder tipe
+      return $ Field key (Opt.Call field [ Opt.Str (ES.fromName key), typeDecoder ])
+
+
+-- A node of the tree: a decoder for one or more of the record's fields.
+data Part
+  = Field N.Name Opt.Expr -- decodes the field's value
+  | Fields [N.Name] Opt.Expr -- decodes a record of just these fields
+
+
+-- Done once a single Fields part is left, which yields the whole record. A
+-- lone Field still goes through one decodeGroup to wrap it in a record.
+combineParts :: NE.List Part -> Names.Tracker Opt.Expr
+combineParts parts =
+  case parts of
+    NE.List (Fields _ decoder) [] ->
+      return decoder
+
+    _ ->
+      case chunksOfMapArity parts of
+        NE.List onlyChunk [] ->
+          combineParts . NE.singleton =<< decodeGroup onlyChunk
+
+        chunks ->
+          combineParts =<< traverse decodeGroupUnlessAlone chunks
+
+
+-- A part left alone at the end of a round moves up to the next round as it
+-- is: grouping it on its own would only copy its value into a new record.
+decodeGroupUnlessAlone :: NE.List Part -> Names.Tracker Part
+decodeGroupUnlessAlone chunk =
+  case chunk of
+    NE.List part [] ->
+      return part
+
+    NE.List _ (_ : _) ->
+      decodeGroup chunk
+
+
+-- The function given to mapN names its parameters _v0, _v1, … rather than
+-- after the fields, because field names can be reserved words in JS (such
+-- as `await` in an ES module).
+decodeGroup :: NE.List Part -> Names.Tracker Part
+decodeGroup parts =
   let
-    toFieldExpr name _ =
-      Opt.VarLocal name
+    partList =
+      NE.toList parts
+
+    args =
+      zipWith (\i _ -> Names.fromVarIndex i) [0..] partList
+
+    readFields arg part =
+      case part of
+        Field key _ ->
+          [ (key, Opt.VarLocal arg) ]
+
+        Fields keys _ ->
+          [ (key, Opt.Access (Opt.VarLocal arg) key) | key <- keys ]
+
+    partKeys part =
+      case part of
+        Field key _ -> [key]
+        Fields keys _ -> keys
+
+    partDecoder part =
+      case part of
+        Field _ decoder -> decoder
+        Fields _ decoder -> decoder
 
     record =
-      Opt.Record (Map.mapWithKey toFieldExpr fields)
+      Opt.Record (Map.fromList (concat (zipWith readFields args partList)))
   in
-    do  succeed <- decode [N.ascii|succeed|]
-        foldM fieldAndThen (Opt.Call succeed [record]) =<<
-          Names.registerFieldDict fields (Map.toList fields)
+  do  mapN <- decodeMapN (length parts)
+      return $ Fields (concatMap partKeys partList) $
+        Opt.Call mapN (Opt.Function args record : map partDecoder partList)
 
 
-fieldAndThen :: Opt.Expr -> (N.Name, Can.FieldType) -> Names.Tracker Opt.Expr
-fieldAndThen decoder (key, Can.FieldType _ tipe) =
-  do  andThen <- decode [N.ascii|andThen|]
-      field <- decode [N.ascii|field|]
-      typeDecoder <- toDecoder tipe
-      return $
-        Opt.Call andThen
-          [ Opt.Function [key] decoder
-          , Opt.Call field [ Opt.Str (ES.fromName key), typeDecoder ]
-          ]
+-- Splits into groups of 1 to 8, the arities of map..map8.
+chunksOfMapArity :: NE.List a -> NE.List (NE.List a)
+chunksOfMapArity (NE.List first rest) =
+  let
+    (chunkRest, later) =
+      splitAt 7 rest
+
+    chunk =
+      NE.List first chunkRest
+  in
+  case later of
+    [] ->
+      NE.List chunk []
+
+    next : afterNext ->
+      NE.List chunk (NE.toList (chunksOfMapArity (NE.List next afterNext)))
+
+
+-- Takes the length of a group from chunksOfMapArity.
+decodeMapN :: Int -> Names.Tracker Opt.Expr
+decodeMapN arity =
+  case arity of
+    1 -> decode [N.ascii|map|]
+    2 -> decode [N.ascii|map2|]
+    3 -> decode [N.ascii|map3|]
+    4 -> decode [N.ascii|map4|]
+    5 -> decode [N.ascii|map5|]
+    6 -> decode [N.ascii|map6|]
+    7 -> decode [N.ascii|map7|]
+    8 -> decode [N.ascii|map8|]
+    _ -> $(Crash.crash 'decodeMapN) ("no Json.Decode.map with arity " ++ show arity)
 
 
 

@@ -12,6 +12,7 @@ tooling (elm-format, elm-test, editors).
 - **[Bugfix, performance and quality of life](#bugfix-performance-and-quality-of-life)**
   - [Exponential compile time and memory with extensible records](#exponential-compile-time-and-memory-with-extensible-records)
   - [Extensible record aliases in ports and flags](#extensible-record-aliases-in-ports-and-flags)
+  - [Large records in ports and flags](#large-records-in-ports-and-flags)
   - [Git dependencies — private packages](#git-dependencies--private-packages)
   - [Kernel code in git dependencies](#kernel-code-in-git-dependencies)
   - [ES module output](#es-module-output)
@@ -103,6 +104,33 @@ port send : One (Two {}) -> Cmd msg
 - `AST.Utils.Type.dealias` now substitutes the extension too and merges
   the fields, giving `{ one : String, two : Int }`. A record whose
   extension really is open is still rejected.
+
+
+## Large records in ports and flags
+
+A program whose flags, or an incoming port, took a record with a few
+hundred fields failed to load on iOS Safari and Chrome with "RangeError:
+Maximum call stack size exceeded", before any Elm code ran.
+
+- The generated decoder chained one `andThen` per field, so the JS nested
+  one function literal per field, and JS engines parse nested functions
+  recursively. iOS gave up at about 334 levels; Node at its default stack
+  at about 440.
+- Fields are now combined with `Json.Decode.map`..`map8` in a tree, so
+  nesting grows with log8 of the field count. For a 300-field record the
+  `--optimize` output shrank from 556 KB to 99 KB and decoding got about
+  5.5 times faster, since the decoder is now built once instead of on
+  every decode.
+- Fields are decoded in the same order as before, so error messages are
+  unchanged.
+- A variable or record field named `await` no longer breaks ES module
+  output: `await` is now renamed like other words JS reserves.
+- After upgrading from an earlier 0.19.3 release, delete `elm-stuff`: a
+  cached module defining `main` keeps its old decoder until it is
+  recompiled.
+- Record alias constructors over 9 fields are still nested one function
+  per field, so calling the constructor of a several-hundred-field record
+  directly (as in `succeed Rec |> andMap …`) can still hit the same limit.
 
 ## Git dependencies — private packages
 
