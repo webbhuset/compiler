@@ -6,11 +6,21 @@
 # (elm-stuff/webbhuset-<version>-<commit>/), so a binary built that way
 # after editing a clean checkout reuses that commit's compiled output.
 
-.PHONY: build clean
+.PHONY: build clean test
 
 build: gen/BuildCount.hs
 	cabal build exe:elm
 	ln -sf $$(realpath --relative-to=. $$(cabal list-bin exe:elm)) whelm
+
+# Runs every tests/*/run.mjs against ./whelm; see tests/README.md.
+test: build
+	@failed=; \
+	for t in tests/*/run.mjs; do \
+		[ -e "$$t" ] || { echo "no tests under tests/"; continue; }; \
+		echo "== $$t"; \
+		node "$$t" ./whelm || failed="$$failed $$t"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "FAILED:$$failed"; exit 1; fi
 
 # Runs on every make; the file is rewritten only when the stamp changes, so
 # unchanged builds stay warm. The release workflow runs the same script, so
