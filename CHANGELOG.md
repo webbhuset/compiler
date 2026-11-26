@@ -79,6 +79,32 @@ type alias Parts =
   canonicalization already did for written ones.
 - Documentation output and error messages are unchanged.
 
+Records built from aliases that include each other still took gigabytes,
+when one alias is reached along several paths:
+
+```elm
+type alias Translations =
+    Header.Translations (Cart.Translations (Page.Translations {}))
+```
+
+where `Page.Translations t = Cart.Translations { t | page : String }`, so
+`Cart`'s fields are reached twice.
+
+- Every annotation mentioning such a type converted each path's copy of
+  the fields separately, and the copies were only merged during
+  unification.
+- A mention of an alias without parameters that expands to record
+  extensions ending in a closed record is now converted as that closed
+  record, with each field once. Anything not resolved exactly (a tag row,
+  an extension ending in something other than a closed record, two copies
+  of a field with different types) and chains written out in an
+  annotation rather than in a `type alias` are converted as before.
+- A full browser build of a large project went from 8.4 GB and 50 s to
+  3.5 GB and 20 s, with identical output.
+- Which programs type-check is unchanged, and so are error messages,
+  except one: an AMBIGUOUS OVERLOAD message for a `where` clause on such a
+  record shows the whole record instead of only its outermost part.
+
 
 ## Extensible record aliases in ports and flags
 
@@ -125,9 +151,6 @@ Maximum call stack size exceeded", before any Elm code ran.
   unchanged.
 - A variable or record field named `await` no longer breaks ES module
   output: `await` is now renamed like other words JS reserves.
-- After upgrading from an earlier 0.19.3 release, delete `elm-stuff`: a
-  cached module defining `main` keeps its old decoder until it is
-  recompiled.
 - Record alias constructors over 9 fields are still nested one function
   per field, so calling the constructor of a several-hundred-field record
   directly (as in `succeed Rec |> andMap …`) can still hit the same limit.
