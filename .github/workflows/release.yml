@@ -67,9 +67,11 @@ jobs:
           # image on 2025-12-04, so an x86_64 build would queue forever. Apple
           # Silicon customers use darwin-arm64; it also runs under Rosetta 2.
           # macos-14 is no longer offered either ("The configuration
-          # 'macos-14-arm64-us-default' is not supported").
+          # 'macos-14-arm64-us-default' is not supported"), and jobs on
+          # macos-15 waited for a machine until they timed out, so this uses
+          # macos-26, the image macos-latest points at.
           - asset: elm-darwin-arm64
-            runner: macos-15      # Apple Silicon
+            runner: macos-26      # Apple Silicon
     runs-on: ${{ matrix.runner }}
     # The oldest macOS the binary runs on. Without it the toolchain uses the
     # build machine's version.
